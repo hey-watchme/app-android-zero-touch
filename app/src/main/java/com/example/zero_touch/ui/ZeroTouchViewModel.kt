@@ -1,6 +1,7 @@
 package com.example.zero_touch.ui
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.zero_touch.api.Card
@@ -26,6 +27,10 @@ data class ZeroTouchUiState(
 )
 
 class ZeroTouchViewModel : ViewModel() {
+    companion object {
+        private const val TAG = "ZeroTouchVM"
+    }
+
     private val api = ZeroTouchApi()
 
     private val _uiState = MutableStateFlow(ZeroTouchUiState())
@@ -57,12 +62,15 @@ class ZeroTouchViewModel : ViewModel() {
             _uiState.value = _uiState.value.copy(isUploading = true, error = null, uploadSuccess = null)
             try {
                 val deviceId = DeviceIdProvider.getDeviceId(context)
+                Log.d(TAG, "Upload starting: file=${audioFile.name}, size=${audioFile.length()}, device=$deviceId")
 
                 // Upload
                 val uploadResult = api.uploadAudio(audioFile, deviceId)
+                Log.d(TAG, "Upload success: session=${uploadResult.session_id}")
 
                 // Trigger transcription + card generation (auto_chain=true)
                 api.transcribe(uploadResult.session_id, autoChain = true)
+                Log.d(TAG, "Transcribe triggered for session=${uploadResult.session_id}")
 
                 _uiState.value = _uiState.value.copy(
                     isUploading = false,
@@ -76,6 +84,7 @@ class ZeroTouchViewModel : ViewModel() {
                 loadSessions(context)
 
             } catch (e: Exception) {
+                Log.e(TAG, "Upload failed", e)
                 _uiState.value = _uiState.value.copy(
                     isUploading = false,
                     error = "Upload failed: ${e.message}"
