@@ -6,7 +6,7 @@ services:
     container_name: zerotouch-api
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8060:8060"
+      - "127.0.0.1:8061:8061"
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
@@ -18,7 +18,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - LLM_DEFAULT_PROVIDER=${LLM_DEFAULT_PROVIDER}
       - LLM_DEFAULT_MODEL=${LLM_DEFAULT_MODEL}
-      - PORT=8060
+      - PORT=8061
     deploy:
       resources:
         limits:

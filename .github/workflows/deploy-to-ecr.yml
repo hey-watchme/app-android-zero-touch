@@ -140,7 +140,7 @@ jobs:
           docker ps | grep zerotouch-api || echo "Container not found"
           sleep 10
           for i in {1..12}; do
-            if curl -f http://localhost:8060/health > /dev/null 2>&1; then
+            if curl -f http://localhost:8061/health > /dev/null 2>&1; then
               echo "Health check passed (attempt $i/12)"
               break
             fi

@@ -39,7 +39,7 @@ echo "Container started"
 echo "Step 6: Running health check..."
 sleep 5
 for i in {1..12}; do
-  if curl -f http://localhost:8060/health > /dev/null 2>&1; then
+  if curl -f http://localhost:8061/health > /dev/null 2>&1; then
     echo "Health check passed (attempt $i/12)"
     break
   fi
@@ -55,4 +55,4 @@ done
 echo ""
 echo "Deployment complete!"
 echo "Container: ${CONTAINER_NAME}"
-echo "Port: 8060"
+echo "Port: 8061"
