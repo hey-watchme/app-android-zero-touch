@@ -1,0 +1,37 @@
+version: "3.8"
+
+services:
+  zerotouch-api:
+    image: 754724220380.dkr.ecr.ap-southeast-2.amazonaws.com/zerotouch-api:latest
+    container_name: zerotouch-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8060:8060"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - S3_BUCKET=${S3_BUCKET}
+      - SPEECHMATICS_API_KEY=${SPEECHMATICS_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LLM_DEFAULT_PROVIDER=${LLM_DEFAULT_PROVIDER}
+      - LLM_DEFAULT_MODEL=${LLM_DEFAULT_MODEL}
+      - PORT=8060
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - watchme-network
+
+networks:
+  watchme-network:
+    external: true

@@ -12,3 +12,12 @@ captures/
 *.log
 .DS_Store
 **/.DS_Store
+
+# Backend
+backend/.env
+backend/venv/
+backend/__pycache__/
+backend/services/__pycache__/
+backend/services/asr_providers/__pycache__/
+**/__pycache__/
+*.pyc

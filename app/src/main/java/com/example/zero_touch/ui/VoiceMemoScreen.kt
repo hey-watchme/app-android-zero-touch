@@ -31,7 +31,10 @@ import com.example.zero_touch.audio.VoiceMemoEngine
 import java.io.File
 
 @Composable
-fun VoiceMemoScreen(modifier: Modifier = Modifier) {
+fun VoiceMemoScreen(
+    modifier: Modifier = Modifier,
+    onUpload: ((File) -> Unit)? = null
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val outputFile = remember(context) { File(context.filesDir, "voice_memo.m4a") }
@@ -50,7 +53,7 @@ fun VoiceMemoScreen(modifier: Modifier = Modifier) {
     val requestPermissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             hasRecordPermission = granted
-            message = if (granted) null else "マイク権限が必要です"
+            message = if (granted) null else "Microphone permission required"
         }
 
     DisposableEffect(lifecycleOwner) {
@@ -73,20 +76,20 @@ fun VoiceMemoScreen(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = "ボイスメモ (最小版)",
+            text = "ZeroTouch Recorder",
             style = MaterialTheme.typography.titleLarge,
         )
 
         if (!hasRecordPermission) {
             Text(
-                text = "録音するにはマイクの許可が必要です。",
+                text = "Microphone permission is required to record.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Button(
                 onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
                 modifier = Modifier.semantics { testTag = "permission_button" },
             ) {
-                Text("マイク権限を許可")
+                Text("Grant Permission")
             }
         }
 
@@ -103,7 +106,7 @@ fun VoiceMemoScreen(modifier: Modifier = Modifier) {
                         if (isRecording) {
                             engine.stopRecording()
                             isRecording = false
-                            message = "保存しました: ${outputFile.name}"
+                            message = "Saved: ${outputFile.name}"
                         } else {
                             engine.startRecording(outputFile)
                             isRecording = true
@@ -111,14 +114,14 @@ fun VoiceMemoScreen(modifier: Modifier = Modifier) {
                     }.onFailure {
                         engine.release()
                         isRecording = false
-                        message = "録音に失敗しました: ${it.message}"
+                        message = "Recording failed: ${it.message}"
                     }
                 },
                 modifier = Modifier
                     .weight(1f)
                     .semantics { testTag = "record_button" },
             ) {
-                Text(if (isRecording) "停止" else "録音")
+                Text(if (isRecording) "Stop" else "Record")
             }
 
             val playEnabled = !isRecording && outputFile.exists()
@@ -137,22 +140,36 @@ fun VoiceMemoScreen(modifier: Modifier = Modifier) {
                     }.onFailure {
                         engine.release()
                         isPlaying = false
-                        message = "再生に失敗しました: ${it.message}"
+                        message = "Playback failed: ${it.message}"
                     }
                 },
                 modifier = Modifier
                     .weight(1f)
                     .semantics { testTag = "play_button" },
             ) {
-                Text(if (isPlaying) "停止" else "再生")
+                Text(if (isPlaying) "Stop" else "Play")
+            }
+        }
+
+        // Upload button
+        if (onUpload != null) {
+            Button(
+                enabled = !isRecording && !isPlaying && outputFile.exists(),
+                onClick = {
+                    message = "Uploading..."
+                    onUpload(outputFile)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Upload & Analyze")
             }
         }
 
         Text(
             text = when {
-                isRecording -> "録音中..."
-                isPlaying -> "再生中..."
-                else -> "待機中"
+                isRecording -> "Recording..."
+                isPlaying -> "Playing..."
+                else -> "Ready"
             },
             style = MaterialTheme.typography.bodyMedium,
         )
