@@ -1,0 +1,163 @@
+# ZeroTouch API - ECR & EC2 Auto Deployment Workflow
+name: Deploy to Amazon ECR and EC2
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "backend/**"
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-southeast-2
+  ECR_REPOSITORY: zerotouch-api
+
+jobs:
+  deploy:
+    name: Build and Push to ECR
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Delete old images from ECR
+      run: |
+        aws ecr batch-delete-image \
+          --region ${{ env.AWS_REGION }} \
+          --repository-name ${{ env.ECR_REPOSITORY }} \
+          --image-ids imageTag=latest || true
+
+    - name: Build, tag, and push image to Amazon ECR
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        cd backend
+        docker buildx build \
+          --platform linux/arm64 \
+          --no-cache \
+          --push \
+          -f Dockerfile \
+          -t $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG \
+          -t $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest \
+          .
+        echo "Image pushed: $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest"
+
+  deploy-to-ec2:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: deploy
+
+    steps:
+    - name: Setup SSH Agent
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Add EC2 to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+    - name: Create application directory on EC2
+      env:
+        EC2_HOST: ${{ secrets.EC2_HOST }}
+        EC2_USER: ${{ secrets.EC2_USER }}
+      run: |
+        ssh ${EC2_USER}@${EC2_HOST} "mkdir -p /home/ubuntu/zerotouch-api"
+
+    - name: Update configuration files on EC2
+      env:
+        EC2_HOST: ${{ secrets.EC2_HOST }}
+        EC2_USER: ${{ secrets.EC2_USER }}
+      run: |
+        scp -o StrictHostKeyChecking=no backend/docker-compose.prod.yml ${EC2_USER}@${EC2_HOST}:/home/ubuntu/zerotouch-api/
+        scp -o StrictHostKeyChecking=no backend/run-prod.sh ${EC2_USER}@${EC2_HOST}:/home/ubuntu/zerotouch-api/
+        ssh ${EC2_USER}@${EC2_HOST} "chmod +x /home/ubuntu/zerotouch-api/run-prod.sh"
+
+    - name: Create/Update .env file on EC2
+      env:
+        EC2_HOST: ${{ secrets.EC2_HOST }}
+        EC2_USER: ${{ secrets.EC2_USER }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_REGION: ap-southeast-2
+        S3_BUCKET: ${{ secrets.S3_BUCKET }}
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        SPEECHMATICS_API_KEY: ${{ secrets.SPEECHMATICS_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        LLM_DEFAULT_PROVIDER: ${{ secrets.LLM_DEFAULT_PROVIDER }}
+        LLM_DEFAULT_MODEL: ${{ secrets.LLM_DEFAULT_MODEL }}
+      run: |
+        ssh ${EC2_USER}@${EC2_HOST} << ENDSSH
+          cd /home/ubuntu/zerotouch-api
+          echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}" > .env
+          echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}" >> .env
+          echo "AWS_REGION=${AWS_REGION}" >> .env
+          echo "S3_BUCKET=${S3_BUCKET}" >> .env
+          echo "SUPABASE_URL=${SUPABASE_URL}" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}" >> .env
+          echo "SPEECHMATICS_API_KEY=${SPEECHMATICS_API_KEY}" >> .env
+          echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> .env
+          echo "GEMINI_API_KEY=${GEMINI_API_KEY}" >> .env
+          echo "LLM_DEFAULT_PROVIDER=${LLM_DEFAULT_PROVIDER}" >> .env
+          echo "LLM_DEFAULT_MODEL=${LLM_DEFAULT_MODEL}" >> .env
+          echo "PORT=8060" >> .env
+        ENDSSH
+
+    - name: Deploy to EC2
+      env:
+        EC2_HOST: ${{ secrets.EC2_HOST }}
+        EC2_USER: ${{ secrets.EC2_USER }}
+      run: |
+        ssh ${EC2_USER}@${EC2_HOST} << 'ENDSSH'
+          set -e
+          cd /home/ubuntu/zerotouch-api
+          docker-compose -f docker-compose.prod.yml down || true
+          docker system prune -a -f
+          ./run-prod.sh
+          echo "Container status:"
+          docker ps | grep zerotouch-api || echo "Container not found"
+          sleep 10
+          for i in {1..12}; do
+            if curl -f http://localhost:8060/health > /dev/null 2>&1; then
+              echo "Health check passed (attempt $i/12)"
+              break
+            fi
+            echo "Attempt $i/12 failed, retrying in 5 seconds..."
+            sleep 5
+          done
+        ENDSSH
+
+    - name: Deployment Success Notification
+      if: success()
+      run: |
+        echo "Deployment completed!"
+        echo "Service: zerotouch-api"
+        echo "URL: https://api.hey-watch.me/zerotouch/"
+        echo "Version: ${{ github.sha }}"
+
+    - name: Deployment Failure Notification
+      if: failure()
+      run: |
+        echo "EC2 deployment failed. Check SSH connection and server logs."
