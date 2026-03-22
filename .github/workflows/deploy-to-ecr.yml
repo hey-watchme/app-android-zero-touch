@@ -122,7 +122,7 @@ jobs:
           echo "GEMINI_API_KEY=${GEMINI_API_KEY}" >> .env
           echo "LLM_DEFAULT_PROVIDER=${LLM_DEFAULT_PROVIDER}" >> .env
           echo "LLM_DEFAULT_MODEL=${LLM_DEFAULT_MODEL}" >> .env
-          echo "PORT=8060" >> .env
+          echo "PORT=8061" >> .env
         ENDSSH
 
     - name: Deploy to EC2
