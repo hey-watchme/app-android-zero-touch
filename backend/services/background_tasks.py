@@ -1,7 +1,7 @@
 """
 Background tasks for ZeroTouch pipeline
 
-transcribe_background: Audio -> STT (Speechmatics)
+transcribe_background: Audio -> STT (ASR provider)
 generate_cards_background: Transcription -> Cards (LLM)
 """
 
@@ -42,7 +42,7 @@ def transcribe_background(
     llm_service=None
 ):
     """
-    Background: download audio from S3, transcribe with Speechmatics.
+    Background: download audio from S3, transcribe with ASR provider.
     If auto_chain=True and llm_service provided, auto-chains to card generation.
     """
     try:

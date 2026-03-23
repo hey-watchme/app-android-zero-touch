@@ -7,5 +7,6 @@ boto3==1.35.81
 openai==1.59.4
 google-genai==1.5.0
 speechmatics-batch==0.4.7
+deepgram-sdk==3.7.0
 tenacity==9.0.0
 python-dotenv==1.0.1

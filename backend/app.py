@@ -19,7 +19,7 @@ from supabase import create_client, Client
 
 from services.llm_providers import LLMFactory, get_current_llm
 from services.llm_models import get_model_catalog
-from services.asr_providers.speechmatics_provider import SpeechmaticsASRService
+from services.asr_providers import get_asr_service
 from services.background_tasks import transcribe_background, generate_cards_background
 
 
@@ -36,12 +36,11 @@ TABLE = "zerotouch_sessions"
 
 supabase: Client = None
 s3_client = None
-asr_service = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global supabase, s3_client, asr_service
+    global supabase, s3_client
 
     # Startup
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
@@ -49,7 +48,6 @@ async def lifespan(app: FastAPI):
 
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     s3_client = boto3.client("s3", region_name=AWS_REGION)
-    asr_service = SpeechmaticsASRService()
 
     print(f"[ZeroTouch] API started - Supabase: {SUPABASE_URL[:30]}...")
     print(f"[ZeroTouch] S3 bucket: {S3_BUCKET}, Region: {AWS_REGION}")
@@ -155,7 +153,7 @@ async def upload_audio(
 # --- Transcribe ---
 
 @app.post("/api/transcribe/{session_id}", status_code=202)
-def transcribe(session_id: str, auto_chain: bool = True):
+def transcribe(session_id: str, auto_chain: bool = True, provider: Optional[str] = None, model: Optional[str] = None):
     """Start transcription (async). If auto_chain=True, auto-generates cards after."""
     # Get session
     result = supabase.table(TABLE)\
@@ -174,6 +172,12 @@ def transcribe(session_id: str, auto_chain: bool = True):
     # Get LLM service for auto-chain
     llm_service = get_current_llm() if auto_chain else None
 
+    # Resolve ASR provider/model and validate keys before starting the thread
+    try:
+        asr_service, resolved_provider, resolved_model = get_asr_service(provider, model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     # Run in background thread
     thread = threading.Thread(
         target=transcribe_background,
@@ -190,7 +194,13 @@ def transcribe(session_id: str, auto_chain: bool = True):
     )
     thread.start()
 
-    return {"session_id": session_id, "status": "transcribing", "auto_chain": auto_chain}
+    return {
+        "session_id": session_id,
+        "status": "transcribing",
+        "auto_chain": auto_chain,
+        "asr_provider": resolved_provider,
+        "asr_model": resolved_model,
+    }
 
 
 # --- Generate Cards ---

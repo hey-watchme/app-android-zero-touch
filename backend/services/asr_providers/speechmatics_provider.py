@@ -10,11 +10,12 @@ logger = logging.getLogger(__name__)
 class SpeechmaticsASRService:
     """Speechmatics ASR Service using speechmatics-batch SDK"""
 
-    def __init__(self):
+    def __init__(self, model: str = "batch"):
         api_key = os.getenv("SPEECHMATICS_API_KEY")
         if not api_key:
             raise ValueError("SPEECHMATICS_API_KEY environment variable not set")
         self.api_key = api_key
+        self.model = model
         logger.info("Speechmatics API initialized")
 
     @retry(
@@ -64,7 +65,7 @@ class SpeechmaticsASRService:
                     "paragraphs": [],
                     "speaker_count": 0,
                     "no_speech_detected": True,
-                    "model": "speechmatics-batch",
+                    "model": f"speechmatics/{self.model}",
                     "provider": "speechmatics",
                 }
 
@@ -87,7 +88,7 @@ class SpeechmaticsASRService:
                 "paragraphs": [],
                 "speaker_count": len(speaker_set),
                 "no_speech_detected": False,
-                "model": "speechmatics-batch",
+                "model": f"speechmatics/{self.model}",
                 "provider": "speechmatics",
             }
 
