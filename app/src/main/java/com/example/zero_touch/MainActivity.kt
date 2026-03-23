@@ -1,10 +1,10 @@
 package com.example.zero_touch
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.NavigationBar
@@ -23,15 +23,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.zero_touch.ui.CardDetailScreen
-import com.example.zero_touch.ui.SessionListScreen
 import com.example.zero_touch.ui.VoiceMemoScreen
 import com.example.zero_touch.ui.ZeroTouchViewModel
 import com.example.zero_touch.ui.theme.ZerotouchTheme
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
         setContent {
             ZerotouchTheme {
@@ -45,12 +45,15 @@ class MainActivity : ComponentActivity() {
 fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
-    var selectedTab by remember { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
+    var selectedTab by remember { mutableIntStateOf(0) }
 
-    // Load sessions on first launch
     LaunchedEffect(Unit) {
         viewModel.loadSessions(context)
+        while (true) {
+            delay(5000)
+            viewModel.refreshSessions(context)
+        }
     }
 
     // Show errors via snackbar
@@ -58,15 +61,6 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         uiState.error?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearError()
-        }
-    }
-
-    // Navigate to detail on upload success
-    LaunchedEffect(uiState.uploadSuccess) {
-        uiState.uploadSuccess?.let { sessionId ->
-            viewModel.loadSessionDetail(sessionId)
-            selectedTab = 2
-            viewModel.clearUploadSuccess()
         }
     }
 
@@ -78,47 +72,24 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    label = { Text("Record") },
+                    label = { Text("タイムライン") },
                     icon = {}
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
-                    onClick = {
-                        selectedTab = 1
-                        viewModel.loadSessions(context)
-                    },
-                    label = { Text("Sessions") },
-                    icon = {}
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    label = { Text("Detail") },
+                    onClick = { selectedTab = 1 },
+                    label = { Text("保存済み") },
                     icon = {}
                 )
             }
         }
     ) { innerPadding ->
-        when (selectedTab) {
-            0 -> VoiceMemoScreen(
-                modifier = Modifier.padding(innerPadding),
-                onUpload = { file ->
-                    viewModel.uploadAndProcess(context, file)
-                }
-            )
-            1 -> SessionListScreen(
-                sessions = uiState.sessions,
-                isLoading = uiState.isLoading,
-                onSessionClick = { sessionId ->
-                    viewModel.loadSessionDetail(sessionId)
-                    selectedTab = 2
-                },
-                modifier = Modifier.padding(innerPadding)
-            )
-            2 -> CardDetailScreen(
-                uiState = uiState,
-                modifier = Modifier.padding(innerPadding)
-            )
-        }
+        VoiceMemoScreen(
+            modifier = Modifier.padding(innerPadding),
+            uiState = uiState,
+            showFavoritesOnly = selectedTab == 1,
+            onDeleteCard = { id -> viewModel.dismissCard(id) },
+            onToggleFavorite = { id -> viewModel.toggleFavorite(id) }
+        )
     }
 }

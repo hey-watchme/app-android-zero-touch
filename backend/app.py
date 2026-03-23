@@ -26,7 +26,7 @@ from services.background_tasks import transcribe_background, generate_cards_back
 # --- Configuration ---
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", os.getenv("SUPABASE_KEY"))
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 S3_BUCKET = os.getenv("S3_BUCKET", "watchme-vault")
 AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-2")
 TABLE = "zerotouch_sessions"
@@ -44,10 +44,10 @@ async def lifespan(app: FastAPI):
     global supabase, s3_client, asr_service
 
     # Startup
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set")
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
 
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     s3_client = boto3.client("s3", region_name=AWS_REGION)
     asr_service = SpeechmaticsASRService()
 
