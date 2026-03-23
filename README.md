@@ -3,10 +3,26 @@
 `ZeroTouch` は、Android タブレットを現場に置くだけで、会話をメモ、ナレッジ、
 将来的にはエージェント行動へ変えていくためのアプリです。
 
+## リポジトリと作業対象（重要）
+
+このREADMEが指す実体のリポジトリは **ZeroTouch専用リポジトリ** です。  
+現在の作業場所: `/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch`
+
+`watchme/` 直下は **Gitリポジトリではありません**（複数リポジトリを並列配置したワークスペース）。  
+そのため、以下の混同が起きやすい点に注意してください。
+
+- `watchme/` 全体の話と **ZeroTouchリポジトリの話は別** です
+- GitHub Actions やCI/CDは **このリポジトリ（ZeroTouch）側** に定義されています
+
+必要に応じて、このリポジトリのGitHub Actionsは  
+`.github/workflows/` 配下を確認してください。
+
 ## 現在の実装（MVP）
 
-**パイプライン**: アンビエント録音 → S3アップロード → Speechmatics文字起こし → アプリ表示  
+**パイプライン**: アンビエント録音 → S3アップロード → ASR文字起こし（Speechmatics / Deepgram）→ アプリ表示  
 ※ **LLM カード生成は一旦停止中**（`/api/generate-cards` は未使用）
+
+**ASRプロバイダー**: Speechmatics / Deepgram（アプリの設定から選択）
 
 > 重要: ZeroTouch は WatchMe のインフラ（同一 Supabase / S3 / EC2）を「間借り」していますが、  
 > **DB は `zerotouch_sessions` のみ**を使用する POC です。WatchMe 本家の既存テーブル/パイプラインには触れません。
@@ -26,7 +42,7 @@ Android App (Kotlin/Compose)
 S3 (watchme-vault/zerotouch/...)
   ↓
 Backend API (FastAPI :8061)
-  ↓ Speechmatics Batch API
+  ↓ ASR (Speechmatics / Deepgram)
 Transcription
   ↓
 Supabase (zerotouch_sessions)
@@ -63,6 +79,8 @@ Android App (Card Display)
 | `/api/sessions` | GET | セッション一覧 |
 | `/api/models` | GET | 利用可能なLLMモデル一覧 |
 
+※ `/api/transcribe/{id}` は `provider` / `model` のクエリ指定に対応（例: `?provider=deepgram&model=nova-3`）
+
 ### データベース
 
 - テーブル: `zerotouch_sessions`（Supabase、同一プロジェクト）
@@ -75,7 +93,7 @@ Android App (Card Display)
 |---------|------|
 | Android | Kotlin / Jetpack Compose / Material3 / OkHttp |
 | Backend | FastAPI (Python 3.11) / uvicorn |
-| STT | Speechmatics Batch API（話者分離対応） |
+| STT | Speechmatics Batch API / Deepgram Nova（選択式） |
 | LLM | **一旦停止中**（将来は GPT-5.4 を想定） |
 | DB | Supabase (`zerotouch_` prefix) |
 | Storage | S3 (`watchme-vault`) |
@@ -90,6 +108,9 @@ cd backend
 cp .env.example .env
 # .env を編集（APIキーを設定）
 # 重要: バックエンドは `SUPABASE_SERVICE_ROLE_KEY` を使用します（Android 側には絶対に持たせない）
+# ASR:
+# - Speechmatics: SPEECHMATICS_API_KEY
+# - Deepgram: DEEPGRAM_API_KEY
 
 python3 -m venv venv
 source venv/bin/activate
