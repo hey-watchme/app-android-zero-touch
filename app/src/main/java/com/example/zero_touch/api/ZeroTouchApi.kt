@@ -10,6 +10,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import android.util.Log
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -64,6 +65,10 @@ data class Card(
 class ZeroTouchApi(
     private val baseUrl: String = "https://api.hey-watch.me"
 ) {
+    companion object {
+        private const val TAG = "ZeroTouchApi"
+    }
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -121,16 +126,20 @@ class ZeroTouchApi(
     }
 
     suspend fun getSession(sessionId: String): SessionDetail = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/sessions/$sessionId"
+        Log.d(TAG, "GET $url")
         val request = Request.Builder()
-            .url("$baseUrl/zerotouch/api/sessions/$sessionId")
+            .url(url)
             .get()
             .build()
 
         val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
+            Log.e(TAG, "GET $url failed: ${response.code} ${response.message} body=$body")
             throw Exception("Get session failed: ${response.code}")
         }
-        gson.fromJson(response.body!!.string(), SessionDetail::class.java)
+        gson.fromJson(body, SessionDetail::class.java)
     }
 
     suspend fun listSessions(
@@ -143,16 +152,19 @@ class ZeroTouchApi(
             if (deviceId != null) append("&device_id=$deviceId")
         }
 
+        Log.d(TAG, "GET $url")
         val request = Request.Builder()
             .url(url)
             .get()
             .build()
 
         val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
+            Log.e(TAG, "GET $url failed: ${response.code} ${response.message} body=$body")
             throw Exception("List sessions failed: ${response.code}")
         }
-        gson.fromJson(response.body!!.string(), SessionListResponse::class.java)
+        gson.fromJson(body, SessionListResponse::class.java)
     }
 
     suspend fun generateCards(sessionId: String): Map<String, Any> = withContext(Dispatchers.IO) {

@@ -79,6 +79,7 @@ class ZeroTouchViewModel : ViewModel() {
                 val sorted = response.sessions.sortedByDescending { it.created_at }
                 val cards = sorted.mapNotNull { summary -> buildTranscriptCard(summary) }
                 val filteredCards = filterDismissed(cards)
+                Log.d(TAG, "loadSessions success: device=$deviceId sessions=${sorted.size}")
                 currentOffset = response.sessions.size
                 hasMore = response.count == PAGE_SIZE
                 _uiState.value = _uiState.value.copy(
@@ -90,6 +91,7 @@ class ZeroTouchViewModel : ViewModel() {
                     favoriteIds = favoriteIds.toSet()
                 )
             } catch (e: Exception) {
+                Log.e(TAG, "loadSessions failed", e)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = "Failed to load sessions: ${e.message}"
@@ -113,14 +115,15 @@ class ZeroTouchViewModel : ViewModel() {
                 val freshCards = fresh.mapNotNull { summary -> buildTranscriptCard(summary) }
                 val mergedCards = mergeCards(_uiState.value.feedCards, freshCards, mergedSessions)
                 val filteredCards = filterDismissed(mergedCards)
+                Log.d(TAG, "refreshSessions success: device=$deviceId newItems=$newItems")
                 _uiState.value = _uiState.value.copy(
                     sessions = mergedSessions,
                     feedCards = filteredCards,
                     dismissedIds = dismissedIds.toSet(),
                     favoriteIds = favoriteIds.toSet()
                 )
-            } catch (_: Exception) {
-                // ignore refresh errors
+            } catch (e: Exception) {
+                Log.e(TAG, "refreshSessions failed", e)
             } finally {
                 isRefreshing = false
             }
