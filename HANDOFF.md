@@ -12,7 +12,7 @@
 |---|---|
 | バックエンド（FastAPI :8061） | EC2 稼働中、CI/CD 正常 |
 | Nginx `/zerotouch/` → `:8061` | 設定済み |
-| Android アプリ（1画面 + フッターナビ） | 実機動作確認済み（Xiaomi Redmi タブレット） |
+| Android アプリ（Notion風UI + BottomSheet） | 実機動作確認済み（Xiaomi Redmi タブレット） |
 | Supabase `zerotouch_sessions` | 作成済み |
 | GitHub Actions → ECR → EC2 | 正常動作 |
 
@@ -159,11 +159,16 @@ Tier 3 ─ クラウド処理（有料）
 ### Android
 | ファイル | 役割 |
 |---|---|
-| `app/.../MainActivity.kt` | 1画面 + フッターナビ |
+| `app/.../MainActivity.kt` | Scaffold + TopAppBar + BottomNav + Settings |
 | `app/.../api/ZeroTouchApi.kt` | APIクライアント（OkHttp） |
 | `app/.../api/DeviceIdProvider.kt` | デバイスID（SharedPreferences + UUID） |
-| `app/.../ui/ZeroTouchViewModel.kt` | 状態管理、アップロード、ポーリング |
-| `app/.../ui/VoiceMemoScreen.kt` | 状態表示 + カードリスト |
+| `app/.../ui/ZeroTouchViewModel.kt` | 状態管理、アップロード、ポーリング、カード選択 |
+| `app/.../ui/VoiceMemoScreen.kt` | メイン画面（カードリスト + 検索 + アンビエント制御） |
+| `app/.../ui/SettingsScreen.kt` | 設定 BottomSheet（モック） |
+| `app/.../ui/components/AmbientIndicator.kt` | パルスドット + ステータスバナー |
+| `app/.../ui/components/TranscriptCardView.kt` | Notion風カードUI |
+| `app/.../ui/components/CardDetailSheet.kt` | カード詳細 BottomSheet |
+| `app/.../ui/components/ShimmerEffect.kt` | シマーローディング |
 | `app/.../audio/ambient/AmbientRecordingService.kt` | Foreground Service |
 | `app/.../audio/ambient/AmbientRecorder.kt` | VAD / 録音 / セッション分割 |
 | `app/.../audio/ambient/VadDetector.kt` | 簡易 VAD（エネルギー + ZCR） |

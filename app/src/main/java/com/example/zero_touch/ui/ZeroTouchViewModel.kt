@@ -7,9 +7,11 @@ import androidx.lifecycle.viewModelScope
 import com.example.zero_touch.api.DeviceIdProvider
 import com.example.zero_touch.api.SessionSummary
 import com.example.zero_touch.api.ZeroTouchApi
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -23,7 +25,9 @@ data class TranscriptCard(
     val displayStatus: String,
     val isProcessing: Boolean,
     val text: String,
-    val displayTitle: String
+    val displayTitle: String,
+    val durationSeconds: Int = 0,
+    val displayDate: String = ""
 )
 
 data class ZeroTouchUiState(
@@ -33,7 +37,8 @@ data class ZeroTouchUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val dismissedIds: Set<String> = emptySet(),
-    val favoriteIds: Set<String> = emptySet()
+    val favoriteIds: Set<String> = emptySet(),
+    val selectedCardId: String? = null
 )
 
 class ZeroTouchViewModel : ViewModel() {
@@ -110,19 +115,13 @@ class ZeroTouchViewModel : ViewModel() {
                 val deviceId = DeviceIdProvider.getDeviceId(context)
                 Log.d(TAG, "Upload starting: file=${audioFile.name}, size=${audioFile.length()}, device=$deviceId")
 
-                // Upload
                 val uploadResult = api.uploadAudio(audioFile, deviceId)
                 Log.d(TAG, "Upload success: session=${uploadResult.session_id}")
 
-                // Trigger transcription only (LLM pipeline disabled)
                 api.transcribe(uploadResult.session_id, autoChain = false)
                 Log.d(TAG, "Transcribe triggered for session=${uploadResult.session_id}")
 
-                _uiState.value = _uiState.value.copy(
-                    isUploading = false
-                )
-
-                // Refresh sessions list
+                _uiState.value = _uiState.value.copy(isUploading = false)
                 loadSessions(context)
 
             } catch (e: Exception) {
@@ -144,7 +143,8 @@ class ZeroTouchViewModel : ViewModel() {
         val current = _uiState.value
         _uiState.value = current.copy(
             feedCards = filterDismissed(current.feedCards),
-            dismissedIds = dismissedIds.toSet()
+            dismissedIds = dismissedIds.toSet(),
+            selectedCardId = if (current.selectedCardId == id) null else current.selectedCardId
         )
     }
 
@@ -159,6 +159,14 @@ class ZeroTouchViewModel : ViewModel() {
         )
     }
 
+    fun selectCard(id: String) {
+        _uiState.value = _uiState.value.copy(selectedCardId = id)
+    }
+
+    fun clearSelection() {
+        _uiState.value = _uiState.value.copy(selectedCardId = null)
+    }
+
     private suspend fun buildTranscriptCard(summary: SessionSummary): TranscriptCard? {
         return try {
             val detail = api.getSession(summary.id)
@@ -166,23 +174,25 @@ class ZeroTouchViewModel : ViewModel() {
             val status = detail.status
             val displayStatus = when (status) {
                 "uploaded" -> "Queued"
-                "transcribing" -> "Processing audio"
+                "transcribing" -> "Transcribing"
                 "transcribed" -> "Transcribed"
                 "completed" -> "Completed"
                 "failed" -> "Failed"
-                "generating" -> "Processing audio"
+                "generating" -> "Generating"
                 else -> status
             }
             val isProcessing = status in listOf("uploaded", "transcribing", "generating")
             val displayText = when {
                 text.isNotEmpty() -> text
-                status in listOf("transcribed", "completed") -> "会話が検出されませんでした"
-                status == "failed" -> "(failed)"
-                else -> "(processing)"
+                status in listOf("transcribed", "completed") -> "No speech detected"
+                status == "failed" -> "Processing failed"
+                else -> "Processing..."
             }
             val sourceTimestamp = detail.recorded_at ?: detail.created_at
             val createdAtEpoch = parseEpochMillis(sourceTimestamp)
             val displayTitle = buildTitle(sourceTimestamp)
+            val displayDate = buildDisplayDate(sourceTimestamp)
+            val duration = detail.duration_seconds ?: 0
             TranscriptCard(
                 id = summary.id,
                 createdAt = summary.created_at,
@@ -191,7 +201,9 @@ class ZeroTouchViewModel : ViewModel() {
                 displayStatus = displayStatus,
                 isProcessing = isProcessing,
                 text = displayText,
-                displayTitle = displayTitle
+                displayTitle = displayTitle,
+                durationSeconds = duration,
+                displayDate = displayDate
             )
         } catch (e: Exception) {
             TranscriptCard(
@@ -199,10 +211,12 @@ class ZeroTouchViewModel : ViewModel() {
                 createdAt = summary.created_at,
                 createdAtEpochMs = 0L,
                 status = summary.status,
-                displayStatus = "Failed to load",
+                displayStatus = "Error",
                 isProcessing = false,
-                text = "(failed to load)",
-                displayTitle = "Unknown time"
+                text = "Failed to load",
+                displayTitle = "--:--",
+                durationSeconds = 0,
+                displayDate = ""
             )
         }
     }
@@ -213,7 +227,7 @@ class ZeroTouchViewModel : ViewModel() {
     }
 
     private fun buildTitle(timestamp: String?): String {
-        if (timestamp.isNullOrBlank()) return "Unknown time"
+        if (timestamp.isNullOrBlank()) return "--:--"
         val value = timestamp.trim()
         return try {
             val parsed = OffsetDateTime.parse(value)
@@ -221,6 +235,22 @@ class ZeroTouchViewModel : ViewModel() {
                 .format(DateTimeFormatter.ofPattern("HH:mm"))
         } catch (_: Exception) {
             if (value.length >= 5) value.substring(0, 5) else value
+        }
+    }
+
+    private fun buildDisplayDate(timestamp: String?): String {
+        if (timestamp.isNullOrBlank()) return ""
+        return try {
+            val parsed = OffsetDateTime.parse(timestamp.trim())
+            val localDate = parsed.atZoneSameInstant(ZoneId.systemDefault()).toLocalDate()
+            val today = LocalDate.now()
+            when (localDate) {
+                today -> "Today"
+                today.minusDays(1) -> "Yesterday"
+                else -> localDate.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN))
+            }
+        } catch (_: Exception) {
+            ""
         }
     }
 

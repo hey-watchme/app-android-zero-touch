@@ -7,27 +7,32 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.MicNone
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -36,12 +41,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ClipboardManager
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -49,9 +55,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.zero_touch.audio.ambient.AmbientPreferences
 import com.example.zero_touch.audio.ambient.AmbientRecordingService
 import com.example.zero_touch.audio.ambient.AmbientStatus
-import kotlin.math.max
-import kotlinx.coroutines.delay
+import com.example.zero_touch.ui.components.AmbientStatusBar
+import com.example.zero_touch.ui.components.CardDetailSheet
+import com.example.zero_touch.ui.components.ShimmerCardList
+import com.example.zero_touch.ui.components.TranscriptCardView
+import com.example.zero_touch.ui.theme.ZtCaption
+import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -61,23 +73,23 @@ fun VoiceMemoScreen(
     uiState: ZeroTouchUiState,
     showFavoritesOnly: Boolean,
     onDeleteCard: (String) -> Unit,
-    onToggleFavorite: (String) -> Unit
+    onToggleFavorite: (String) -> Unit,
+    onSelectCard: (String) -> Unit,
+    onDismissDetail: () -> Unit
 ) {
     val context = LocalContext.current
+    val clipboardManager: ClipboardManager = LocalClipboardManager.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    // --- Permission & ambient state (preserved from original) ---
     var hasRecordPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
                 PackageManager.PERMISSION_GRANTED
         )
     }
-    var message by remember { mutableStateOf<String?>(null) }
     var ambientEnabled by remember { mutableStateOf(AmbientPreferences.isAmbientEnabled(context)) }
     val ambientState by AmbientStatus.state.collectAsState()
-    val feedCards = uiState.feedCards
-    val pendingRecordings = ambientState.recordings
-    val dismissedIds = uiState.dismissedIds
-    val favoriteIds = uiState.favoriteIds
     var hasNotificationPermission by remember {
         mutableStateOf(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -92,13 +104,11 @@ fun VoiceMemoScreen(
     val requestPermissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             hasRecordPermission = granted
-            message = if (granted) null else "Microphone permission required"
         }
     val requestNotificationLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             hasNotificationPermission = granted
             if (!granted) {
-                message = "Notification permission required for ambient mode"
                 ambientEnabled = false
                 AmbientPreferences.setAmbientEnabled(context, false)
             } else if (ambientEnabled) {
@@ -108,20 +118,14 @@ fun VoiceMemoScreen(
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                // no-op
-            }
+            if (event == Lifecycle.Event.ON_STOP) { /* no-op */ }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(ambientEnabled, hasRecordPermission, hasNotificationPermission) {
-        if (!ambientEnabled) {
-            return@LaunchedEffect
-        }
+        if (!ambientEnabled) return@LaunchedEffect
         val notificationsOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotificationPermission
         if (!hasRecordPermission || !notificationsOk) {
             ambientEnabled = false
@@ -132,168 +136,312 @@ fun VoiceMemoScreen(
         startAmbientService(context)
     }
 
+    // --- Data preparation ---
+    val feedCards = uiState.feedCards
+    val pendingRecordings = ambientState.recordings
+    val dismissedIds = uiState.dismissedIds
+    val favoriteIds = uiState.favoriteIds
+    val now = System.currentTimeMillis()
+
+    val pendingCards = pendingRecordings.mapNotNull { entry ->
+        val timeTitle = formatTimeOnly(entry.createdAt)
+        val matchedServer = feedCards.any { card ->
+            card.createdAtEpochMs > 0L &&
+                kotlin.math.abs(card.createdAtEpochMs - entry.createdAt) <= 2 * 60_000
+        }
+        val isRecent = now - entry.createdAt <= 10 * 60_000
+        if (matchedServer || !isRecent) {
+            null
+        } else {
+            val id = "local-${entry.createdAt}"
+            if (dismissedIds.contains(id)) return@mapNotNull null
+            TranscriptCard(
+                id = id,
+                createdAt = "",
+                createdAtEpochMs = entry.createdAt,
+                status = "pending",
+                displayStatus = "Processing",
+                isProcessing = true,
+                text = "",
+                displayTitle = timeTitle,
+                durationSeconds = 0,
+                displayDate = "Today"
+            )
+        }
+    }.take(5)
+
+    val mergedCards = pendingCards + feedCards
+    val visibleCards = if (showFavoritesOnly) {
+        mergedCards.filter { favoriteIds.contains(it.id) }
+    } else {
+        mergedCards
+    }
+
+    // Group cards by date
+    val groupedCards = visibleCards.groupBy { card ->
+        if (card.displayDate.isNotEmpty()) card.displayDate
+        else dateFromEpoch(card.createdAtEpochMs)
+    }
+
+    // --- Bottom sheet for card detail ---
+    val selectedCard = uiState.selectedCardId?.let { id ->
+        mergedCards.find { it.id == id }
+    }
+    if (selectedCard != null) {
+        CardDetailSheet(
+            card = selectedCard,
+            isFavorite = favoriteIds.contains(selectedCard.id),
+            onDismiss = onDismissDetail,
+            onToggleFavorite = { onToggleFavorite(selectedCard.id) },
+            onDelete = { onDeleteCard(selectedCard.id) },
+            onCopy = {
+                clipboardManager.setText(AnnotatedString(selectedCard.text))
+            }
+        )
+    }
+
+    // --- Main UI ---
     Column(
-        modifier = modifier.padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 20.dp)
     ) {
+        Spacer(Modifier.height(8.dp))
+
+        // Header row: date + ambient toggle
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "ZeroTouch",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Switch(
-                    checked = ambientEnabled,
-                    onCheckedChange = { enabled ->
-                        message = null
-                        if (enabled) {
-                            if (!hasRecordPermission) {
-                                requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                return@Switch
-                            }
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission) {
-                                requestNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                return@Switch
-                            }
-                            AmbientPreferences.setAmbientEnabled(context, true)
-                            ambientEnabled = true
-                            startAmbientService(context)
-                        } else {
-                            AmbientPreferences.setAmbientEnabled(context, false)
-                            ambientEnabled = false
-                            stopAmbientService(context)
-                        }
-                    },
+            Column {
+                Text(
+                    text = formatTodayJa(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ZtOnSurfaceVariant
                 )
             }
+            // Ambient toggle chip
+            AmbientToggleChip(
+                enabled = ambientEnabled,
+                onToggle = { enabled ->
+                    if (enabled) {
+                        if (!hasRecordPermission) {
+                            requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            return@AmbientToggleChip
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission) {
+                            requestNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            return@AmbientToggleChip
+                        }
+                        AmbientPreferences.setAmbientEnabled(context, true)
+                        ambientEnabled = true
+                        startAmbientService(context)
+                    } else {
+                        AmbientPreferences.setAmbientEnabled(context, false)
+                        ambientEnabled = false
+                        stopAmbientService(context)
+                    }
+                }
+            )
         }
 
-        Text(
-            text = formatTodayJa(),
-            style = MaterialTheme.typography.bodyMedium,
+        Spacer(Modifier.height(12.dp))
+
+        // Ambient status bar (recording indicator)
+        AmbientStatusBar(
+            ambientState = ambientState,
+            isEnabled = ambientEnabled
         )
 
+        // Permission prompt
         if (!hasRecordPermission) {
-            Text(
-                text = "Microphone permission is required to record.",
-                style = MaterialTheme.typography.bodyMedium,
+            Spacer(Modifier.height(8.dp))
+            PermissionBanner(
+                onGrant = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
             )
-            Button(
-                onClick = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                modifier = Modifier.semantics { testTag = "permission_button" },
-            ) {
-                Text("Grant Permission")
-            }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Status: ${ambientState.status}",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    text = "VAD: ${if (ambientState.speech) "speech" else "silence"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                LinearProgressIndicator(
-                    progress = ambientState.level,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
+        Spacer(Modifier.height(12.dp))
+
+        // Search bar (mock, non-functional)
+        SearchBarMock()
+
+        Spacer(Modifier.height(16.dp))
+
+        // Card list
+        when {
+            uiState.isLoading && feedCards.isEmpty() -> {
+                ShimmerCardList(count = 3)
+            }
+            visibleCards.isEmpty() -> {
+                EmptyStateView(showFavoritesOnly = showFavoritesOnly)
+            }
+            else -> {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
-                    RecordingBadge(isActive = ambientState.isRecording)
-                    Text(
-                        text = if (ambientState.isRecording) {
-                            "Recording ${formatDuration(ambientState.recordingElapsedMs)}"
-                        } else {
-                            "Idle"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+                    groupedCards.forEach { (dateLabel, cards) ->
+                        // Date header
+                        item(key = "header_$dateLabel") {
+                            DateHeader(dateLabel)
+                        }
+                        // Cards for this date
+                        items(cards, key = { it.id }) { card ->
+                            TranscriptCardView(
+                                card = card,
+                                isFavorite = favoriteIds.contains(card.id),
+                                onClick = { onSelectCard(card.id) },
+                                onToggleFavorite = { onToggleFavorite(card.id) }
+                            )
+                        }
+                    }
                 }
-                ambientState.lastEvent?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
             }
         }
+    }
+}
 
-        if (uiState.isLoading) {
-            Text(
-                text = "読み込み中...",
-                style = MaterialTheme.typography.bodySmall,
+// --- Sub-composables ---
+
+@Composable
+private fun AmbientToggleChip(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (enabled) MaterialTheme.colorScheme.primaryContainer
+               else MaterialTheme.colorScheme.surfaceVariant,
+        onClick = { onToggle(!enabled) }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (enabled) Icons.Outlined.Mic else Icons.Outlined.MicNone,
+                contentDescription = "Ambient",
+                modifier = Modifier.size(16.dp),
+                tint = if (enabled) MaterialTheme.colorScheme.primary
+                       else ZtOnSurfaceVariant
             )
-        }
-
-        val now = System.currentTimeMillis()
-        val pendingCards = pendingRecordings.mapNotNull { entry ->
-            val timeTitle = formatTimeOnly(entry.createdAt)
-            val matchedServer = feedCards.any { card ->
-                card.createdAtEpochMs > 0L &&
-                    kotlin.math.abs(card.createdAtEpochMs - entry.createdAt) <= 2 * 60_000
-            }
-            val isRecent = now - entry.createdAt <= 10 * 60_000
-            if (matchedServer || !isRecent) {
-                null
-            } else {
-                val id = "local-${entry.createdAt}"
-                if (dismissedIds.contains(id)) return@mapNotNull null
-                TranscriptCard(
-                    id = id,
-                    createdAt = "",
-                    createdAtEpochMs = entry.createdAt,
-                    status = "pending",
-                    displayStatus = "処理待ち",
-                    isProcessing = true,
-                    text = "(処理待ち)",
-                    displayTitle = timeTitle
-                )
-            }
-        }.take(5)
-        val mergedCards = pendingCards + feedCards
-        val visibleCards = if (showFavoritesOnly) {
-            mergedCards.filter { favoriteIds.contains(it.id) }
-        } else {
-            mergedCards
-        }
-
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(visibleCards) { card ->
-                TranscriptCardItem(
-                    card = card,
-                    isFavorite = favoriteIds.contains(card.id),
-                    onToggleFavorite = onToggleFavorite,
-                    onDelete = onDeleteCard
-                )
-            }
-        }
-
-        if (!uiState.isLoading && visibleCards.isEmpty()) {
             Text(
-                text = "まだカードがありません",
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-
-        if (message != null) {
-            Text(
-                text = message!!,
-                style = MaterialTheme.typography.bodySmall,
+                text = if (enabled) "Listening" else "Off",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (enabled) MaterialTheme.colorScheme.primary
+                        else ZtOnSurfaceVariant
             )
         }
     }
 }
+
+@Composable
+private fun SearchBarMock() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Outlined.Search,
+                contentDescription = "Search",
+                tint = ZtCaption,
+                modifier = Modifier.size(18.dp)
+            )
+            Text(
+                text = "Search transcripts...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ZtCaption
+            )
+        }
+    }
+}
+
+@Composable
+private fun PermissionBanner(onGrant: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        onClick = onGrant
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Outlined.Mic,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Column {
+                Text(
+                    text = "Microphone access required",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Tap to grant permission",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DateHeader(label: String) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.titleSmall,
+        color = ZtOnSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+    )
+}
+
+@Composable
+private fun EmptyStateView(showFavoritesOnly: Boolean) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = if (showFavoritesOnly) "No saved items" else "No transcripts yet",
+                style = MaterialTheme.typography.titleMedium,
+                color = ZtOnSurfaceVariant
+            )
+            Text(
+                text = if (showFavoritesOnly) {
+                    "Bookmark transcripts to find them here"
+                } else {
+                    "Turn on ambient listening to capture conversations automatically"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = ZtCaption
+            )
+        }
+    }
+}
+
+// --- Utility functions ---
 
 private fun startAmbientService(context: Context) {
     val intent = Intent(context, AmbientRecordingService::class.java).apply {
@@ -309,110 +457,28 @@ private fun stopAmbientService(context: Context) {
     ContextCompat.startForegroundService(context, intent)
 }
 
-private fun formatDuration(durationMs: Long): String {
-    val totalSeconds = max(0, durationMs / 1000)
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return String.format("%d:%02d", minutes, seconds)
-}
-
-@Composable
-private fun RecordingBadge(isActive: Boolean) {
-    val color = if (isActive) Color.Red else Color.Gray
-    Box(
-        modifier = Modifier
-            .size(10.dp)
-            .background(color, CircleShape)
-    )
-}
-
-@Composable
-private fun TranscriptCardItem(
-    card: TranscriptCard,
-    isFavorite: Boolean,
-    onToggleFavorite: (String) -> Unit,
-    onDelete: (String) -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (card.isProcessing) {
-                MaterialTheme.colorScheme.surfaceVariant
-            } else {
-                MaterialTheme.colorScheme.surface
-            }
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .border(1.dp, MaterialTheme.colorScheme.outline)
-                .padding(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = card.displayTitle,
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = card.displayStatus,
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                    ProcessingDots(isActive = card.isProcessing)
-                    TextButton(
-                        onClick = { onToggleFavorite(card.id) },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = if (isFavorite) Color(0xFFFFC107) else MaterialTheme.colorScheme.outline
-                        )
-                    ) {
-                        Text(if (isFavorite) "★" else "☆")
-                    }
-                    TextButton(onClick = { onDelete(card.id) }) {
-                        Text("×")
-                    }
-                }
-            }
-            Text(
-                text = card.text,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun ProcessingDots(isActive: Boolean) {
-    if (!isActive) return
-    var dots by remember { mutableStateOf(".") }
-    LaunchedEffect(isActive) {
-        val sequence = listOf(".", "..", "...")
-        var index = 0
-        while (isActive) {
-            dots = sequence[index % sequence.size]
-            index++
-            delay(400)
-        }
-    }
-    Text(
-        text = dots,
-        style = MaterialTheme.typography.labelSmall
-    )
-}
-
 private fun formatTodayJa(): String {
-    val formatter = DateTimeFormatter.ofPattern("M月d日(E)", Locale.JAPAN)
+    val formatter = DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN)
     return LocalDate.now().format(formatter)
 }
 
 private fun formatTimeOnly(epochMs: Long): String {
     val formatter = DateTimeFormatter.ofPattern("HH:mm", Locale.JAPAN)
-    return java.time.Instant.ofEpochMilli(epochMs)
-        .atZone(java.time.ZoneId.systemDefault())
+    return Instant.ofEpochMilli(epochMs)
+        .atZone(ZoneId.systemDefault())
         .toLocalTime()
         .format(formatter)
+}
+
+private fun dateFromEpoch(epochMs: Long): String {
+    if (epochMs <= 0L) return "Unknown"
+    val localDate = Instant.ofEpochMilli(epochMs)
+        .atZone(ZoneId.systemDefault())
+        .toLocalDate()
+    val today = LocalDate.now()
+    return when (localDate) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> localDate.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN))
+    }
 }
