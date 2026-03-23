@@ -5,6 +5,8 @@ import android.content.Context
 object AmbientPreferences {
     private const val PREF_NAME = "zerotouch_prefs"
     private const val KEY_AMBIENT_ENABLED = "ambient_enabled"
+    private const val KEY_ASR_PROVIDER = "asr_provider"
+    private const val DEFAULT_ASR_PROVIDER = "speechmatics"
 
     fun isAmbientEnabled(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -14,5 +16,15 @@ object AmbientPreferences {
     fun setAmbientEnabled(context: Context, enabled: Boolean) {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(KEY_AMBIENT_ENABLED, enabled).apply()
+    }
+
+    fun getAsrProvider(context: Context): String {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_ASR_PROVIDER, DEFAULT_ASR_PROVIDER) ?: DEFAULT_ASR_PROVIDER
+    }
+
+    fun setAsrProvider(context: Context, provider: String) {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_ASR_PROVIDER, provider).apply()
     }
 }

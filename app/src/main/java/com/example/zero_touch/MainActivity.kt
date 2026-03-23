@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -43,6 +45,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.zero_touch.api.DeviceIdProvider
 import com.example.zero_touch.audio.ambient.AmbientStatus
 import com.example.zero_touch.ui.SettingsSheet
+import com.example.zero_touch.ui.TimelineScreen
 import com.example.zero_touch.ui.VoiceMemoScreen
 import com.example.zero_touch.ui.ZeroTouchViewModel
 import com.example.zero_touch.ui.components.AmbientDot
@@ -145,14 +148,14 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                     onClick = { selectedTab = 0 },
                     label = {
                         Text(
-                            "Timeline",
+                            "Home",
                             style = MaterialTheme.typography.labelMedium
                         )
                     },
                     icon = {
                         Icon(
-                            imageVector = if (selectedTab == 0) Icons.Filled.Schedule else Icons.Outlined.Schedule,
-                            contentDescription = "Timeline",
+                            imageVector = if (selectedTab == 0) Icons.Filled.Home else Icons.Outlined.Home,
+                            contentDescription = "Home",
                             modifier = Modifier.size(22.dp)
                         )
                     },
@@ -169,13 +172,37 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                     onClick = { selectedTab = 1 },
                     label = {
                         Text(
+                            "Timeline",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = if (selectedTab == 1) Icons.Filled.Schedule else Icons.Outlined.Schedule,
+                            contentDescription = "Timeline",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                        unselectedIconColor = ZtCaption,
+                        unselectedTextColor = ZtCaption,
+                        indicatorColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    label = {
+                        Text(
                             "Saved",
                             style = MaterialTheme.typography.labelMedium
                         )
                     },
                     icon = {
                         Icon(
-                            imageVector = if (selectedTab == 1) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            imageVector = if (selectedTab == 2) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                             contentDescription = "Saved",
                             modifier = Modifier.size(22.dp)
                         )
@@ -191,14 +218,36 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
             }
         }
     ) { innerPadding ->
-        VoiceMemoScreen(
-            modifier = Modifier.padding(innerPadding),
-            uiState = uiState,
-            showFavoritesOnly = selectedTab == 1,
-            onDeleteCard = { id -> viewModel.dismissCard(id) },
-            onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
-            onSelectCard = { id -> viewModel.selectCard(id) },
-            onDismissDetail = { viewModel.clearSelection() }
-        )
+        when (selectedTab) {
+            0 -> VoiceMemoScreen(
+                modifier = Modifier.padding(innerPadding),
+                uiState = uiState,
+                showFavoritesOnly = false,
+                onDeleteCard = { id -> viewModel.dismissCard(id) },
+                onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
+                onSelectCard = { id -> viewModel.selectCard(id) },
+                onDismissDetail = { viewModel.clearSelection() },
+                onLoadMore = { viewModel.loadMoreSessions(context) }
+            )
+            1 -> TimelineScreen(
+                modifier = Modifier.padding(innerPadding),
+                uiState = uiState,
+                onDeleteCard = { id -> viewModel.dismissCard(id) },
+                onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
+                onSelectCard = { id -> viewModel.selectCard(id) },
+                onDismissDetail = { viewModel.clearSelection() },
+                onLoadMore = { viewModel.loadMoreSessions(context) }
+            )
+            else -> VoiceMemoScreen(
+                modifier = Modifier.padding(innerPadding),
+                uiState = uiState,
+                showFavoritesOnly = true,
+                onDeleteCard = { id -> viewModel.dismissCard(id) },
+                onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
+                onSelectCard = { id -> viewModel.selectCard(id) },
+                onDismissDetail = { viewModel.clearSelection() },
+                onLoadMore = { viewModel.loadMoreSessions(context) }
+            )
+        }
     }
 }

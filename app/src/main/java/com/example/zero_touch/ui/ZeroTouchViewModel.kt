@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.zero_touch.api.DeviceIdProvider
 import com.example.zero_touch.api.SessionSummary
 import com.example.zero_touch.api.ZeroTouchApi
+import com.example.zero_touch.audio.ambient.AmbientPreferences
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -27,7 +28,9 @@ data class TranscriptCard(
     val text: String,
     val displayTitle: String,
     val durationSeconds: Int = 0,
-    val displayDate: String = ""
+    val displayDate: String = "",
+    val asrProvider: String? = null,
+    val asrModel: String? = null
 )
 
 data class ZeroTouchUiState(
@@ -35,6 +38,8 @@ data class ZeroTouchUiState(
     val feedCards: List<TranscriptCard> = emptyList(),
     val isUploading: Boolean = false,
     val isLoading: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val hasMore: Boolean = true,
     val error: String? = null,
     val dismissedIds: Set<String> = emptySet(),
     val favoriteIds: Set<String> = emptySet(),
@@ -44,6 +49,7 @@ data class ZeroTouchUiState(
 class ZeroTouchViewModel : ViewModel() {
     companion object {
         private const val TAG = "ZeroTouchVM"
+        private const val PAGE_SIZE = 10
     }
 
     private val api = ZeroTouchApi()
@@ -54,22 +60,32 @@ class ZeroTouchViewModel : ViewModel() {
     private var isRefreshing = false
     private val dismissedIds = mutableSetOf<String>()
     private val favoriteIds = mutableSetOf<String>()
+    private var currentOffset = 0
+    private var hasMore = true
 
     fun loadSessions(context: Context) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            currentOffset = 0
+            hasMore = true
+            _uiState.value = _uiState.value.copy(
+                isLoading = true,
+                isLoadingMore = false,
+                error = null,
+                hasMore = true
+            )
             try {
                 val deviceId = DeviceIdProvider.getDeviceId(context)
-                val response = api.listSessions(deviceId = deviceId, limit = 10)
+                val response = api.listSessions(deviceId = deviceId, limit = PAGE_SIZE, offset = 0)
                 val sorted = response.sessions.sortedByDescending { it.created_at }
-                val cards = sorted.mapNotNull { summary ->
-                    buildTranscriptCard(summary)
-                }
+                val cards = sorted.mapNotNull { summary -> buildTranscriptCard(summary) }
                 val filteredCards = filterDismissed(cards)
+                currentOffset = response.sessions.size
+                hasMore = response.count == PAGE_SIZE
                 _uiState.value = _uiState.value.copy(
                     sessions = sorted,
                     feedCards = filteredCards,
                     isLoading = false,
+                    hasMore = hasMore,
                     dismissedIds = dismissedIds.toSet(),
                     favoriteIds = favoriteIds.toSet()
                 )
@@ -87,15 +103,18 @@ class ZeroTouchViewModel : ViewModel() {
         isRefreshing = true
         viewModelScope.launch {
             try {
+                val existingSessions = _uiState.value.sessions
                 val deviceId = DeviceIdProvider.getDeviceId(context)
-                val response = api.listSessions(deviceId = deviceId, limit = 10)
-                val sorted = response.sessions.sortedByDescending { it.created_at }
-                val cards = sorted.mapNotNull { summary ->
-                    buildTranscriptCard(summary)
-                }
-                val filteredCards = filterDismissed(cards)
+                val response = api.listSessions(deviceId = deviceId, limit = PAGE_SIZE, offset = 0)
+                val fresh = response.sessions.sortedByDescending { it.created_at }
+                val newItems = fresh.count { freshItem -> existingSessions.none { it.id == freshItem.id } }
+                if (newItems > 0) currentOffset += newItems
+                val mergedSessions = mergeSessions(_uiState.value.sessions, fresh)
+                val freshCards = fresh.mapNotNull { summary -> buildTranscriptCard(summary) }
+                val mergedCards = mergeCards(_uiState.value.feedCards, freshCards, mergedSessions)
+                val filteredCards = filterDismissed(mergedCards)
                 _uiState.value = _uiState.value.copy(
-                    sessions = sorted,
+                    sessions = mergedSessions,
                     feedCards = filteredCards,
                     dismissedIds = dismissedIds.toSet(),
                     favoriteIds = favoriteIds.toSet()
@@ -104,6 +123,36 @@ class ZeroTouchViewModel : ViewModel() {
                 // ignore refresh errors
             } finally {
                 isRefreshing = false
+            }
+        }
+    }
+
+    fun loadMoreSessions(context: Context) {
+        if (_uiState.value.isLoadingMore || !hasMore) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoadingMore = true)
+            try {
+                val deviceId = DeviceIdProvider.getDeviceId(context)
+                val response = api.listSessions(deviceId = deviceId, limit = PAGE_SIZE, offset = currentOffset)
+                val nextSessions = response.sessions.sortedByDescending { it.created_at }
+                val mergedSessions = mergeSessions(_uiState.value.sessions, nextSessions)
+                val nextCards = nextSessions.mapNotNull { summary -> buildTranscriptCard(summary) }
+                val mergedCards = mergeCards(_uiState.value.feedCards, nextCards, mergedSessions)
+                val filteredCards = filterDismissed(mergedCards)
+
+                currentOffset += response.sessions.size
+                hasMore = response.count == PAGE_SIZE
+
+                _uiState.value = _uiState.value.copy(
+                    sessions = mergedSessions,
+                    feedCards = filteredCards,
+                    isLoadingMore = false,
+                    hasMore = hasMore,
+                    dismissedIds = dismissedIds.toSet(),
+                    favoriteIds = favoriteIds.toSet()
+                )
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(isLoadingMore = false)
             }
         }
     }
@@ -118,7 +167,8 @@ class ZeroTouchViewModel : ViewModel() {
                 val uploadResult = api.uploadAudio(audioFile, deviceId)
                 Log.d(TAG, "Upload success: session=${uploadResult.session_id}")
 
-                api.transcribe(uploadResult.session_id, autoChain = false)
+                val asrProvider = AmbientPreferences.getAsrProvider(context)
+                api.transcribe(uploadResult.session_id, autoChain = false, provider = asrProvider)
                 Log.d(TAG, "Transcribe triggered for session=${uploadResult.session_id}")
 
                 _uiState.value = _uiState.value.copy(isUploading = false)
@@ -193,6 +243,9 @@ class ZeroTouchViewModel : ViewModel() {
             val displayTitle = buildTitle(sourceTimestamp)
             val displayDate = buildDisplayDate(sourceTimestamp)
             val duration = detail.duration_seconds ?: 0
+            val metadata = detail.transcription_metadata ?: emptyMap()
+            val asrProvider = metadata["provider"] as? String
+            val asrModel = metadata["model"] as? String
             TranscriptCard(
                 id = summary.id,
                 createdAt = summary.created_at,
@@ -203,7 +256,9 @@ class ZeroTouchViewModel : ViewModel() {
                 text = displayText,
                 displayTitle = displayTitle,
                 durationSeconds = duration,
-                displayDate = displayDate
+                displayDate = displayDate,
+                asrProvider = asrProvider,
+                asrModel = asrModel
             )
         } catch (e: Exception) {
             TranscriptCard(
@@ -216,7 +271,9 @@ class ZeroTouchViewModel : ViewModel() {
                 text = "Failed to load",
                 displayTitle = "--:--",
                 durationSeconds = 0,
-                displayDate = ""
+                displayDate = "",
+                asrProvider = null,
+                asrModel = null
             )
         }
     }
@@ -224,6 +281,28 @@ class ZeroTouchViewModel : ViewModel() {
     private fun filterDismissed(cards: List<TranscriptCard>): List<TranscriptCard> {
         if (dismissedIds.isEmpty()) return cards
         return cards.filterNot { dismissedIds.contains(it.id) }
+    }
+
+    private fun mergeSessions(
+        current: List<SessionSummary>,
+        incoming: List<SessionSummary>
+    ): List<SessionSummary> {
+        val map = LinkedHashMap<String, SessionSummary>()
+        (incoming + current).forEach { session ->
+            map[session.id] = session
+        }
+        return map.values.sortedByDescending { it.created_at }
+    }
+
+    private fun mergeCards(
+        current: List<TranscriptCard>,
+        incoming: List<TranscriptCard>,
+        orderedSessions: List<SessionSummary>
+    ): List<TranscriptCard> {
+        val map = LinkedHashMap<String, TranscriptCard>()
+        current.forEach { map[it.id] = it }
+        incoming.forEach { map[it.id] = it }
+        return orderedSessions.mapNotNull { map[it.id] }
     }
 
     private fun buildTitle(timestamp: String?): String {

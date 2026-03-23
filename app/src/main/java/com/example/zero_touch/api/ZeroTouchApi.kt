@@ -95,9 +95,20 @@ class ZeroTouchApi(
         gson.fromJson(response.body!!.string(), UploadResponse::class.java)
     }
 
-    suspend fun transcribe(sessionId: String, autoChain: Boolean = true): Map<String, Any> = withContext(Dispatchers.IO) {
+    suspend fun transcribe(
+        sessionId: String,
+        autoChain: Boolean = true,
+        provider: String? = null,
+        model: String? = null
+    ): Map<String, Any> = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append("$baseUrl/zerotouch/api/transcribe/$sessionId?auto_chain=$autoChain")
+            if (!provider.isNullOrBlank()) append("&provider=$provider")
+            if (!model.isNullOrBlank()) append("&model=$model")
+        }
+
         val request = Request.Builder()
-            .url("$baseUrl/zerotouch/api/transcribe/$sessionId?auto_chain=$autoChain")
+            .url(url)
             .post("".toRequestBody(null))
             .build()
 
@@ -122,9 +133,13 @@ class ZeroTouchApi(
         gson.fromJson(response.body!!.string(), SessionDetail::class.java)
     }
 
-    suspend fun listSessions(deviceId: String? = null, limit: Int = 20): SessionListResponse = withContext(Dispatchers.IO) {
+    suspend fun listSessions(
+        deviceId: String? = null,
+        limit: Int = 20,
+        offset: Int = 0
+    ): SessionListResponse = withContext(Dispatchers.IO) {
         val url = buildString {
-            append("$baseUrl/zerotouch/api/sessions?limit=$limit")
+            append("$baseUrl/zerotouch/api/sessions?limit=$limit&offset=$offset")
             if (deviceId != null) append("&device_id=$deviceId")
         }
 

@@ -91,7 +91,8 @@ class AmbientRecordingService : Service() {
             try {
                 val api = ZeroTouchApi()
                 val upload = api.uploadAudio(file, deviceId)
-                api.transcribe(upload.session_id, autoChain = false)
+                val asrProvider = AmbientPreferences.getAsrProvider(this@AmbientRecordingService)
+                api.transcribe(upload.session_id, autoChain = false, provider = asrProvider)
                 Log.d(TAG, "Uploaded session=${upload.session_id} durationMs=$durationMs")
             } catch (e: Exception) {
                 Log.e(TAG, "Upload failed: ${file.name} ${e.message}")

@@ -110,6 +110,16 @@ fun CardDetailSheet(
                 StatusPill(card.displayStatus, card.status)
             }
 
+            // ASR provider/model
+            val asrLabel = buildAsrLabel(card.asrProvider, card.asrModel)
+            if (asrLabel.isNotBlank()) {
+                Text(
+                    text = "ASR: $asrLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ZtOnSurfaceVariant
+                )
+            }
+
             HorizontalDivider(color = ZtOutline)
 
             // Transcription content (selectable)
@@ -239,5 +249,19 @@ private fun formatDetailDuration(seconds: Int): String {
             "${m}m ${s}s"
         }
         else -> "${seconds}s"
+    }
+}
+
+private fun buildAsrLabel(provider: String?, model: String?): String {
+    val providerLabel = provider?.trim()?.takeIf { it.isNotEmpty() }
+        ?.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+    val modelLabel = model?.trim()?.takeIf { it.isNotEmpty() }
+        ?.let { if (it.contains("/")) it.substringAfter("/") else it }
+
+    return when {
+        providerLabel != null && modelLabel != null -> "$providerLabel · $modelLabel"
+        providerLabel != null -> providerLabel
+        modelLabel != null -> modelLabel
+        else -> ""
     }
 }

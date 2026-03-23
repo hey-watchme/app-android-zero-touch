@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Mic
@@ -66,6 +67,8 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
 fun VoiceMemoScreen(
@@ -75,7 +78,8 @@ fun VoiceMemoScreen(
     onDeleteCard: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onSelectCard: (String) -> Unit,
-    onDismissDetail: () -> Unit
+    onDismissDetail: () -> Unit,
+    onLoadMore: () -> Unit
 ) {
     val context = LocalContext.current
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
@@ -183,6 +187,23 @@ fun VoiceMemoScreen(
         else dateFromEpoch(card.createdAtEpochMs)
     }
 
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(listState, uiState.hasMore, uiState.isLoadingMore, uiState.isLoading, visibleCards.size) {
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            totalItems > 0 && lastVisibleIndex >= totalItems - 3
+        }
+            .distinctUntilChanged()
+            .collect { isNearEnd ->
+                if (isNearEnd && uiState.hasMore && !uiState.isLoadingMore && !uiState.isLoading) {
+                    onLoadMore()
+                }
+            }
+    }
+
     // --- Bottom sheet for card detail ---
     val selectedCard = uiState.selectedCardId?.let { id ->
         mergedCards.find { it.id == id }
@@ -280,6 +301,7 @@ fun VoiceMemoScreen(
             }
             else -> {
                 LazyColumn(
+                    state = listState,
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
@@ -296,6 +318,23 @@ fun VoiceMemoScreen(
                                 onClick = { onSelectCard(card.id) },
                                 onToggleFavorite = { onToggleFavorite(card.id) }
                             )
+                        }
+                    }
+
+                    if (uiState.isLoadingMore) {
+                        item(key = "loading_more") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "Loading more...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ZtOnSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }

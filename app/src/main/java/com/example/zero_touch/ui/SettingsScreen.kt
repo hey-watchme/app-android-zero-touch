@@ -18,6 +18,8 @@ import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,7 +40,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.zero_touch.audio.ambient.AmbientPreferences
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
 import com.example.zero_touch.ui.theme.ZtOutline
@@ -53,7 +57,9 @@ fun SettingsSheet(
     deviceId: String,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var asrProvider by remember { mutableStateOf(AmbientPreferences.getAsrProvider(context)) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -127,6 +133,43 @@ fun SettingsSheet(
                 checked = autoTranscribe,
                 onCheckedChange = { autoTranscribe = it }
             )
+
+            Spacer(Modifier.height(8.dp))
+
+            SectionHeader("Transcription")
+            val providerSubtitle = when (asrProvider) {
+                "deepgram" -> "Deepgram (nova-3) — fast + smart format"
+                else -> "Speechmatics (batch) — diarization + entities"
+            }
+            SettingsRow(
+                icon = Icons.Outlined.Mic,
+                title = "ASR Provider",
+                subtitle = providerSubtitle
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = asrProvider == "speechmatics",
+                        onClick = {
+                            asrProvider = "speechmatics"
+                            AmbientPreferences.setAsrProvider(context, "speechmatics")
+                        },
+                        label = { Text("Speechmatics") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                    FilterChip(
+                        selected = asrProvider == "deepgram",
+                        onClick = {
+                            asrProvider = "deepgram"
+                            AmbientPreferences.setAsrProvider(context, "deepgram")
+                        },
+                        label = { Text("Deepgram") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                }
+            }
 
             Spacer(Modifier.height(8.dp))
             HorizontalDivider(color = ZtOutline)
