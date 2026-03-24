@@ -67,8 +67,12 @@ class AmbientRecordingService : Service() {
                 AmbientStatus.update(status = status)
                 updateNotification(status)
             },
-            onLevelChanged = { level, speech ->
-                AmbientStatus.update(level = level, speech = speech)
+            onLevelChanged = { ambientLevel, voiceLevel, speech ->
+                AmbientStatus.update(
+                    ambientLevel = ambientLevel,
+                    voiceLevel = voiceLevel,
+                    speech = speech
+                )
             },
             onRecordingState = { isRecording, elapsedMs ->
                 AmbientStatus.update(isRecording = isRecording, recordingElapsedMs = elapsedMs)
@@ -86,7 +90,12 @@ class AmbientRecordingService : Service() {
     private fun stopAmbient() {
         recorder?.stop()
         recorder = null
-        AmbientStatus.update(status = "Stopped", level = 0f, speech = false)
+        AmbientStatus.update(
+            status = "Stopped",
+            ambientLevel = 0f,
+            voiceLevel = 0f,
+            speech = false
+        )
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         Log.d(TAG, "Ambient service stopped")

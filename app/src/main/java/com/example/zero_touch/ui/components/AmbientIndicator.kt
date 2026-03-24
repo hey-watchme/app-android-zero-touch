@@ -2,6 +2,7 @@ package com.example.zero_touch.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -15,9 +16,9 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -33,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.zero_touch.audio.ambient.AmbientUiState
 import com.example.zero_touch.ui.theme.ZtCaption
@@ -87,10 +89,12 @@ fun AmbientStatusBar(
                     style = MaterialTheme.typography.labelLarge,
                     color = if (isRecording) ZtRecording else ZtOnSurfaceVariant
                 )
-                if (isRecording) {
-                    Spacer(Modifier.weight(1f))
-                    AudioLevelBar(level = ambientState.level)
-                }
+                Spacer(Modifier.weight(1f))
+                DualLevelEqualizer(
+                    ambientLevel = ambientState.ambientLevel,
+                    voiceLevel = ambientState.voiceLevel,
+                    speechDetected = ambientState.speech
+                )
             }
         }
     }
@@ -144,19 +148,61 @@ private fun PulsingDot(
 }
 
 @Composable
-private fun AudioLevelBar(level: Float) {
-    Box(
-        modifier = Modifier
-            .width(48.dp)
-            .height(4.dp)
-            .clip(RoundedCornerShape(2.dp))
-            .background(ZtOutline)
+private fun DualLevelEqualizer(
+    ambientLevel: Float,
+    voiceLevel: Float,
+    speechDetected: Boolean
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        EqualizerStrip(
+            label = "SND",
+            level = ambientLevel,
+            color = ZtOnSurfaceVariant
+        )
+        EqualizerStrip(
+            label = "VOC",
+            level = voiceLevel,
+            color = if (speechDetected) ZtSuccess else ZtOutline
+        )
+    }
+}
+
+@Composable
+private fun EqualizerStrip(
+    label: String,
+    level: Float,
+    color: Color
+) {
+    val animatedLevel by animateFloatAsState(
+        targetValue = level.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 180),
+        label = "${label}_level"
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(fraction = level.coerceIn(0f, 1f))
-                .background(ZtRecording, RoundedCornerShape(2.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            EQ_PATTERN.forEach { weight ->
+                val barHeight = 3.dp + (10f * animatedLevel * weight).dp
+                val alpha = (0.22f + (animatedLevel * 0.78f * weight)).coerceIn(0.18f, 1f)
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(barHeight)
+                        .clip(RoundedCornerShape(1.5.dp))
+                        .background(color.copy(alpha = alpha))
+                )
+            }
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = ZtCaption
         )
     }
 }
@@ -167,3 +213,5 @@ private fun formatDuration(durationMs: Long): String {
     val seconds = totalSeconds % 60
     return String.format("%d:%02d", minutes, seconds)
 }
+
+private val EQ_PATTERN = floatArrayOf(0.35f, 0.7f, 1f, 0.75f, 0.5f)

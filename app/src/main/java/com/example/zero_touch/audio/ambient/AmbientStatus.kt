@@ -5,7 +5,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 data class AmbientUiState(
     val status: String = "Listening",
-    val level: Float = 0f,
+    val ambientLevel: Float = 0f,
+    val voiceLevel: Float = 0f,
     val speech: Boolean = false,
     val lastFilePath: String? = null,
     val lastDurationMs: Long? = null,
@@ -28,7 +29,8 @@ object AmbientStatus {
 
     fun update(
         status: String? = null,
-        level: Float? = null,
+        ambientLevel: Float? = null,
+        voiceLevel: Float? = null,
         speech: Boolean? = null,
         lastFilePath: String? = null,
         lastDurationMs: Long? = null,
@@ -40,7 +42,8 @@ object AmbientStatus {
         val current = _state.value
         _state.value = current.copy(
             status = status ?: current.status,
-            level = level ?: current.level,
+            ambientLevel = ambientLevel ?: current.ambientLevel,
+            voiceLevel = voiceLevel ?: current.voiceLevel,
             speech = speech ?: current.speech,
             lastFilePath = lastFilePath ?: current.lastFilePath,
             lastDurationMs = lastDurationMs ?: current.lastDurationMs,

@@ -8,12 +8,13 @@ import android.util.Log
 import java.io.File
 import java.util.UUID
 import kotlin.math.ceil
+import kotlin.math.max
 
 class AmbientRecorder(
     private val outputDir: File,
     private val onSessionReady: (File, Long) -> Unit,
     private val onStatusChanged: (String) -> Unit,
-    private val onLevelChanged: (Float, Boolean) -> Unit,
+    private val onLevelChanged: (Float, Float, Boolean) -> Unit,
     private val onRecordingState: (Boolean, Long) -> Unit,
     private val audioSource: Int = MediaRecorder.AudioSource.MIC,
     private val detector: VoiceActivityDetector = VadDetector(),
@@ -120,9 +121,10 @@ class AmbientRecorder(
             }
 
             if (now - lastLevelUpdate >= 200) {
-                val normalized = (result.ratio / 4.0f).coerceIn(0f, 1f)
                 val displaySpeech = now - lastSpeechAt <= displaySpeechHoldMs
-                onLevelChanged(normalized, displaySpeech)
+                val ambientLevel = computeAmbientLevel(result)
+                val voiceLevel = computeVoiceLevel(result, displaySpeech)
+                onLevelChanged(ambientLevel, voiceLevel, displaySpeech)
                 lastLevelUpdate = now
             }
 
@@ -246,8 +248,25 @@ class AmbientRecorder(
         lastVadLogAt = now
     }
 
+    private fun computeAmbientLevel(result: VadResult): Float {
+        val rmsLevel = (result.rms / AMBIENT_RMS_NORMALIZER).coerceIn(0f, 1f)
+        val ratioLevel = (result.ratio / 4f).coerceIn(0f, 1f)
+        return (rmsLevel * 0.65f + ratioLevel * 0.35f).coerceIn(0f, 1f)
+    }
+
+    private fun computeVoiceLevel(result: VadResult, displaySpeech: Boolean): Float {
+        return when {
+            result.isSpeech -> max(result.confidence.coerceIn(0f, 1f), MIN_VOICE_ACTIVE_LEVEL)
+            displaySpeech -> VOICE_TRAIL_LEVEL
+            else -> 0f
+        }
+    }
+
     companion object {
         private const val TAG = "AmbientRecorder"
         private const val VAD_LOG_INTERVAL_MS = 2_000L
+        private const val AMBIENT_RMS_NORMALIZER = 2_500f
+        private const val MIN_VOICE_ACTIVE_LEVEL = 0.2f
+        private const val VOICE_TRAIL_LEVEL = 0.1f
     }
 }
