@@ -149,15 +149,19 @@ fun VoiceMemoScreen(
 
     val pendingCards = pendingRecordings.mapNotNull { entry ->
         val timeTitle = formatTimeOnly(entry.createdAt)
-        val matchedServer = feedCards.any { card ->
-            card.createdAtEpochMs > 0L &&
-                kotlin.math.abs(card.createdAtEpochMs - entry.createdAt) <= 2 * 60_000
+        val matchedServer = if (!entry.sessionId.isNullOrBlank()) {
+            feedCards.any { card -> card.id == entry.sessionId }
+        } else {
+            feedCards.any { card ->
+                card.createdAtEpochMs > 0L &&
+                    kotlin.math.abs(card.createdAtEpochMs - entry.createdAt) <= 20_000
+            }
         }
         val isRecent = now - entry.createdAt <= 10 * 60_000
         if (matchedServer || !isRecent) {
             null
         } else {
-            val id = "local-${entry.createdAt}"
+            val id = if (!entry.sessionId.isNullOrBlank()) "local-${entry.sessionId}" else "local-${entry.createdAt}"
             if (dismissedIds.contains(id)) return@mapNotNull null
             TranscriptCard(
                 id = id,

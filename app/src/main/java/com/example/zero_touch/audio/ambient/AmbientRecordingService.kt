@@ -97,7 +97,8 @@ class AmbientRecordingService : Service() {
         val entry = AmbientRecordingEntry(
             path = file.absolutePath,
             durationMs = durationMs,
-            createdAt = System.currentTimeMillis()
+            createdAt = System.currentTimeMillis(),
+            sessionId = null
         )
         val updated = listOf(entry) + current.recordings
         AmbientStatus.update(
@@ -111,6 +112,13 @@ class AmbientRecordingService : Service() {
             try {
                 val api = ZeroTouchApi()
                 val upload = api.uploadAudio(file, deviceId)
+                val uploaded = AmbientStatus.state.value.recordings.map { item ->
+                    if (item.path == file.absolutePath) item.copy(sessionId = upload.session_id) else item
+                }
+                AmbientStatus.update(
+                    recordings = uploaded,
+                    lastEvent = "Upload completed"
+                )
                 val asrProvider = AmbientPreferences.getAsrProvider(this@AmbientRecordingService)
                 api.transcribe(upload.session_id, autoChain = false, provider = asrProvider)
                 Log.d(TAG, "Uploaded session=${upload.session_id} durationMs=$durationMs")

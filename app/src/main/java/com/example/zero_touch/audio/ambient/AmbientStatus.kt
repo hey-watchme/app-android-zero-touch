@@ -18,7 +18,8 @@ data class AmbientUiState(
 data class AmbientRecordingEntry(
     val path: String,
     val durationMs: Long,
-    val createdAt: Long
+    val createdAt: Long,
+    val sessionId: String? = null
 )
 
 object AmbientStatus {
