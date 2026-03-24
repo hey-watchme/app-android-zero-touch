@@ -13,13 +13,12 @@ class SileroVadDetector(
     private val sampleRate = SampleRate.SAMPLE_RATE_16K
     private val frameSize = FrameSize.FRAME_SIZE_512
     private val mode = Mode.NORMAL
-    private val speechDurationMs = 50
+    private val speechDurationMs = 120
     private val silenceDurationMs = 300
     private val targetFrameSamples = frameSize.value
 
     private var vad: VadSilero? = null
     private var initFailure: String? = null
-    private var lastResult: VadResult? = null
 
     private var bufferedSamples = 0
     private var pendingSamples = ShortArray(targetFrameSamples * 2)
@@ -40,10 +39,11 @@ class SileroVadDetector(
                 reason = initFailure ?: "Silero VAD is unavailable",
                 samples = samples,
                 length = safeLength
-            ).also { lastResult = it }
+            )
         }
 
         var result: VadResult? = null
+        var hasNewInference = false
         while (bufferedSamples >= targetFrameSamples) {
             val frame = takeFrame()
             val speech = runCatching {
@@ -55,19 +55,22 @@ class SileroVadDetector(
                     reason = initFailure ?: "Silero inference failed",
                     samples = frame,
                     length = frame.size
-                ).also { lastResult = it }
+                )
             }
             result = buildSpeechResult(frame, speech)
-            lastResult = result
+            hasNewInference = true
         }
 
-        return result ?: lastResult ?: bufferingResult(samples, safeLength)
+        return if (hasNewInference) {
+            result ?: bufferingResult(samples, safeLength)
+        } else {
+            bufferingResult(samples, safeLength)
+        }
     }
 
     override fun reset() {
         bufferedSamples = 0
         pendingSamples = ShortArray(targetFrameSamples * 2)
-        lastResult = null
         initFailure = null
         close()
         initializeEngine()
