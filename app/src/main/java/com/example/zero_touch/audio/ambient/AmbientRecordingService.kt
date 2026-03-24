@@ -45,6 +45,12 @@ class AmbientRecordingService : Service() {
 
     private fun startAmbient() {
         if (recorder != null) return
+        AmbientStatus.update(
+            status = "Listening",
+            speech = false,
+            isRecording = false,
+            recordingElapsedMs = 0
+        )
         startForeground(NOTIFICATION_ID, buildNotification("Listening"))
         val outputDir = File(filesDir, "ambient/${TimeUtils.todayString()}")
         val selectedSource = AmbientPreferences.getAmbientAudioSource(this)
@@ -94,7 +100,9 @@ class AmbientRecordingService : Service() {
             status = "Stopped",
             ambientLevel = 0f,
             voiceLevel = 0f,
-            speech = false
+            speech = false,
+            isRecording = false,
+            recordingElapsedMs = 0
         )
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()

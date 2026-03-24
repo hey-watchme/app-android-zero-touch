@@ -87,6 +87,7 @@ class AmbientRecorder(
         audioRecord?.release()
         audioRecord = null
         onStatusChanged("Stopped")
+        onRecordingState(false, 0)
     }
 
     private fun startAudioRecord() {
