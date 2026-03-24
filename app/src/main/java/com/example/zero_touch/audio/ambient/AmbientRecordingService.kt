@@ -48,12 +48,18 @@ class AmbientRecordingService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification("Listening"))
         val outputDir = File(filesDir, "ambient/${TimeUtils.todayString()}")
         val selectedSource = AmbientPreferences.getAmbientAudioSource(this)
+        val selectedVadEngine = AmbientPreferences.getVadEngine(this)
         val audioSource = when (selectedSource) {
             "voice_recognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
             else -> MediaRecorder.AudioSource.MIC
         }
         val hpfEnabled = AmbientPreferences.isHighPassFilterEnabled(this)
         val preprocessor = if (hpfEnabled) HighPassAudioPreprocessor() else NoOpAudioPreprocessor
+        val detector = when (selectedVadEngine) {
+            AmbientPreferences.VAD_ENGINE_SILERO -> SileroVadDetector(applicationContext)
+            AmbientPreferences.VAD_ENGINE_WEBRTC -> WebRtcVadDetector()
+            else -> VadDetector()
+        }
         recorder = AmbientRecorder(
             outputDir = outputDir,
             onSessionReady = { file, durationMs -> handleSessionReady(file, durationMs) },
@@ -68,12 +74,12 @@ class AmbientRecordingService : Service() {
                 AmbientStatus.update(isRecording = isRecording, recordingElapsedMs = elapsedMs)
             },
             audioSource = audioSource,
-            detector = VadDetector(),
+            detector = detector,
             preprocessor = preprocessor
         ).also { it.start() }
         Log.d(
             TAG,
-            "Ambient service started audioSource=$selectedSource hpfEnabled=$hpfEnabled detector=threshold"
+            "Ambient service started audioSource=$selectedSource hpfEnabled=$hpfEnabled vadEngine=$selectedVadEngine detector=${detector.javaClass.simpleName}"
         )
     }
 

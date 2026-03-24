@@ -82,6 +82,7 @@ class AmbientRecorder(
         worker?.join(1000)
         worker = null
         stopRecording(finalize = true, reason = "service_stop")
+        detector.close()
         audioRecord?.release()
         audioRecord = null
         onStatusChanged("Stopped")

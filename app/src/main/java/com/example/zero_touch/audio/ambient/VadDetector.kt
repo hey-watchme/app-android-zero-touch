@@ -7,6 +7,8 @@ interface VoiceActivityDetector {
     fun analyze(samples: ShortArray, length: Int): VadResult
 
     fun reset() = Unit
+
+    fun close() = Unit
 }
 
 data class VadResult(

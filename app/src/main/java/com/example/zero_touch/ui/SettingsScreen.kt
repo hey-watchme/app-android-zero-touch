@@ -60,6 +60,7 @@ fun SettingsSheet(
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var asrProvider by remember { mutableStateOf(AmbientPreferences.getAsrProvider(context)) }
+    var vadEngine by remember { mutableStateOf(AmbientPreferences.getVadEngine(context)) }
     var ambientAudioSource by remember {
         mutableStateOf(AmbientPreferences.getAmbientAudioSource(context))
     }
@@ -108,6 +109,47 @@ fun SettingsSheet(
                         activeTrackColor = MaterialTheme.colorScheme.primary
                     )
                 )
+            }
+
+            val vadSubtitle = when (vadEngine) {
+                AmbientPreferences.VAD_ENGINE_SILERO -> "Silero VAD — model-backed detector"
+                AmbientPreferences.VAD_ENGINE_WEBRTC -> "WebRTC VAD — hidden compatibility mode"
+                else -> "Threshold VAD — default lightweight detector"
+            }
+            SettingsRow(
+                icon = Icons.Outlined.Speed,
+                title = "VAD engine",
+                subtitle = vadSubtitle
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = vadEngine == AmbientPreferences.VAD_ENGINE_THRESHOLD,
+                        onClick = {
+                            vadEngine = AmbientPreferences.VAD_ENGINE_THRESHOLD
+                            AmbientPreferences.setVadEngine(
+                                context,
+                                AmbientPreferences.VAD_ENGINE_THRESHOLD
+                            )
+                        },
+                        label = { Text("Threshold") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                    FilterChip(
+                        selected = vadEngine == AmbientPreferences.VAD_ENGINE_SILERO,
+                        onClick = {
+                            vadEngine = AmbientPreferences.VAD_ENGINE_SILERO
+                            AmbientPreferences.setVadEngine(
+                                context,
+                                AmbientPreferences.VAD_ENGINE_SILERO
+                            )
+                        },
+                        label = { Text("Silero") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                }
             }
 
             // Min session length (mock)
