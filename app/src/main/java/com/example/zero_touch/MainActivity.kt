@@ -227,7 +227,8 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
                 onSelectCard = { id -> viewModel.selectCard(id) },
                 onDismissDetail = { viewModel.clearSelection() },
-                onLoadMore = { viewModel.loadMoreSessions(context) }
+                onLoadMore = { viewModel.loadMoreSessions(context) },
+                onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") }
             )
             1 -> TimelineScreen(
                 modifier = Modifier.padding(innerPadding),
@@ -236,7 +237,8 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
                 onSelectCard = { id -> viewModel.selectCard(id) },
                 onDismissDetail = { viewModel.clearSelection() },
-                onLoadMore = { viewModel.loadMoreSessions(context) }
+                onLoadMore = { viewModel.loadMoreSessions(context) },
+                onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") }
             )
             else -> VoiceMemoScreen(
                 modifier = Modifier.padding(innerPadding),
@@ -246,7 +248,8 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
                 onSelectCard = { id -> viewModel.selectCard(id) },
                 onDismissDetail = { viewModel.clearSelection() },
-                onLoadMore = { viewModel.loadMoreSessions(context) }
+                onLoadMore = { viewModel.loadMoreSessions(context) },
+                onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") }
             )
         }
     }

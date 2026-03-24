@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class DeepgramASRService:
     """Deepgram ASR Service using deepgram-sdk v3.x"""
 
-    def __init__(self, model: str = "nova-3"):
+    def __init__(self, model: str = "nova-3", language: str = "ja"):
         api_key = os.getenv("DEEPGRAM_API_KEY")
         if not api_key:
             raise ValueError("DEEPGRAM_API_KEY environment variable not set")
@@ -18,7 +18,8 @@ class DeepgramASRService:
 
         self.client = DeepgramClient(api_key=api_key)
         self.model = model
-        logger.info(f"Deepgram API initialized (model={model})")
+        self.language = language
+        logger.info(f"Deepgram API initialized (model={model}, language={language})")
 
     @retry(
         stop=stop_after_attempt(3),
@@ -40,7 +41,7 @@ class DeepgramASRService:
 
             options = PrerecordedOptions(
                 model=self.model,
-                language="ja",
+                language=self.language,
                 punctuate=True,
                 diarize=True,
                 smart_format=True,
@@ -55,17 +56,17 @@ class DeepgramASRService:
             processing_time = time.time() - start_time
 
             if not response or not getattr(response, "results", None):
-                return _empty_result(processing_time, self.model)
+                return _empty_result(processing_time, self.model, self.language)
 
             results = response.results
             channels = getattr(results, "channels", []) or []
             if not channels or not getattr(channels[0], "alternatives", None):
-                return _empty_result(processing_time, self.model)
+                return _empty_result(processing_time, self.model, self.language)
 
             alternative = channels[0].alternatives[0]
             transcript = (alternative.transcript or "").strip()
             if not transcript:
-                return _empty_result(processing_time, self.model)
+                return _empty_result(processing_time, self.model, self.language)
 
             confidence = getattr(alternative, "confidence", 0.0) or 0.0
             word_count = len(transcript.split())
@@ -99,6 +100,7 @@ class DeepgramASRService:
                 "no_speech_detected": False,
                 "model": f"deepgram/{self.model}",
                 "provider": "deepgram",
+                "language": self.language,
                 "estimated_duration": round(duration, 2) if duration > 0 else None,
             }
 
@@ -107,7 +109,7 @@ class DeepgramASRService:
             raise
 
 
-def _empty_result(processing_time: float, model: str) -> Dict[str, Any]:
+def _empty_result(processing_time: float, model: str, language: str) -> Dict[str, Any]:
     return {
         "transcription": "",
         "processing_time": round(processing_time, 2),
@@ -119,5 +121,6 @@ def _empty_result(processing_time: float, model: str) -> Dict[str, Any]:
         "no_speech_detected": True,
         "model": f"deepgram/{model}",
         "provider": "deepgram",
+        "language": language,
         "estimated_duration": None,
     }

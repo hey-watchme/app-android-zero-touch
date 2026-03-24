@@ -104,12 +104,14 @@ class ZeroTouchApi(
         sessionId: String,
         autoChain: Boolean = true,
         provider: String? = null,
-        model: String? = null
+        model: String? = null,
+        language: String? = null
     ): Map<String, Any> = withContext(Dispatchers.IO) {
         val url = buildString {
             append("$baseUrl/zerotouch/api/transcribe/$sessionId?auto_chain=$autoChain")
             if (!provider.isNullOrBlank()) append("&provider=$provider")
             if (!model.isNullOrBlank()) append("&model=$model")
+            if (!language.isNullOrBlank()) append("&language=$language")
         }
 
         val request = Request.Builder()

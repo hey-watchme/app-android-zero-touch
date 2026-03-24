@@ -85,6 +85,7 @@ def transcribe_background(
                 'word_count': transcription_result.get('word_count', 0),
                 'provider': transcription_result.get('provider', 'unknown'),
                 'model': transcription_result.get('model', 'unknown'),
+                'language': transcription_result.get('language', 'unknown'),
                 'processing_time': transcription_result.get('processing_time', 0.0),
             },
             'duration_seconds': duration_seconds,

@@ -10,13 +10,14 @@ logger = logging.getLogger(__name__)
 class SpeechmaticsASRService:
     """Speechmatics ASR Service using speechmatics-batch SDK"""
 
-    def __init__(self, model: str = "batch"):
+    def __init__(self, model: str = "batch", language: str = "ja"):
         api_key = os.getenv("SPEECHMATICS_API_KEY")
         if not api_key:
             raise ValueError("SPEECHMATICS_API_KEY environment variable not set")
         self.api_key = api_key
         self.model = model
-        logger.info("Speechmatics API initialized")
+        self.language = language
+        logger.info(f"Speechmatics API initialized (model={model}, language={language})")
 
     @retry(
         stop=stop_after_attempt(3),
@@ -38,7 +39,7 @@ class SpeechmaticsASRService:
             client = AsyncClient(api_key=self.api_key)
 
             config = TranscriptionConfig(
-                language="ja",
+                language=self.language,
                 diarization="speaker",
                 enable_entities=True,
                 speaker_diarization_config={
@@ -67,6 +68,7 @@ class SpeechmaticsASRService:
                     "no_speech_detected": True,
                     "model": f"speechmatics/{self.model}",
                     "provider": "speechmatics",
+                    "language": self.language,
                 }
 
             utterances = []
@@ -90,6 +92,7 @@ class SpeechmaticsASRService:
                 "no_speech_detected": False,
                 "model": f"speechmatics/{self.model}",
                 "provider": "speechmatics",
+                "language": self.language,
             }
 
         except Exception as e:

@@ -51,7 +51,8 @@ fun TimelineScreen(
     onToggleFavorite: (String) -> Unit,
     onSelectCard: (String) -> Unit,
     onDismissDetail: () -> Unit,
-    onLoadMore: () -> Unit
+    onLoadMore: () -> Unit,
+    onRetranscribeEnglish: (String) -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
     val ambientState by AmbientStatus.state.collectAsState()
@@ -109,7 +110,8 @@ fun TimelineScreen(
             onDismiss = onDismissDetail,
             onToggleFavorite = { onToggleFavorite(selectedCard.id) },
             onDelete = { onDeleteCard(selectedCard.id) },
-            onCopy = { clipboardManager.setText(AnnotatedString(selectedCard.text)) }
+            onCopy = { clipboardManager.setText(AnnotatedString(selectedCard.text)) },
+            onRetranscribeEnglish = { onRetranscribeEnglish(selectedCard.id) }
         )
     }
 

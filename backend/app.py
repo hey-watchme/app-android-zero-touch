@@ -153,7 +153,13 @@ async def upload_audio(
 # --- Transcribe ---
 
 @app.post("/api/transcribe/{session_id}", status_code=202)
-def transcribe(session_id: str, auto_chain: bool = True, provider: Optional[str] = None, model: Optional[str] = None):
+def transcribe(
+    session_id: str,
+    auto_chain: bool = True,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    language: Optional[str] = None
+):
     """Start transcription (async). If auto_chain=True, auto-generates cards after."""
     # Get session
     result = supabase.table(TABLE)\
@@ -174,7 +180,11 @@ def transcribe(session_id: str, auto_chain: bool = True, provider: Optional[str]
 
     # Resolve ASR provider/model and validate keys before starting the thread
     try:
-        asr_service, resolved_provider, resolved_model = get_asr_service(provider, model)
+        asr_service, resolved_provider, resolved_model, resolved_language = get_asr_service(
+            provider,
+            model,
+            language
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -200,6 +210,7 @@ def transcribe(session_id: str, auto_chain: bool = True, provider: Optional[str]
         "auto_chain": auto_chain,
         "asr_provider": resolved_provider,
         "asr_model": resolved_model,
+        "asr_language": resolved_language,
     }
 
 

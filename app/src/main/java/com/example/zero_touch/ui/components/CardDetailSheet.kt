@@ -17,8 +17,8 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -26,7 +26,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -52,7 +51,8 @@ fun CardDetailSheet(
     onDismiss: () -> Unit,
     onToggleFavorite: () -> Unit,
     onDelete: () -> Unit,
-    onCopy: () -> Unit
+    onCopy: () -> Unit,
+    onRetranscribeEnglish: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -111,7 +111,7 @@ fun CardDetailSheet(
             }
 
             // ASR provider/model
-            val asrLabel = buildAsrLabel(card.asrProvider, card.asrModel)
+            val asrLabel = buildAsrLabel(card.asrProvider, card.asrModel, card.asrLanguage)
             if (asrLabel.isNotBlank()) {
                 Text(
                     text = "ASR: $asrLabel",
@@ -169,6 +169,15 @@ fun CardDetailSheet(
                     },
                     modifier = Modifier.weight(1f),
                     tint = ZtError
+                )
+            }
+
+            if (!card.isProcessing && onRetranscribeEnglish != null) {
+                SheetActionButton(
+                    icon = Icons.Outlined.Refresh,
+                    label = "Re-Transcribe EN",
+                    onClick = onRetranscribeEnglish,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
@@ -252,16 +261,21 @@ private fun formatDetailDuration(seconds: Int): String {
     }
 }
 
-private fun buildAsrLabel(provider: String?, model: String?): String {
+private fun buildAsrLabel(provider: String?, model: String?, language: String?): String {
     val providerLabel = provider?.trim()?.takeIf { it.isNotEmpty() }
         ?.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
     val modelLabel = model?.trim()?.takeIf { it.isNotEmpty() }
         ?.let { if (it.contains("/")) it.substringAfter("/") else it }
+    val languageLabel = language?.trim()?.takeIf { it.isNotEmpty() }
+        ?.uppercase()
 
     return when {
+        providerLabel != null && modelLabel != null && languageLabel != null -> "$providerLabel · $modelLabel · $languageLabel"
         providerLabel != null && modelLabel != null -> "$providerLabel · $modelLabel"
+        providerLabel != null && languageLabel != null -> "$providerLabel · $languageLabel"
         providerLabel != null -> providerLabel
         modelLabel != null -> modelLabel
+        languageLabel != null -> languageLabel
         else -> ""
     }
 }

@@ -79,7 +79,8 @@ fun VoiceMemoScreen(
     onToggleFavorite: (String) -> Unit,
     onSelectCard: (String) -> Unit,
     onDismissDetail: () -> Unit,
-    onLoadMore: () -> Unit
+    onLoadMore: () -> Unit,
+    onRetranscribeEnglish: (String) -> Unit
 ) {
     val context = LocalContext.current
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
@@ -221,7 +222,8 @@ fun VoiceMemoScreen(
             onDelete = { onDeleteCard(selectedCard.id) },
             onCopy = {
                 clipboardManager.setText(AnnotatedString(selectedCard.text))
-            }
+            },
+            onRetranscribeEnglish = { onRetranscribeEnglish(selectedCard.id) }
         )
     }
 

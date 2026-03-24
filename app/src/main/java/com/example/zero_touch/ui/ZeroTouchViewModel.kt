@@ -30,7 +30,8 @@ data class TranscriptCard(
     val durationSeconds: Int = 0,
     val displayDate: String = "",
     val asrProvider: String? = null,
-    val asrModel: String? = null
+    val asrModel: String? = null,
+    val asrLanguage: String? = null
 )
 
 data class ZeroTouchUiState(
@@ -187,6 +188,32 @@ class ZeroTouchViewModel : ViewModel() {
         }
     }
 
+    fun retranscribeSession(
+        context: Context,
+        sessionId: String,
+        language: String = "en"
+    ) {
+        viewModelScope.launch {
+            try {
+                markCardAsTranscribing(sessionId)
+                val asrProvider = AmbientPreferences.getAsrProvider(context)
+                api.transcribe(
+                    sessionId = sessionId,
+                    autoChain = false,
+                    provider = asrProvider,
+                    language = language
+                )
+                Log.d(TAG, "Re-transcribe triggered: session=$sessionId provider=$asrProvider language=$language")
+                refreshSessions(context)
+            } catch (e: Exception) {
+                Log.e(TAG, "Re-transcribe failed: session=$sessionId language=$language", e)
+                _uiState.value = _uiState.value.copy(
+                    error = "Re-transcribe failed: ${e.message}"
+                )
+            }
+        }
+    }
+
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
     }
@@ -249,6 +276,7 @@ class ZeroTouchViewModel : ViewModel() {
             val metadata = detail.transcription_metadata ?: emptyMap()
             val asrProvider = metadata["provider"] as? String
             val asrModel = metadata["model"] as? String
+            val asrLanguage = metadata["language"] as? String
             TranscriptCard(
                 id = summary.id,
                 createdAt = summary.created_at,
@@ -261,7 +289,8 @@ class ZeroTouchViewModel : ViewModel() {
                 durationSeconds = duration,
                 displayDate = displayDate,
                 asrProvider = asrProvider,
-                asrModel = asrModel
+                asrModel = asrModel,
+                asrLanguage = asrLanguage
             )
         } catch (e: Exception) {
             TranscriptCard(
@@ -276,9 +305,27 @@ class ZeroTouchViewModel : ViewModel() {
                 durationSeconds = 0,
                 displayDate = "",
                 asrProvider = null,
-                asrModel = null
+                asrModel = null,
+                asrLanguage = null
             )
         }
+    }
+
+    private fun markCardAsTranscribing(sessionId: String) {
+        val state = _uiState.value
+        val updatedCards = state.feedCards.map { card ->
+            if (card.id != sessionId) {
+                card
+            } else {
+                card.copy(
+                    status = "transcribing",
+                    displayStatus = "Transcribing",
+                    isProcessing = true,
+                    text = "Processing..."
+                )
+            }
+        }
+        _uiState.value = state.copy(feedCards = updatedCards)
     }
 
     private fun filterDismissed(cards: List<TranscriptCard>): List<TranscriptCard> {
