@@ -21,7 +21,7 @@ from services.llm_providers import LLMFactory, get_current_llm
 from services.llm_models import get_model_catalog
 from services.asr_providers import get_asr_service
 from services.background_tasks import transcribe_background, generate_cards_background
-from services.topic_manager import reconcile_topics
+from services.topic_manager import backfill_ungrouped_sessions, reconcile_topics
 
 
 # --- Configuration ---
@@ -104,6 +104,11 @@ class TopicReconcileRequest(BaseModel):
     device_id: Optional[str] = None
     topic_id: Optional[str] = None
     force_finalize: bool = False
+
+
+class TopicBackfillRequest(BaseModel):
+    device_id: Optional[str] = None
+    limit: int = 200
 
 
 # --- Health ---
@@ -377,6 +382,20 @@ def finalize_topic(topic_id: str):
         force_finalize=True,
     )
     return {"status": "ok", "topic_id": topic_id, "result": result}
+
+
+@app.post("/api/topics/backfill")
+def backfill_topics(body: TopicBackfillRequest = None):
+    if body is None:
+        body = TopicBackfillRequest()
+    safe_limit = max(1, min(body.limit, 1000))
+    result = backfill_ungrouped_sessions(
+        supabase=supabase,
+        llm_service=_get_topic_llm_service(),
+        device_id=body.device_id,
+        limit=safe_limit,
+    )
+    return {"status": "ok", "result": result}
 
 
 # --- Sessions ---

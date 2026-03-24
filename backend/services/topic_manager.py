@@ -236,6 +236,14 @@ def _classify_join_or_new(
     return decision, confidence, reason
 
 
+def _fallback_decision_without_llm(
+    gap_seconds: float,
+) -> Tuple[str, Optional[float], str]:
+    if gap_seconds >= FORCE_NEW_TOPIC_GAP_SECONDS:
+        return "new", None, f"Fallback: time gap {int(gap_seconds)}s exceeded threshold"
+    return "join", None, f"Fallback: joined by time gap {int(gap_seconds)}s"
+
+
 def maybe_refresh_live_topic(
     supabase: Client,
     topic_id: str,
@@ -390,18 +398,26 @@ def process_transcribed_session(
                 ascending=True,
             )
             llm_checked = llm_service is not None
-            decision, confidence, reason = _classify_join_or_new(
-                llm_service=llm_service,
-                topic=candidate,
-                recent_utterances=recent,
-                incoming_transcript=transcript,
-            )
-            supabase.table(TOPIC_TABLE).update(
-                {
-                    "last_llm_join_checked_at": _iso_now(),
-                    "updated_at": _iso_now(),
-                }
-            ).eq("id", candidate["id"]).execute()
+            if llm_checked:
+                try:
+                    decision, confidence, reason = _classify_join_or_new(
+                        llm_service=llm_service,
+                        topic=candidate,
+                        recent_utterances=recent,
+                        incoming_transcript=transcript,
+                    )
+                    supabase.table(TOPIC_TABLE).update(
+                        {
+                            "last_llm_join_checked_at": _iso_now(),
+                            "updated_at": _iso_now(),
+                        }
+                    ).eq("id", candidate["id"]).execute()
+                except Exception as llm_error:
+                    decision, confidence, reason = _fallback_decision_without_llm(gap_seconds)
+                    reason = f"{reason}; llm_error={llm_error}"
+                    llm_checked = False
+            else:
+                decision, confidence, reason = _fallback_decision_without_llm(gap_seconds)
 
             if decision == "join":
                 topic = _update_topic_with_session(
@@ -504,4 +520,50 @@ def reconcile_topics(
         "moved_to_cooling": moved_to_cooling,
         "finalized": finalized,
         "force_finalize": force_finalize,
+    }
+
+
+def backfill_ungrouped_sessions(
+    supabase: Client,
+    llm_service=None,
+    device_id: Optional[str] = None,
+    limit: int = 200,
+) -> Dict[str, Any]:
+    query = (
+        supabase.table(SESSION_TABLE)
+        .select("id, device_id, status, transcription, recorded_at, created_at, topic_id")
+        .is_("topic_id", "null")
+        .eq("status", "transcribed")
+        .order("recorded_at", desc=False)
+        .limit(limit)
+    )
+    if device_id:
+        query = query.eq("device_id", device_id)
+
+    rows = query.execute().data or []
+    processed = 0
+    skipped = 0
+    errors = 0
+
+    for row in rows:
+        text = (row.get("transcription") or "").strip()
+        if not text:
+            skipped += 1
+            continue
+        try:
+            process_transcribed_session(
+                session_id=row["id"],
+                supabase=supabase,
+                llm_service=llm_service,
+            )
+            processed += 1
+        except Exception:
+            errors += 1
+
+    return {
+        "target": len(rows),
+        "processed": processed,
+        "skipped": skipped,
+        "errors": errors,
+        "limit": limit,
     }
