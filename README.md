@@ -80,6 +80,7 @@ Android App (Card Display)
 | `/api/models` | GET | 利用可能なLLMモデル一覧 |
 
 ※ `/api/transcribe/{id}` は `provider` / `model` のクエリ指定に対応（例: `?provider=deepgram&model=nova-3`）
+※ `/api/transcribe/{id}` は `language` のクエリ指定に対応（例: `?language=en`）。`ja`, `en` をサポート。
 
 ### データベース
 
@@ -111,6 +112,8 @@ cp .env.example .env
 # ASR:
 # - Speechmatics: SPEECHMATICS_API_KEY
 # - Deepgram: DEEPGRAM_API_KEY
+# Optional:
+# - ASR_PROVIDER / ASR_MODEL / ASR_LANGUAGE（デフォルト設定）
 
 python3 -m venv venv
 source venv/bin/activate
@@ -146,7 +149,9 @@ android-zero-touch/
 │       │       ├── AmbientRecordingService.kt
 │       │       ├── AmbientRecorder.kt
 │       │       ├── Mp4AudioWriter.kt
+│       │       ├── SileroVadDetector.kt
 │       │       ├── VadDetector.kt
+│       │       ├── WebRtcVadDetector.kt
 │       │       ├── PcmRingBuffer.kt
 │       │       └── AmbientStatus.kt
 │       └── ui/
@@ -193,3 +198,24 @@ android-zero-touch/
 - 企画書: `docs/ambient-agent-spec.md`
 - モデルプロジェクト: `/Users/kaya.matsumoto/projects/watchme/business`
 - WatchMe インフラ: `/Users/kaya.matsumoto/projects/watchme/server-configs`
+
+## 最近の変更（運用メモ / 2026-03-24）
+
+### Listeningの可視化（2軸）
+
+- `SND`: 環境音レベル（物音なども含む）
+- `VOC`: VADが「声」と判定した度合い
+
+実装: `app/src/main/java/com/example/zero_touch/ui/components/AmbientIndicator.kt`
+
+### VAD関連（オンデバイス）
+
+- 設定で `VAD engine` / `Audio source` / `High-pass filter` を切り替え可能
+- `Silero VAD` を実装（声の判定はこれがメイン）
+- `WebRTC VAD` は現状未実装（選択しても `supported=false` 扱い）
+
+### 英語会議の再トランスクライブ
+
+- カード詳細に `Re-Transcribe EN` ボタンを追加（事後的に英語で再文字起こし）
+- API: `POST /api/transcribe/{id}?language=en`（`ja|en`）
+- `transcription_metadata.language` に実際に使った言語を保存
