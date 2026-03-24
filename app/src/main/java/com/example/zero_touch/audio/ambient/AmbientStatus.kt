@@ -12,6 +12,7 @@ data class AmbientUiState(
     val lastDurationMs: Long? = null,
     val isRecording: Boolean = false,
     val recordingElapsedMs: Long = 0,
+    val recordingHeartbeatAt: Long = 0,
     val recordings: List<AmbientRecordingEntry> = emptyList(),
     val lastEvent: String? = null
 )
@@ -36,6 +37,7 @@ object AmbientStatus {
         lastDurationMs: Long? = null,
         isRecording: Boolean? = null,
         recordingElapsedMs: Long? = null,
+        recordingHeartbeatAt: Long? = null,
         recordings: List<AmbientRecordingEntry>? = null,
         lastEvent: String? = null
     ) {
@@ -49,6 +51,7 @@ object AmbientStatus {
             lastDurationMs = lastDurationMs ?: current.lastDurationMs,
             isRecording = isRecording ?: current.isRecording,
             recordingElapsedMs = recordingElapsedMs ?: current.recordingElapsedMs,
+            recordingHeartbeatAt = recordingHeartbeatAt ?: current.recordingHeartbeatAt,
             recordings = recordings ?: current.recordings,
             lastEvent = lastEvent ?: current.lastEvent
         )

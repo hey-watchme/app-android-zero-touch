@@ -331,7 +331,7 @@ class ZeroTouchApi(
         val type = object : TypeToken<Map<String, Any>>() {}.type
         val envelope: Map<String, Any> = gson.fromJson(body, type)
         val settings = envelope["settings"]
-        return if (settings is Map<*, *>) {
+        if (settings is Map<*, *>) {
             val json = gson.toJson(settings)
             gson.fromJson(json, DeviceSettings::class.java)
         } else {

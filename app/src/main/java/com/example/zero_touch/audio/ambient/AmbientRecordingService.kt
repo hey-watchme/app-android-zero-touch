@@ -9,6 +9,7 @@ import android.content.Intent
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.zero_touch.api.DeviceIdProvider
@@ -16,12 +17,14 @@ import com.example.zero_touch.api.ZeroTouchApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
 class AmbientRecordingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var recorder: AmbientRecorder? = null
+    private var monitorRunning = false
 
     override fun onCreate() {
         super.onCreate()
@@ -49,7 +52,8 @@ class AmbientRecordingService : Service() {
             status = "Listening",
             speech = false,
             isRecording = false,
-            recordingElapsedMs = 0
+            recordingElapsedMs = 0,
+            recordingHeartbeatAt = SystemClock.elapsedRealtime()
         )
         startForeground(NOTIFICATION_ID, buildNotification("Listening"))
         val outputDir = File(filesDir, "ambient/${TimeUtils.todayString()}")
@@ -81,12 +85,17 @@ class AmbientRecordingService : Service() {
                 )
             },
             onRecordingState = { isRecording, elapsedMs ->
-                AmbientStatus.update(isRecording = isRecording, recordingElapsedMs = elapsedMs)
+                AmbientStatus.update(
+                    isRecording = isRecording,
+                    recordingElapsedMs = elapsedMs,
+                    recordingHeartbeatAt = SystemClock.elapsedRealtime()
+                )
             },
             audioSource = audioSource,
             detector = detector,
             preprocessor = preprocessor
         ).also { it.start() }
+        startMonitor()
         Log.d(
             TAG,
             "Ambient service started audioSource=$selectedSource hpfEnabled=$hpfEnabled vadEngine=$selectedVadEngine detector=${detector.javaClass.simpleName}"
@@ -96,13 +105,15 @@ class AmbientRecordingService : Service() {
     private fun stopAmbient() {
         recorder?.stop()
         recorder = null
+        monitorRunning = false
         AmbientStatus.update(
             status = "Stopped",
             ambientLevel = 0f,
             voiceLevel = 0f,
             speech = false,
             isRecording = false,
-            recordingElapsedMs = 0
+            recordingElapsedMs = 0,
+            recordingHeartbeatAt = SystemClock.elapsedRealtime()
         )
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -171,11 +182,36 @@ class AmbientRecordingService : Service() {
         manager.createNotificationChannel(channel)
     }
 
+    private fun startMonitor() {
+        if (monitorRunning) return
+        monitorRunning = true
+        scope.launch {
+            while (monitorRunning) {
+                delay(1000)
+                val state = AmbientStatus.state.value
+                if (!state.isRecording) continue
+                val ageMs = SystemClock.elapsedRealtime() - state.recordingHeartbeatAt
+                if (ageMs <= RECORDING_STALE_THRESHOLD_MS) continue
+                Log.w(TAG, "Recording heartbeat stale (${ageMs}ms). Restarting recorder.")
+                recorder?.stop()
+                recorder = null
+                AmbientStatus.update(
+                    status = "Listening",
+                    isRecording = false,
+                    recordingElapsedMs = 0,
+                    recordingHeartbeatAt = SystemClock.elapsedRealtime()
+                )
+                startAmbient()
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "AmbientService"
         private const val CHANNEL_ID = "zerotouch_ambient"
         private const val NOTIFICATION_ID = 7001
         private const val MAX_RECORDINGS = 50
+        private const val RECORDING_STALE_THRESHOLD_MS = 4000L
         const val ACTION_START = "com.example.zero_touch.AMBIENT_START"
         const val ACTION_STOP = "com.example.zero_touch.AMBIENT_STOP"
     }

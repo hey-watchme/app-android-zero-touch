@@ -148,7 +148,6 @@ fun VoiceMemoScreen(
     val dismissedIds = uiState.dismissedIds
     val favoriteIds = uiState.favoriteIds
     val now = System.currentTimeMillis()
-    var showTopicMode by remember { mutableStateOf(!showFavoritesOnly) }
 
     val pendingCards = pendingRecordings.mapNotNull { entry ->
         val timeTitle = formatTimeOnly(entry.createdAt)
@@ -303,14 +302,6 @@ fun VoiceMemoScreen(
         // Search bar (mock, non-functional)
         SearchBarMock()
 
-        if (!showFavoritesOnly) {
-            Spacer(Modifier.height(10.dp))
-            FeedModeToggle(
-                showTopicMode = showTopicMode,
-                onSwitch = { showTopicMode = it }
-            )
-        }
-
         Spacer(Modifier.height(16.dp))
 
         // Feed list
@@ -318,52 +309,46 @@ fun VoiceMemoScreen(
             uiState.isLoading && visibleCards.isEmpty() && visibleTopicCards.isEmpty() -> {
                 ShimmerCardList(count = 3)
             }
-            showTopicMode && visibleTopicCards.isNotEmpty() -> {
-                val groupedTopics = visibleTopicCards.groupBy { it.displayDate.ifEmpty { "Unknown" } }
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 16.dp)
-                ) {
-                    groupedTopics.forEach { (dateLabel, topics) ->
-                        item(key = "topic_header_$dateLabel") {
-                            DateHeader(dateLabel)
-                        }
-                        items(topics, key = { it.id }) { topic ->
-                            TopicGroupCard(
-                                topic = topic,
-                                favoriteIds = favoriteIds,
-                                onSelectCard = onSelectCard,
-                                onToggleFavorite = onToggleFavorite
-                            )
-                        }
-                    }
-                }
-            }
-            showTopicMode && visibleTopicCards.isEmpty() -> {
-                EmptyStateView(showFavoritesOnly = false)
-            }
-            visibleCards.isEmpty() -> {
-                EmptyStateView(showFavoritesOnly = showFavoritesOnly)
-            }
             else -> {
                 LazyColumn(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
-                    groupedCards.forEach { (dateLabel, cards) ->
-                        // Date header
-                        item(key = "header_$dateLabel") {
-                            DateHeader(dateLabel)
+                    if (visibleCards.isEmpty() && visibleTopicCards.isEmpty()) {
+                        item(key = "empty_state") {
+                            EmptyStateView(showFavoritesOnly = showFavoritesOnly)
                         }
-                        // Cards for this date
-                        items(cards, key = { it.id }) { card ->
-                            TranscriptCardView(
-                                card = card,
-                                isFavorite = favoriteIds.contains(card.id),
-                                onClick = { onSelectCard(card.id) },
-                                onToggleFavorite = { onToggleFavorite(card.id) }
-                            )
+                    } else {
+                        groupedCards.forEach { (dateLabel, cards) ->
+                            item(key = "header_$dateLabel") {
+                                DateHeader(dateLabel)
+                            }
+                            items(cards, key = { it.id }) { card ->
+                                TranscriptCardView(
+                                    card = card,
+                                    isFavorite = favoriteIds.contains(card.id),
+                                    onClick = { onSelectCard(card.id) },
+                                    onToggleFavorite = { onToggleFavorite(card.id) }
+                                )
+                            }
+                        }
+
+                        if (visibleTopicCards.isNotEmpty()) {
+                            val groupedTopics = visibleTopicCards.groupBy { it.displayDate.ifEmpty { "Unknown" } }
+                            groupedTopics.forEach { (dateLabel, topics) ->
+                                item(key = "topic_header_$dateLabel") {
+                                    DateHeader(dateLabel)
+                                }
+                                items(topics, key = { it.id }) { topic ->
+                                    TopicGroupCard(
+                                        topic = topic,
+                                        favoriteIds = favoriteIds,
+                                        onSelectCard = onSelectCard,
+                                        onToggleFavorite = onToggleFavorite
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -390,52 +375,6 @@ fun VoiceMemoScreen(
 }
 
 // --- Sub-composables ---
-
-@Composable
-private fun FeedModeToggle(
-    showTopicMode: Boolean,
-    onSwitch: (Boolean) -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Surface(
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(10.dp),
-                color = if (showTopicMode) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant,
-                onClick = { onSwitch(true) }
-            ) {
-                Text(
-                    text = "Topics",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (showTopicMode) MaterialTheme.colorScheme.primary else ZtOnSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 10.dp),
-                )
-            }
-            Surface(
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(10.dp),
-                color = if (!showTopicMode) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant,
-                onClick = { onSwitch(false) }
-            ) {
-                Text(
-                    text = "Cards",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (!showTopicMode) MaterialTheme.colorScheme.primary else ZtOnSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 10.dp),
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun TopicGroupCard(

@@ -58,6 +58,7 @@ class AmbientRecorder(
     private var vadLogUnsupportedFrames = 0
     private var vadLogRmsSum = 0f
     private var vadLogRatioSum = 0f
+    private var consecutiveReadErrors = 0
 
     fun start() {
         if (running) return
@@ -104,58 +105,85 @@ class AmbientRecorder(
 
     private fun captureLoop() {
         val record = audioRecord ?: return
-        while (running) {
-            val read = record.read(frameBuffer, 0, frameSamples, AudioRecord.READ_BLOCKING)
-            if (read <= 0) continue
-            ringBuffer.write(frameBuffer, read)
-            val processed = preprocessor.process(frameBuffer, read)
-            val result = detector.analyze(processed, processed.size)
-            val speech = result.isSpeech
-
-            val now = SystemClock.elapsedRealtime()
-            updateVadDebugStats(result, now)
-            if (speech) {
-                speechScore = (speechScore + 2).coerceAtMost(startDebounceFrames)
-                lastSpeechAt = now
-            } else {
-                speechScore = (speechScore - 1).coerceAtLeast(0)
-            }
-
-            if (now - lastLevelUpdate >= 200) {
-                val displaySpeech = now - lastSpeechAt <= displaySpeechHoldMs
-                val ambientLevel = computeAmbientLevel(result)
-                val voiceLevel = computeVoiceLevel(result, displaySpeech)
-                onLevelChanged(ambientLevel, voiceLevel, displaySpeech)
-                lastLevelUpdate = now
-            }
-
-            if (!recordingActive) {
-                if (speechScore >= startDebounceFrames) {
-                    startRecording(result)
+        try {
+            while (running) {
+                val read = record.read(frameBuffer, 0, frameSamples, AudioRecord.READ_BLOCKING)
+                val now = SystemClock.elapsedRealtime()
+                if (read <= 0) {
+                    consecutiveReadErrors++
+                    if (recordingActive) {
+                        val elapsedMs = now - sessionStartElapsed
+                        if (now - lastRecordingTick >= 500) {
+                            onRecordingState(true, elapsedMs)
+                            lastRecordingTick = now
+                        }
+                    }
+                    if (consecutiveReadErrors >= MAX_READ_ERRORS) {
+                        Log.w(TAG, "AudioRecord read errors=$consecutiveReadErrors; stopping recording")
+                        if (recordingActive) {
+                            stopRecording(finalize = true, reason = "read_error")
+                        }
+                        consecutiveReadErrors = 0
+                    }
+                    continue
                 }
-                continue
-            }
+                consecutiveReadErrors = 0
+                ringBuffer.write(frameBuffer, read)
+                val processed = preprocessor.process(frameBuffer, read)
+                val result = detector.analyze(processed, processed.size)
+                val speech = result.isSpeech
 
-            writer?.writePcm(frameBuffer, read)
-            recordedSamples += read
+                updateVadDebugStats(result, now)
+                if (speech) {
+                    speechScore = (speechScore + 2).coerceAtMost(startDebounceFrames)
+                    lastSpeechAt = now
+                } else {
+                    speechScore = (speechScore - 1).coerceAtLeast(0)
+                }
 
-            if (speech) {
-                silenceFrames = 0
-            } else {
-                silenceFrames++
-            }
+                if (now - lastLevelUpdate >= 200) {
+                    val displaySpeech = now - lastSpeechAt <= displaySpeechHoldMs
+                    val ambientLevel = computeAmbientLevel(result)
+                    val voiceLevel = computeVoiceLevel(result, displaySpeech)
+                    onLevelChanged(ambientLevel, voiceLevel, displaySpeech)
+                    lastLevelUpdate = now
+                }
 
-            val silenceMs = silenceFrames * frameMs
-            val elapsedMs = SystemClock.elapsedRealtime() - sessionStartElapsed
+                if (!recordingActive) {
+                    if (speechScore >= startDebounceFrames) {
+                        startRecording(result)
+                    }
+                    continue
+                }
 
-            if (silenceMs >= silenceStopMs || elapsedMs >= maxSessionMs) {
-                val reason = if (silenceMs >= silenceStopMs) "silence_timeout" else "max_session_timeout"
-                stopRecording(finalize = true, reason = reason)
+                writer?.writePcm(frameBuffer, read)
+                recordedSamples += read
+
+                if (speech) {
+                    silenceFrames = 0
+                } else {
+                    silenceFrames++
+                }
+
+                val silenceMs = silenceFrames * frameMs
+                val elapsedMs = now - sessionStartElapsed
+
+                if (silenceMs >= silenceStopMs || elapsedMs >= maxSessionMs) {
+                    val reason = if (silenceMs >= silenceStopMs) "silence_timeout" else "max_session_timeout"
+                    stopRecording(finalize = true, reason = reason)
+                }
+                if (now - lastRecordingTick >= 500) {
+                    onRecordingState(true, elapsedMs)
+                    lastRecordingTick = now
+                }
             }
-            if (now - lastRecordingTick >= 500) {
-                onRecordingState(true, elapsedMs)
-                lastRecordingTick = now
+        } catch (e: Exception) {
+            Log.e(TAG, "Capture loop failed: ${e.message}", e)
+            if (recordingActive) {
+                stopRecording(finalize = true, reason = "capture_exception")
             }
+            onStatusChanged("Error")
+            onRecordingState(false, 0)
         }
     }
 
@@ -265,6 +293,7 @@ class AmbientRecorder(
 
     companion object {
         private const val TAG = "AmbientRecorder"
+        private const val MAX_READ_ERRORS = 10
         private const val VAD_LOG_INTERVAL_MS = 2_000L
         private const val AMBIENT_RMS_NORMALIZER = 2_500f
         private const val MIN_VOICE_ACTIVE_LEVEL = 0.2f
