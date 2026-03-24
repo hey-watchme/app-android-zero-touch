@@ -143,10 +143,12 @@ fun VoiceMemoScreen(
 
     // --- Data preparation ---
     val feedCards = uiState.feedCards
+    val topicCards = uiState.topicCards
     val pendingRecordings = ambientState.recordings
     val dismissedIds = uiState.dismissedIds
     val favoriteIds = uiState.favoriteIds
     val now = System.currentTimeMillis()
+    var showTopicMode by remember { mutableStateOf(!showFavoritesOnly) }
 
     val pendingCards = pendingRecordings.mapNotNull { entry ->
         val timeTitle = formatTimeOnly(entry.createdAt)
@@ -180,10 +182,16 @@ fun VoiceMemoScreen(
     }.take(5)
 
     val mergedCards = pendingCards + feedCards
+    val topicChildren = topicCards.flatMap { it.utterances }
     val visibleCards = if (showFavoritesOnly) {
         mergedCards.filter { favoriteIds.contains(it.id) }
     } else {
         mergedCards
+    }
+    val visibleTopicCards = if (showFavoritesOnly) {
+        emptyList()
+    } else {
+        topicCards
     }
 
     // Group cards by date
@@ -211,7 +219,7 @@ fun VoiceMemoScreen(
 
     // --- Bottom sheet for card detail ---
     val selectedCard = uiState.selectedCardId?.let { id ->
-        mergedCards.find { it.id == id }
+        (mergedCards + topicChildren).distinctBy { it.id }.find { it.id == id }
     }
     if (selectedCard != null) {
         CardDetailSheet(
@@ -295,12 +303,44 @@ fun VoiceMemoScreen(
         // Search bar (mock, non-functional)
         SearchBarMock()
 
+        if (!showFavoritesOnly) {
+            Spacer(Modifier.height(10.dp))
+            FeedModeToggle(
+                showTopicMode = showTopicMode,
+                onSwitch = { showTopicMode = it }
+            )
+        }
+
         Spacer(Modifier.height(16.dp))
 
-        // Card list
+        // Feed list
         when {
-            uiState.isLoading && feedCards.isEmpty() -> {
+            uiState.isLoading && visibleCards.isEmpty() && visibleTopicCards.isEmpty() -> {
                 ShimmerCardList(count = 3)
+            }
+            showTopicMode && visibleTopicCards.isNotEmpty() -> {
+                val groupedTopics = visibleTopicCards.groupBy { it.displayDate.ifEmpty { "Unknown" } }
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    groupedTopics.forEach { (dateLabel, topics) ->
+                        item(key = "topic_header_$dateLabel") {
+                            DateHeader(dateLabel)
+                        }
+                        items(topics, key = { it.id }) { topic ->
+                            TopicGroupCard(
+                                topic = topic,
+                                favoriteIds = favoriteIds,
+                                onSelectCard = onSelectCard,
+                                onToggleFavorite = onToggleFavorite
+                            )
+                        }
+                    }
+                }
+            }
+            showTopicMode && visibleTopicCards.isEmpty() -> {
+                EmptyStateView(showFavoritesOnly = false)
             }
             visibleCards.isEmpty() -> {
                 EmptyStateView(showFavoritesOnly = showFavoritesOnly)
@@ -350,6 +390,138 @@ fun VoiceMemoScreen(
 }
 
 // --- Sub-composables ---
+
+@Composable
+private fun FeedModeToggle(
+    showTopicMode: Boolean,
+    onSwitch: (Boolean) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                color = if (showTopicMode) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant,
+                onClick = { onSwitch(true) }
+            ) {
+                Text(
+                    text = "Topics",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (showTopicMode) MaterialTheme.colorScheme.primary else ZtOnSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 10.dp),
+                )
+            }
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                color = if (!showTopicMode) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant,
+                onClick = { onSwitch(false) }
+            ) {
+                Text(
+                    text = "Cards",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (!showTopicMode) MaterialTheme.colorScheme.primary else ZtOnSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 10.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TopicGroupCard(
+    topic: TopicFeedCard,
+    favoriteIds: Set<String>,
+    onSelectCard: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = topic.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "${topic.utteranceCount} utterances",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtCaption
+                    )
+                }
+                TopicStatusBadge(topic.status)
+            }
+
+            if (topic.summary.isNotBlank()) {
+                Text(
+                    text = topic.summary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ZtOnSurfaceVariant
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                topic.utterances.forEach { utterance ->
+                    TranscriptCardView(
+                        card = utterance,
+                        isFavorite = favoriteIds.contains(utterance.id),
+                        onClick = { onSelectCard(utterance.id) },
+                        onToggleFavorite = { onToggleFavorite(utterance.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TopicStatusBadge(status: String) {
+    val label = when (status) {
+        "active" -> "Live"
+        "cooling" -> "Cooling"
+        "finalized" -> "Finalized"
+        else -> status
+    }
+    val color = when (status) {
+        "active" -> MaterialTheme.colorScheme.primary
+        "cooling" -> MaterialTheme.colorScheme.tertiary
+        "finalized" -> ZtOnSurfaceVariant
+        else -> ZtOnSurfaceVariant
+    }
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = color.copy(alpha = 0.12f)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+    }
+}
 
 @Composable
 private fun AmbientToggleChip(

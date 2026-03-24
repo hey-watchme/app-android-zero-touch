@@ -25,7 +25,7 @@
 **ASRプロバイダー**: Speechmatics / Deepgram（アプリの設定から選択）
 
 > 重要: ZeroTouch は WatchMe のインフラ（同一 Supabase / S3 / EC2）を「間借り」していますが、  
-> **DB は `zerotouch_sessions` のみ**を使用する POC です。WatchMe 本家の既存テーブル/パイプラインには触れません。
+> **DB は `zerotouch_sessions`（発言）と `conversation_topics`（会話グループ）**のみを使用する POC です。WatchMe 本家の既存テーブル/パイプラインには触れません。
 
 ## 対象タブレット
 
@@ -45,7 +45,7 @@ Backend API (FastAPI :8061)
   ↓ ASR (Speechmatics / Deepgram)
 Transcription
   ↓
-Supabase (zerotouch_sessions)
+Supabase (zerotouch_sessions / conversation_topics)
   ↓ Polling (5s)
 Android App (Card Display)
 ```
@@ -84,7 +84,9 @@ Android App (Card Display)
 
 ### データベース
 
-- テーブル: `zerotouch_sessions`（Supabase、同一プロジェクト）
+- テーブル:
+  - `zerotouch_sessions`（発言単位）
+  - `conversation_topics`（発言を束ねるトピック単位）
 - ステータス遷移: `recording → uploaded → transcribing → transcribed → generating → completed / failed`
   - ※ 現在は `transcribed` までを利用
 
@@ -128,6 +130,7 @@ Supabase SQL Editorで以下を順に実行:
 
 1. `backend/migrations/001_create_zerotouch_sessions.sql`
 2. `backend/migrations/002_lockdown_zerotouch_sessions_rls.sql`（推奨: anon/authenticated からの直接アクセスを遮断）
+3. `backend/migrations/003_add_conversation_topics.sql`
 
 ### Android
 
@@ -178,7 +181,9 @@ android-zero-touch/
 │   │   └── asr_providers/
 │   │       └── speechmatics_provider.py
 │   ├── migrations/
-│   │   └── 001_create_zerotouch_sessions.sql
+│   │   ├── 001_create_zerotouch_sessions.sql
+│   │   ├── 002_lockdown_zerotouch_sessions_rls.sql
+│   │   └── 003_add_conversation_topics.sql
 │   ├── Dockerfile
 │   ├── docker-compose.prod.yml
 │   └── requirements.txt
