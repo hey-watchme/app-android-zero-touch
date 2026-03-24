@@ -80,3 +80,98 @@ Output ONLY the following JSON structure. No explanation before or after.
 """
 
     return prompt
+
+
+def build_topic_join_prompt(
+    topic_live_title: str,
+    topic_live_summary: str,
+    recent_utterances: list[str],
+    incoming_utterance: str,
+) -> str:
+    recent_text = "\n".join(
+        [f"- {line}" for line in recent_utterances if (line or "").strip()]
+    ) or "- (no context yet)"
+
+    return f"""You are classifying whether a new utterance belongs to an existing conversation topic.
+
+Decide if the incoming utterance should be attached to the existing topic context.
+Output ONLY JSON:
+{{
+  "decision": "join | new | unsure",
+  "confidence": 0.0,
+  "reason": "short reason"
+}}
+
+Existing topic title:
+{topic_live_title or "(none)"}
+
+Existing topic live summary:
+{topic_live_summary or "(none)"}
+
+Recent utterances in topic:
+{recent_text}
+
+Incoming utterance:
+{incoming_utterance or "(empty)"}
+"""
+
+
+def build_topic_live_update_prompt(
+    current_title: str,
+    current_summary: str,
+    utterances: list[str],
+) -> str:
+    transcript = "\n".join([f"- {line}" for line in utterances if (line or "").strip()])
+    return f"""You are updating a live conversation card for an ambient agent UI.
+
+Requirements:
+- Keep output concise and neutral.
+- The title should be specific but short (max 30 chars if possible).
+- Summary should be 1 sentence.
+- Do not invent facts that are not in the utterances.
+
+Output ONLY JSON:
+{{
+  "live_title": "string",
+  "live_summary": "string"
+}}
+
+Current title:
+{current_title or "(none)"}
+
+Current summary:
+{current_summary or "(none)"}
+
+Latest utterances:
+{transcript or "- (none)"}
+"""
+
+
+def build_topic_finalize_prompt(utterances: list[str]) -> str:
+    transcript = "\n".join([f"- {line}" for line in utterances if (line or "").strip()])
+    return f"""You are finalizing a completed conversation topic from ambient capture.
+
+Produce:
+1) final title
+2) final summary
+3) task candidates when concrete actions are present
+4) topic type
+
+Output ONLY JSON:
+{{
+  "final_title": "string",
+  "final_summary": "string",
+  "topic_type": "reservation_call | customer_support | internal_ops | casual_chat | unknown",
+  "task_candidates": [
+    {{
+      "title": "string",
+      "detail": "string",
+      "priority": "high | normal | low",
+      "due_hint": "string | null"
+    }}
+  ]
+}}
+
+Conversation utterances (ordered):
+{transcript or "- (none)"}
+"""

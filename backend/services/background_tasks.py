@@ -14,6 +14,7 @@ from datetime import datetime
 import boto3
 from supabase import Client
 from services.prompts import build_card_generation_prompt
+from services.topic_manager import process_transcribed_session, reconcile_topics
 
 
 TABLE = "zerotouch_sessions"
@@ -39,7 +40,8 @@ def transcribe_background(
     supabase: Client,
     asr_service,
     auto_chain: bool = True,
-    llm_service=None
+    llm_service=None,
+    topic_llm_service=None,
 ):
     """
     Background: download audio from S3, transcribe with ASR provider.
@@ -95,6 +97,22 @@ def transcribe_background(
 
         processing_time = time.time() - start_time
         print(f"[Background] Transcription completed in {processing_time:.2f}s for session: {session_id}")
+
+        # Assign transcribed utterance into a conversation topic.
+        try:
+            topic_result = process_transcribed_session(
+                session_id=session_id,
+                supabase=supabase,
+                llm_service=topic_llm_service,
+            )
+            print(f"[Background] Topic assignment: {topic_result}")
+            reconcile_topics(
+                supabase=supabase,
+                llm_service=topic_llm_service,
+                device_id=topic_result.get("device_id"),
+            )
+        except Exception as topic_error:
+            print(f"[Background] Topic assignment skipped due to error: {topic_error}")
 
         # Auto-chain to card generation
         if auto_chain and llm_service:

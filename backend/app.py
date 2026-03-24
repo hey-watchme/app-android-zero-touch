@@ -14,13 +14,14 @@ import boto3
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Dict, Optional
 from supabase import create_client, Client
 
 from services.llm_providers import LLMFactory, get_current_llm
 from services.llm_models import get_model_catalog
 from services.asr_providers import get_asr_service
 from services.background_tasks import transcribe_background, generate_cards_background
+from services.topic_manager import reconcile_topics
 
 
 # --- Configuration ---
@@ -30,6 +31,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 S3_BUCKET = os.getenv("S3_BUCKET", "watchme-vault")
 AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-2")
 TABLE = "zerotouch_sessions"
+TOPIC_TABLE = "conversation_topics"
 
 
 # --- Globals ---
@@ -98,11 +100,25 @@ class GenerateCardsRequest(BaseModel):
     use_custom_prompt: Optional[bool] = False
 
 
+class TopicReconcileRequest(BaseModel):
+    device_id: Optional[str] = None
+    topic_id: Optional[str] = None
+    force_finalize: bool = False
+
+
 # --- Health ---
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "zerotouch-api", "version": "0.1.0"}
+
+
+def _get_topic_llm_service():
+    try:
+        return get_current_llm()
+    except Exception as exc:
+        print(f"[ZeroTouch] Topic LLM unavailable, fallback to rule-based grouping: {exc}")
+        return None
 
 
 # --- Upload ---
@@ -177,6 +193,7 @@ def transcribe(
 
     # Get LLM service for auto-chain
     llm_service = get_current_llm() if auto_chain else None
+    topic_llm_service = _get_topic_llm_service()
 
     # Resolve ASR provider/model and validate keys before starting the thread
     try:
@@ -200,6 +217,7 @@ def transcribe(
             "asr_service": asr_service,
             "auto_chain": auto_chain,
             "llm_service": llm_service,
+            "topic_llm_service": topic_llm_service,
         }
     )
     thread.start()
@@ -255,6 +273,110 @@ def generate_cards(session_id: str, body: GenerateCardsRequest = None):
     thread.start()
 
     return {"session_id": session_id, "status": "generating"}
+
+
+# --- Topics ---
+
+@app.get("/api/topics")
+def list_topics(
+    device_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+    include_children: bool = False,
+):
+    query = (
+        supabase.table(TOPIC_TABLE)
+        .select("*")
+        .order("last_utterance_at", desc=True)
+        .range(offset, offset + limit - 1)
+    )
+
+    if device_id:
+        query = query.eq("device_id", device_id)
+    if status:
+        query = query.eq("topic_status", status)
+
+    topics = query.execute().data or []
+
+    if include_children and topics:
+        topic_ids = [topic["id"] for topic in topics if topic.get("id")]
+        child_rows: list[Dict[str, Any]] = []
+        if topic_ids:
+            child_rows = (
+                supabase.table(TABLE)
+                .select(
+                    "id, topic_id, device_id, status, transcription, duration_seconds, "
+                    "recorded_at, created_at, updated_at"
+                )
+                .in_("topic_id", topic_ids)
+                .order("created_at", desc=False)
+                .execute()
+                .data
+                or []
+            )
+        children_map: Dict[str, list[Dict[str, Any]]] = {}
+        for row in child_rows:
+            children_map.setdefault(row.get("topic_id"), []).append(row)
+        for topic in topics:
+            topic["utterances"] = children_map.get(topic.get("id"), [])
+
+    return {"topics": topics, "count": len(topics)}
+
+
+@app.get("/api/topics/{topic_id}")
+def get_topic(topic_id: str):
+    topic = (
+        supabase.table(TOPIC_TABLE)
+        .select("*")
+        .eq("id", topic_id)
+        .single()
+        .execute()
+        .data
+    )
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    utterances = (
+        supabase.table(TABLE)
+        .select(
+            "id, topic_id, device_id, status, transcription, duration_seconds, "
+            "s3_audio_path, transcription_metadata, recorded_at, created_at, updated_at"
+        )
+        .eq("topic_id", topic_id)
+        .order("created_at", desc=False)
+        .execute()
+        .data
+        or []
+    )
+
+    return {"topic": topic, "utterances": utterances, "count": len(utterances)}
+
+
+@app.post("/api/topics/reconcile")
+def reconcile_topic_groups(body: TopicReconcileRequest = None):
+    if body is None:
+        body = TopicReconcileRequest()
+
+    result = reconcile_topics(
+        supabase=supabase,
+        llm_service=_get_topic_llm_service(),
+        device_id=body.device_id,
+        topic_id=body.topic_id,
+        force_finalize=body.force_finalize,
+    )
+    return {"status": "ok", "result": result}
+
+
+@app.post("/api/topics/{topic_id}/finalize")
+def finalize_topic(topic_id: str):
+    result = reconcile_topics(
+        supabase=supabase,
+        llm_service=_get_topic_llm_service(),
+        topic_id=topic_id,
+        force_finalize=True,
+    )
+    return {"status": "ok", "topic_id": topic_id, "result": result}
 
 
 # --- Sessions ---
