@@ -175,3 +175,45 @@ Output ONLY JSON:
 Conversation utterances (ordered):
 {transcript or "- (none)"}
 """
+
+
+def build_topic_batch_group_prompt(sessions: list[dict]) -> str:
+    lines: list[str] = []
+    for session in sessions:
+        session_id = str(session.get("id") or "").strip()
+        transcription = str(session.get("transcription") or "").strip()
+        recorded_at = str(session.get("recorded_at") or session.get("created_at") or "").strip()
+        if not session_id or not transcription:
+            continue
+        lines.append(f"- id={session_id} at={recorded_at} text={transcription}")
+
+    transcript = "\n".join(lines) or "- (none)"
+
+    return f"""You are grouping ambient conversation cards into finalized topics.
+
+You will receive session cards for a single device and a single evaluation run.
+Return grouped topics with a short title and summary.
+
+Rules:
+- Use ONLY the provided session IDs.
+- Every provided session ID must be assigned to exactly one topic.
+- Do not invent or drop session IDs.
+- If all cards are about one thing, return one topic.
+- If a card is short (for example one phrase), still assign it to a topic.
+- Keep title short and concrete.
+- Summary should be one concise sentence.
+
+Output ONLY JSON:
+{{
+  "topics": [
+    {{
+      "title": "string",
+      "summary": "string",
+      "session_ids": ["uuid", "uuid"]
+    }}
+  ]
+}}
+
+Sessions:
+{transcript}
+"""

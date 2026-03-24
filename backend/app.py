@@ -21,6 +21,7 @@ from services.llm_providers import LLMFactory, get_current_llm
 from services.llm_models import get_model_catalog
 from services.asr_providers import get_asr_service
 from services.background_tasks import transcribe_background, generate_cards_background
+from services.topic_manager_process2 import process_pending_topics_for_device
 from services.topic_manager import backfill_ungrouped_sessions, reconcile_topics
 
 
@@ -31,7 +32,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 S3_BUCKET = os.getenv("S3_BUCKET", "watchme-vault")
 AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-2")
 TABLE = "zerotouch_sessions"
-TOPIC_TABLE = "conversation_topics"
+TOPIC_TABLE = os.getenv("TOPIC_TABLE", "zerotouch_conversation_topics")
 
 
 # --- Globals ---
@@ -109,6 +110,13 @@ class TopicReconcileRequest(BaseModel):
 class TopicBackfillRequest(BaseModel):
     device_id: Optional[str] = None
     limit: int = 200
+
+
+class TopicEvaluatePendingRequest(BaseModel):
+    device_id: str
+    force: bool = False
+    idle_seconds: int = 60
+    max_sessions: int = 200
 
 
 # --- Health ---
@@ -394,6 +402,21 @@ def backfill_topics(body: TopicBackfillRequest = None):
         llm_service=_get_topic_llm_service(),
         device_id=body.device_id,
         limit=safe_limit,
+    )
+    return {"status": "ok", "result": result}
+
+
+@app.post("/api/topics/evaluate-pending")
+def evaluate_pending_topics(body: TopicEvaluatePendingRequest):
+    safe_idle = max(10, min(body.idle_seconds, 3600))
+    safe_max_sessions = max(1, min(body.max_sessions, 500))
+    result = process_pending_topics_for_device(
+        supabase=supabase,
+        device_id=body.device_id,
+        llm_service=_get_topic_llm_service(),
+        idle_seconds=safe_idle,
+        max_sessions=safe_max_sessions,
+        force=body.force,
     )
     return {"status": "ok", "result": result}
 

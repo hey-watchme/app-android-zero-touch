@@ -22,6 +22,9 @@
 **パイプライン**: アンビエント録音 → S3アップロード → ASR文字起こし（Speechmatics / Deepgram）→ アプリ表示  
 ※ **LLM カード生成は一旦停止中**（`/api/generate-cards` は未使用）
 
+この方式は、会話パイプライン設計上の **`Process 1`** として扱います。  
+試行中の設計メモは `docs/conversation-pipeline-processes.md` を参照してください。
+
 **ASRプロバイダー**: Speechmatics / Deepgram（アプリの設定から選択）
 
 > 重要: ZeroTouch は WatchMe のインフラ（同一 Supabase / S3 / EC2）を「間借り」していますが、  
@@ -75,6 +78,9 @@ Android App (Card Display)
 | `/api/upload` | POST | 音声をS3にアップロード、セッション作成 |
 | `/api/transcribe/{id}` | POST | 文字起こし開始（202 Accepted） |
 | `/api/generate-cards/{id}` | POST | カード生成開始（202 Accepted / 現在は未使用） |
+| `/api/topics` | GET | トピック一覧取得 |
+| `/api/topics/{topic_id}` | GET | トピック詳細取得 |
+| `/api/topics/evaluate-pending` | POST | `device_id` 単位で pending 発言を Process 2 評価 |
 | `/api/sessions/{id}` | GET | セッション詳細取得 |
 | `/api/sessions` | GET | セッション一覧 |
 | `/api/models` | GET | 利用可能なLLMモデル一覧 |
@@ -86,7 +92,8 @@ Android App (Card Display)
 
 - テーブル:
   - `zerotouch_sessions`（発言単位）
-  - `conversation_topics`（発言を束ねるトピック単位）
+  - `zerotouch_conversation_topics`（発言を束ねるトピック単位）
+  - `zerotouch_topic_evaluation_runs`（Process 2 の評価バッチ管理）
 - ステータス遷移: `recording → uploaded → transcribing → transcribed → generating → completed / failed`
   - ※ 現在は `transcribed` までを利用
 
@@ -116,6 +123,7 @@ cp .env.example .env
 # - Deepgram: DEEPGRAM_API_KEY
 # Optional:
 # - ASR_PROVIDER / ASR_MODEL / ASR_LANGUAGE（デフォルト設定）
+# - TOPIC_PIPELINE_MODE（`process1` または `process2`、デフォルト: `process2`）
 
 python3 -m venv venv
 source venv/bin/activate
@@ -131,6 +139,7 @@ Supabase SQL Editorで以下を順に実行:
 1. `backend/migrations/001_create_zerotouch_sessions.sql`
 2. `backend/migrations/002_lockdown_zerotouch_sessions_rls.sql`（推奨: anon/authenticated からの直接アクセスを遮断）
 3. `backend/migrations/003_add_conversation_topics.sql`
+4. `backend/migrations/004_process2_topic_pipeline.sql`
 
 ### Android
 
@@ -178,17 +187,20 @@ android-zero-touch/
 │   │   ├── llm_models.py       # モデルカタログ
 │   │   ├── prompts.py          # カード生成プロンプト
 │   │   ├── background_tasks.py  # 非同期処理
+│   │   ├── topic_manager_process2.py # Process 2 (60秒無発言バッチ評価)
 │   │   └── asr_providers/
 │   │       └── speechmatics_provider.py
 │   ├── migrations/
 │   │   ├── 001_create_zerotouch_sessions.sql
 │   │   ├── 002_lockdown_zerotouch_sessions_rls.sql
-│   │   └── 003_add_conversation_topics.sql
+│   │   ├── 003_add_conversation_topics.sql
+│   │   └── 004_process2_topic_pipeline.sql
 │   ├── Dockerfile
 │   ├── docker-compose.prod.yml
 │   └── requirements.txt
 └── docs/
-    └── ambient-agent-spec.md    # 企画書
+    ├── ambient-agent-spec.md    # 企画書
+    └── conversation-pipeline-processes.md # Process 1 / 2 試行メモ
 ```
 
 ## 今後の拡張（Phase 2+）
@@ -201,6 +213,7 @@ android-zero-touch/
 ## 参考
 
 - 企画書: `docs/ambient-agent-spec.md`
+- 会話パイプライン試行メモ: `docs/conversation-pipeline-processes.md`
 - モデルプロジェクト: `/Users/kaya.matsumoto/projects/watchme/business`
 - WatchMe インフラ: `/Users/kaya.matsumoto/projects/watchme/server-configs`
 

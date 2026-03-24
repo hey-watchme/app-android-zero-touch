@@ -10,10 +10,15 @@ import io
 import json
 import time
 import asyncio
+import threading
 from datetime import datetime
 import boto3
 from supabase import Client
 from services.prompts import build_card_generation_prompt
+from services.topic_manager_process2 import (
+    mark_session_for_topic_evaluation,
+    process_pending_topics_for_device,
+)
 from services.topic_manager import (
     force_assign_session_as_new_topic,
     process_transcribed_session,
@@ -22,6 +27,7 @@ from services.topic_manager import (
 
 
 TABLE = "zerotouch_sessions"
+TOPIC_PIPELINE_MODE = os.getenv("TOPIC_PIPELINE_MODE", "process2").strip().lower()
 
 
 def _format_llm_error(error: Exception) -> str:
@@ -34,6 +40,27 @@ def _format_llm_error(error: Exception) -> str:
     if any(k in lower for k in ['not found', 'invalid model', '404', 'unsupported model']):
         return f"LLM model error: {message}"
     return f"LLM generation failed: {message}"
+
+
+def _run_delayed_process2_evaluation(
+    device_id: str,
+    supabase: Client,
+    topic_llm_service,
+    delay_seconds: int = 65,
+):
+    safe_delay = max(5, min(delay_seconds, 300))
+    time.sleep(safe_delay)
+    try:
+        result = process_pending_topics_for_device(
+            supabase=supabase,
+            device_id=device_id,
+            llm_service=topic_llm_service,
+            idle_seconds=60,
+            force=False,
+        )
+        print(f"[Background] Process2 delayed evaluate result: {result}")
+    except Exception as error:
+        print(f"[Background] Process2 delayed evaluate failed: device={device_id} error={error}")
 
 
 def transcribe_background(
@@ -102,29 +129,66 @@ def transcribe_background(
         processing_time = time.time() - start_time
         print(f"[Background] Transcription completed in {processing_time:.2f}s for session: {session_id}")
 
-        # Assign transcribed utterance into a conversation topic.
-        try:
-            topic_result = process_transcribed_session(
-                session_id=session_id,
-                supabase=supabase,
-                llm_service=topic_llm_service,
-            )
-            print(f"[Background] Topic assignment: {topic_result}")
-            reconcile_topics(
-                supabase=supabase,
-                llm_service=topic_llm_service,
-                device_id=topic_result.get("device_id"),
-            )
-        except Exception as topic_error:
-            print(f"[Background] Topic assignment failed, trying hard fallback: {topic_error}")
+        # Topic pipeline mode:
+        # - process2: queue card -> evaluate by device after 60s without new utterances
+        # - process1: legacy immediate topic assignment
+        if TOPIC_PIPELINE_MODE == "process2":
             try:
-                fallback_result = force_assign_session_as_new_topic(
+                queue_result = mark_session_for_topic_evaluation(
                     session_id=session_id,
                     supabase=supabase,
                 )
-                print(f"[Background] Topic hard fallback result: {fallback_result}")
-            except Exception as fallback_error:
-                print(f"[Background] Topic hard fallback also failed: {fallback_error}")
+                print(f"[Background] Process2 queue result: {queue_result}")
+                device_id = queue_result.get("device_id")
+                if queue_result.get("queued") and device_id:
+                    eval_result = process_pending_topics_for_device(
+                        supabase=supabase,
+                        device_id=device_id,
+                        llm_service=topic_llm_service,
+                        idle_seconds=60,
+                    )
+                    print(f"[Background] Process2 evaluate result: {eval_result}")
+                    # Ensure Process 2 still runs when no new utterance arrives after this one.
+                    delay_seconds = 65
+                    if eval_result.get("reason") == "idle_threshold_not_reached":
+                        elapsed = int(eval_result.get("idle_elapsed_seconds") or 0)
+                        threshold = int(eval_result.get("idle_threshold_seconds") or 60)
+                        delay_seconds = max(5, (threshold - elapsed) + 5)
+                    threading.Thread(
+                        target=_run_delayed_process2_evaluation,
+                        kwargs={
+                            "device_id": device_id,
+                            "supabase": supabase,
+                            "topic_llm_service": topic_llm_service,
+                            "delay_seconds": delay_seconds,
+                        },
+                        daemon=True,
+                    ).start()
+            except Exception as topic_error:
+                print(f"[Background] Process2 topic pipeline failed: {topic_error}")
+        else:
+            try:
+                topic_result = process_transcribed_session(
+                    session_id=session_id,
+                    supabase=supabase,
+                    llm_service=topic_llm_service,
+                )
+                print(f"[Background] Topic assignment: {topic_result}")
+                reconcile_topics(
+                    supabase=supabase,
+                    llm_service=topic_llm_service,
+                    device_id=topic_result.get("device_id"),
+                )
+            except Exception as topic_error:
+                print(f"[Background] Topic assignment failed, trying hard fallback: {topic_error}")
+                try:
+                    fallback_result = force_assign_session_as_new_topic(
+                        session_id=session_id,
+                        supabase=supabase,
+                    )
+                    print(f"[Background] Topic hard fallback result: {fallback_result}")
+                except Exception as fallback_error:
+                    print(f"[Background] Topic hard fallback also failed: {fallback_error}")
 
         # Auto-chain to card generation
         if auto_chain and llm_service:

@@ -5,6 +5,7 @@ Topic grouping and lifecycle management for ZeroTouch conversations.
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,7 +20,7 @@ from services.prompts import (
 
 
 SESSION_TABLE = "zerotouch_sessions"
-TOPIC_TABLE = "conversation_topics"
+TOPIC_TABLE = os.getenv("TOPIC_TABLE", "zerotouch_conversation_topics")
 
 STATUS_ACTIVE = "active"
 STATUS_COOLING = "cooling"
