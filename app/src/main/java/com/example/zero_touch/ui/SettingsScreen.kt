@@ -60,6 +60,12 @@ fun SettingsSheet(
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var asrProvider by remember { mutableStateOf(AmbientPreferences.getAsrProvider(context)) }
+    var ambientAudioSource by remember {
+        mutableStateOf(AmbientPreferences.getAmbientAudioSource(context))
+    }
+    var hpfEnabled by remember {
+        mutableStateOf(AmbientPreferences.isHighPassFilterEnabled(context))
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -170,6 +176,57 @@ fun SettingsSheet(
                     )
                 }
             }
+
+            Spacer(Modifier.height(8.dp))
+
+            SectionHeader("Ambient")
+            val ambientSubtitle = when (ambientAudioSource) {
+                "voice_recognition" -> "Voice recognition stream — system-level input"
+                else -> "Microphone input — raw ambient audio"
+            }
+            SettingsRow(
+                icon = Icons.Outlined.Mic,
+                title = "Audio source",
+                subtitle = ambientSubtitle
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = ambientAudioSource == "mic",
+                        onClick = {
+                            ambientAudioSource = "mic"
+                            AmbientPreferences.setAmbientAudioSource(context, "mic")
+                        },
+                        label = { Text("Mic") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                    FilterChip(
+                        selected = ambientAudioSource == "voice_recognition",
+                        onClick = {
+                            ambientAudioSource = "voice_recognition"
+                            AmbientPreferences.setAmbientAudioSource(
+                                context,
+                                "voice_recognition"
+                            )
+                        },
+                        label = { Text("Voice recognition") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                }
+            }
+
+            SettingsToggleRow(
+                icon = Icons.Outlined.Speed,
+                title = "High-pass filter",
+                subtitle = "Reduce low-frequency noise before transcription",
+                checked = hpfEnabled,
+                onCheckedChange = {
+                    hpfEnabled = it
+                    AmbientPreferences.setHighPassFilterEnabled(context, it)
+                }
+            )
 
             Spacer(Modifier.height(8.dp))
             HorizontalDivider(color = ZtOutline)

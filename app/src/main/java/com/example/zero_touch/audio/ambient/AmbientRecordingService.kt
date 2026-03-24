@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -46,6 +47,13 @@ class AmbientRecordingService : Service() {
         if (recorder != null) return
         startForeground(NOTIFICATION_ID, buildNotification("Listening"))
         val outputDir = File(filesDir, "ambient/${TimeUtils.todayString()}")
+        val selectedSource = AmbientPreferences.getAmbientAudioSource(this)
+        val audioSource = when (selectedSource) {
+            "voice_recognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+            else -> MediaRecorder.AudioSource.MIC
+        }
+        val hpfEnabled = AmbientPreferences.isHighPassFilterEnabled(this)
+        val preprocessor = if (hpfEnabled) HighPassAudioPreprocessor() else NoOpAudioPreprocessor
         recorder = AmbientRecorder(
             outputDir = outputDir,
             onSessionReady = { file, durationMs -> handleSessionReady(file, durationMs) },
@@ -58,9 +66,15 @@ class AmbientRecordingService : Service() {
             },
             onRecordingState = { isRecording, elapsedMs ->
                 AmbientStatus.update(isRecording = isRecording, recordingElapsedMs = elapsedMs)
-            }
+            },
+            audioSource = audioSource,
+            detector = VadDetector(),
+            preprocessor = preprocessor
         ).also { it.start() }
-        Log.d(TAG, "Ambient service started")
+        Log.d(
+            TAG,
+            "Ambient service started audioSource=$selectedSource hpfEnabled=$hpfEnabled detector=threshold"
+        )
     }
 
     private fun stopAmbient() {

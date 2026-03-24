@@ -14,7 +14,10 @@ class AmbientRecorder(
     private val onSessionReady: (File, Long) -> Unit,
     private val onStatusChanged: (String) -> Unit,
     private val onLevelChanged: (Float, Boolean) -> Unit,
-    private val onRecordingState: (Boolean, Long) -> Unit
+    private val onRecordingState: (Boolean, Long) -> Unit,
+    private val audioSource: Int = MediaRecorder.AudioSource.MIC,
+    private val detector: VoiceActivityDetector = VadDetector(),
+    private val preprocessor: AudioPreprocessor = NoOpAudioPreprocessor
 ) {
     private val sampleRate = 16_000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
@@ -30,7 +33,6 @@ class AmbientRecorder(
     private val preRollSeconds = 2
     private val bitRate = 64_000
 
-    private val vad = VadDetector()
     private val ringBuffer = PcmRingBuffer(sampleRate, preRollSeconds)
     private val frameBuffer = ShortArray(frameSamples)
 
@@ -49,11 +51,23 @@ class AmbientRecorder(
     private var currentFile: File? = null
     private var writer: Mp4AudioWriter? = null
     private val startDebounceFrames = (startDebounceMs / frameMs).coerceAtLeast(1)
+    private var lastVadLogAt = 0L
+    private var vadLogFrames = 0
+    private var vadLogSpeechFrames = 0
+    private var vadLogUnsupportedFrames = 0
+    private var vadLogRmsSum = 0f
+    private var vadLogRatioSum = 0f
 
     fun start() {
         if (running) return
         running = true
         onStatusChanged("Listening")
+        detector.reset()
+        preprocessor.reset()
+        Log.d(
+            TAG,
+            "Ambient recorder start source=$audioSource detector=${detector.javaClass.simpleName} preprocessor=${preprocessor.javaClass.simpleName}"
+        )
         startAudioRecord()
         worker = Thread { captureLoop() }.apply { start() }
     }
@@ -67,7 +81,7 @@ class AmbientRecorder(
         }
         worker?.join(1000)
         worker = null
-        stopRecording(finalize = true)
+        stopRecording(finalize = true, reason = "service_stop")
         audioRecord?.release()
         audioRecord = null
         onStatusChanged("Stopped")
@@ -77,7 +91,7 @@ class AmbientRecorder(
         val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
         val bufferSize = maxOf(minBuffer, frameSamples * 4)
         audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            audioSource,
             sampleRate,
             channelConfig,
             audioFormat,
@@ -91,10 +105,12 @@ class AmbientRecorder(
             val read = record.read(frameBuffer, 0, frameSamples, AudioRecord.READ_BLOCKING)
             if (read <= 0) continue
             ringBuffer.write(frameBuffer, read)
-            val result = vad.analyze(frameBuffer, read)
+            val processed = preprocessor.process(frameBuffer, read)
+            val result = detector.analyze(processed, processed.size)
             val speech = result.isSpeech
 
             val now = SystemClock.elapsedRealtime()
+            updateVadDebugStats(result, now)
             if (speech) {
                 speechScore = (speechScore + 2).coerceAtMost(startDebounceFrames)
                 lastSpeechAt = now
@@ -111,7 +127,7 @@ class AmbientRecorder(
 
             if (!recordingActive) {
                 if (speechScore >= startDebounceFrames) {
-                    startRecording()
+                    startRecording(result)
                 }
                 continue
             }
@@ -129,7 +145,8 @@ class AmbientRecorder(
             val elapsedMs = SystemClock.elapsedRealtime() - sessionStartElapsed
 
             if (silenceMs >= silenceStopMs || elapsedMs >= maxSessionMs) {
-                stopRecording(finalize = true)
+                val reason = if (silenceMs >= silenceStopMs) "silence_timeout" else "max_session_timeout"
+                stopRecording(finalize = true, reason = reason)
             }
             if (now - lastRecordingTick >= 500) {
                 onRecordingState(true, elapsedMs)
@@ -138,7 +155,7 @@ class AmbientRecorder(
         }
     }
 
-    private fun startRecording() {
+    private fun startRecording(trigger: VadResult) {
         if (recordingActive) return
         outputDir.mkdirs()
         val file = File(outputDir, "ambient_${System.currentTimeMillis()}_${UUID.randomUUID()}.m4a")
@@ -167,9 +184,13 @@ class AmbientRecorder(
         recordingActive = true
         onStatusChanged("Recording")
         onRecordingState(true, 0)
+        Log.d(
+            TAG,
+            "Recording started reason=speech_confirmed score=$speechScore rms=${trigger.rms} ratio=${trigger.ratio} zcr=${trigger.zeroCrossingRate} engine=${trigger.engine}"
+        )
     }
 
-    private fun stopRecording(finalize: Boolean) {
+    private fun stopRecording(finalize: Boolean, reason: String) {
         if (!recordingActive) return
         recordingActive = false
         writer?.stop()
@@ -182,10 +203,10 @@ class AmbientRecorder(
         if (file == null) return
 
         if (durationMs < minSessionMs) {
-            Log.d(TAG, "Discard short session: ${file.name} (${durationMs}ms)")
+            Log.d(TAG, "Discard short session reason=min_duration file=${file.name} durationMs=$durationMs")
             file.delete()
         } else if (finalize) {
-            Log.d(TAG, "Session ready: ${file.name} (${durationMs}ms)")
+            Log.d(TAG, "Session ready: ${file.name} (${durationMs}ms) stopReason=$reason")
             onSessionReady(file, durationMs)
         }
         recordedSamples = 0
@@ -193,7 +214,39 @@ class AmbientRecorder(
         onRecordingState(false, durationMs)
     }
 
+    private fun updateVadDebugStats(result: VadResult, now: Long) {
+        vadLogFrames++
+        if (result.isSpeech) vadLogSpeechFrames++
+        if (!result.supported) vadLogUnsupportedFrames++
+        vadLogRmsSum += result.rms
+        vadLogRatioSum += result.ratio
+
+        if (lastVadLogAt == 0L) {
+            lastVadLogAt = now
+            return
+        }
+        if (now - lastVadLogAt < VAD_LOG_INTERVAL_MS) return
+
+        val frames = vadLogFrames.coerceAtLeast(1)
+        val avgRms = vadLogRmsSum / frames
+        val avgRatio = vadLogRatioSum / frames
+        val speechRate = vadLogSpeechFrames.toFloat() / frames
+        val unsupportedRate = vadLogUnsupportedFrames.toFloat() / frames
+        Log.d(
+            TAG,
+            "VAD stats engine=${result.engine} frames=$frames speechRate=${"%.2f".format(speechRate)} unsupportedRate=${"%.2f".format(unsupportedRate)} avgRms=${"%.1f".format(avgRms)} avgRatio=${"%.2f".format(avgRatio)} recording=$recordingActive"
+        )
+
+        vadLogFrames = 0
+        vadLogSpeechFrames = 0
+        vadLogUnsupportedFrames = 0
+        vadLogRmsSum = 0f
+        vadLogRatioSum = 0f
+        lastVadLogAt = now
+    }
+
     companion object {
         private const val TAG = "AmbientRecorder"
+        private const val VAD_LOG_INTERVAL_MS = 2_000L
     }
 }
