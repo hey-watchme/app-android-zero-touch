@@ -62,9 +62,7 @@ import com.example.zero_touch.ui.components.ShimmerCardList
 import com.example.zero_touch.ui.components.TranscriptCardView
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import androidx.compose.runtime.snapshotFlow
@@ -142,66 +140,18 @@ fun VoiceMemoScreen(
     }
 
     // --- Data preparation ---
-    val feedCards = uiState.feedCards
     val topicCards = uiState.topicCards
-    val pendingRecordings = ambientState.recordings
-    val dismissedIds = uiState.dismissedIds
     val favoriteIds = uiState.favoriteIds
-    val now = System.currentTimeMillis()
-
-    val pendingCards = pendingRecordings.mapNotNull { entry ->
-        val timeTitle = formatTimeOnly(entry.createdAt)
-        val matchedServer = if (!entry.sessionId.isNullOrBlank()) {
-            feedCards.any { card -> card.id == entry.sessionId }
-        } else {
-            feedCards.any { card ->
-                card.createdAtEpochMs > 0L &&
-                    kotlin.math.abs(card.createdAtEpochMs - entry.createdAt) <= 20_000
-            }
-        }
-        val isRecent = now - entry.createdAt <= 10 * 60_000
-        if (matchedServer || !isRecent) {
-            null
-        } else {
-            val id = if (!entry.sessionId.isNullOrBlank()) "local-${entry.sessionId}" else "local-${entry.createdAt}"
-            if (dismissedIds.contains(id)) return@mapNotNull null
-            TranscriptCard(
-                id = id,
-                createdAt = "",
-                createdAtEpochMs = entry.createdAt,
-                status = "pending",
-                displayStatus = "Processing",
-                isProcessing = true,
-                text = "",
-                displayTitle = timeTitle,
-                durationSeconds = 0,
-                displayDate = "Today"
-            )
-        }
-    }.take(5)
-
-    val mergedCards = pendingCards + feedCards
     val topicChildren = topicCards.flatMap { it.utterances }
-    val visibleCards = if (showFavoritesOnly) {
-        mergedCards.filter { favoriteIds.contains(it.id) }
-    } else {
-        mergedCards
-    }
     val visibleTopicCards = if (showFavoritesOnly) {
         emptyList()
     } else {
         topicCards
     }
 
-    // Group cards by date
-    val groupedCards = visibleCards.groupBy { card ->
-        if (card.displayDate.isNotEmpty()) card.displayDate
-        else dateFromEpoch(card.createdAtEpochMs)
-    }
-
     val listState = rememberLazyListState()
 
-    LaunchedEffect(listState, uiState.hasMore, uiState.isLoadingMore, uiState.isLoading, visibleCards.size) {
+    LaunchedEffect(listState, uiState.hasMore, uiState.isLoadingMore, uiState.isLoading, visibleTopicCards.size) {
         snapshotFlow {
             val layoutInfo = listState.layoutInfo
             val totalItems = layoutInfo.totalItemsCount
@@ -218,7 +168,7 @@ fun VoiceMemoScreen(
 
     // --- Bottom sheet for card detail ---
     val selectedCard = uiState.selectedCardId?.let { id ->
-        (mergedCards + topicChildren).distinctBy { it.id }.find { it.id == id }
+        topicChildren.distinctBy { it.id }.find { it.id == id }
     }
     if (selectedCard != null) {
         CardDetailSheet(
@@ -304,9 +254,9 @@ fun VoiceMemoScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // Feed list
+        // Feed list (topics only)
         when {
-            uiState.isLoading && visibleCards.isEmpty() && visibleTopicCards.isEmpty() -> {
+            uiState.isLoading && visibleTopicCards.isEmpty() -> {
                 ShimmerCardList(count = 3)
             }
             else -> {
@@ -315,39 +265,23 @@ fun VoiceMemoScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
-                    if (visibleCards.isEmpty() && visibleTopicCards.isEmpty()) {
+                    if (visibleTopicCards.isEmpty()) {
                         item(key = "empty_state") {
                             EmptyStateView(showFavoritesOnly = showFavoritesOnly)
                         }
                     } else {
-                        groupedCards.forEach { (dateLabel, cards) ->
-                            item(key = "header_$dateLabel") {
+                        val groupedTopics = visibleTopicCards.groupBy { it.displayDate.ifEmpty { "Unknown" } }
+                        groupedTopics.forEach { (dateLabel, topics) ->
+                            item(key = "topic_header_$dateLabel") {
                                 DateHeader(dateLabel)
                             }
-                            items(cards, key = { it.id }) { card ->
-                                TranscriptCardView(
-                                    card = card,
-                                    isFavorite = favoriteIds.contains(card.id),
-                                    onClick = { onSelectCard(card.id) },
-                                    onToggleFavorite = { onToggleFavorite(card.id) }
+                            items(topics, key = { it.id }) { topic ->
+                                TopicGroupCard(
+                                    topic = topic,
+                                    favoriteIds = favoriteIds,
+                                    onSelectCard = onSelectCard,
+                                    onToggleFavorite = onToggleFavorite
                                 )
-                            }
-                        }
-
-                        if (visibleTopicCards.isNotEmpty()) {
-                            val groupedTopics = visibleTopicCards.groupBy { it.displayDate.ifEmpty { "Unknown" } }
-                            groupedTopics.forEach { (dateLabel, topics) ->
-                                item(key = "topic_header_$dateLabel") {
-                                    DateHeader(dateLabel)
-                                }
-                                items(topics, key = { it.id }) { topic ->
-                                    TopicGroupCard(
-                                        topic = topic,
-                                        favoriteIds = favoriteIds,
-                                        onSelectCard = onSelectCard,
-                                        onToggleFavorite = onToggleFavorite
-                                    )
-                                }
                             }
                         }
                     }
@@ -616,25 +550,4 @@ private fun stopAmbientService(context: Context) {
 private fun formatTodayJa(): String {
     val formatter = DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN)
     return LocalDate.now().format(formatter)
-}
-
-private fun formatTimeOnly(epochMs: Long): String {
-    val formatter = DateTimeFormatter.ofPattern("HH:mm", Locale.JAPAN)
-    return Instant.ofEpochMilli(epochMs)
-        .atZone(ZoneId.systemDefault())
-        .toLocalTime()
-        .format(formatter)
-}
-
-private fun dateFromEpoch(epochMs: Long): String {
-    if (epochMs <= 0L) return "Unknown"
-    val localDate = Instant.ofEpochMilli(epochMs)
-        .atZone(ZoneId.systemDefault())
-        .toLocalDate()
-    val today = LocalDate.now()
-    return when (localDate) {
-        today -> "Today"
-        today.minusDays(1) -> "Yesterday"
-        else -> localDate.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN))
-    }
 }
