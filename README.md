@@ -81,6 +81,8 @@ Android App (Card Display)
 | `/api/topics` | GET | トピック一覧取得 |
 | `/api/topics/{topic_id}` | GET | トピック詳細取得 |
 | `/api/topics/evaluate-pending` | POST | `device_id` 単位で pending 発言を Process 2 評価 |
+| `/api/device-settings/{device_id}` | GET | デバイス設定（LLM）取得 |
+| `/api/device-settings/{device_id}` | POST | デバイス設定（LLM）更新 |
 | `/api/sessions/{id}` | GET | セッション詳細取得 |
 | `/api/sessions` | GET | セッション一覧 |
 | `/api/models` | GET | 利用可能なLLMモデル一覧 |
@@ -94,6 +96,7 @@ Android App (Card Display)
   - `zerotouch_sessions`（発言単位）
   - `zerotouch_conversation_topics`（発言を束ねるトピック単位）
   - `zerotouch_topic_evaluation_runs`（Process 2 の評価バッチ管理）
+  - `zerotouch_device_settings`（デバイスごとの LLM 設定）
 - ステータス遷移: `recording → uploaded → transcribing → transcribed → generating → completed / failed`
   - ※ 現在は `transcribed` までを利用
 
@@ -140,6 +143,7 @@ Supabase SQL Editorで以下を順に実行:
 2. `backend/migrations/002_lockdown_zerotouch_sessions_rls.sql`（推奨: anon/authenticated からの直接アクセスを遮断）
 3. `backend/migrations/003_add_conversation_topics.sql`
 4. `backend/migrations/004_process2_topic_pipeline.sql`
+5. `backend/migrations/005_add_device_settings.sql`
 
 ### Android
 
@@ -194,7 +198,8 @@ android-zero-touch/
 │   │   ├── 001_create_zerotouch_sessions.sql
 │   │   ├── 002_lockdown_zerotouch_sessions_rls.sql
 │   │   ├── 003_add_conversation_topics.sql
-│   │   └── 004_process2_topic_pipeline.sql
+│   │   ├── 004_process2_topic_pipeline.sql
+│   │   └── 005_add_device_settings.sql
 │   ├── Dockerfile
 │   ├── docker-compose.prod.yml
 │   └── requirements.txt

@@ -18,6 +18,7 @@ from services.prompts import build_card_generation_prompt
 from services.topic_manager_process2 import (
     mark_session_for_topic_evaluation,
     process_pending_topics_for_device,
+    resolve_device_llm_service,
 )
 from services.topic_manager import (
     force_assign_session_as_new_topic,
@@ -141,10 +142,15 @@ def transcribe_background(
                 print(f"[Background] Process2 queue result: {queue_result}")
                 device_id = queue_result.get("device_id")
                 if queue_result.get("queued") and device_id:
+                    device_llm = resolve_device_llm_service(
+                        supabase=supabase,
+                        device_id=device_id,
+                        fallback_llm_service=topic_llm_service,
+                    )
                     eval_result = process_pending_topics_for_device(
                         supabase=supabase,
                         device_id=device_id,
-                        llm_service=topic_llm_service,
+                        llm_service=device_llm,
                         idle_seconds=60,
                     )
                     print(f"[Background] Process2 evaluate result: {eval_result}")
@@ -159,7 +165,7 @@ def transcribe_background(
                         kwargs={
                             "device_id": device_id,
                             "supabase": supabase,
-                            "topic_llm_service": topic_llm_service,
+                            "topic_llm_service": device_llm,
                             "delay_seconds": delay_seconds,
                         },
                         daemon=True,

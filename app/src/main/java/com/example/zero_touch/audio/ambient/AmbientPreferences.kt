@@ -9,7 +9,11 @@ object AmbientPreferences {
     private const val KEY_AMBIENT_AUDIO_SOURCE = "ambient_audio_source"
     private const val KEY_AMBIENT_HPF_ENABLED = "ambient_hpf_enabled"
     private const val KEY_VAD_ENGINE = "vad_engine"
+    private const val KEY_LLM_PROVIDER = "llm_provider"
+    private const val KEY_LLM_MODEL = "llm_model"
     private const val DEFAULT_ASR_PROVIDER = "speechmatics"
+    private const val DEFAULT_LLM_PROVIDER = "openai"
+    private const val DEFAULT_LLM_MODEL = "gpt-4.1-nano"
     private const val DEFAULT_AMBIENT_AUDIO_SOURCE = "mic"
     private const val DEFAULT_VAD_ENGINE = "threshold"
     const val VAD_ENGINE_THRESHOLD = "threshold"
@@ -65,5 +69,25 @@ object AmbientPreferences {
     fun setVadEngine(context: Context, engine: String) {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_VAD_ENGINE, engine).apply()
+    }
+
+    fun getLlmProvider(context: Context): String {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_LLM_PROVIDER, DEFAULT_LLM_PROVIDER) ?: DEFAULT_LLM_PROVIDER
+    }
+
+    fun setLlmProvider(context: Context, provider: String) {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_LLM_PROVIDER, provider).apply()
+    }
+
+    fun getLlmModel(context: Context): String {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_LLM_MODEL, DEFAULT_LLM_MODEL) ?: DEFAULT_LLM_MODEL
+    }
+
+    fun setLlmModel(context: Context, model: String) {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_LLM_MODEL, model).apply()
     }
 }

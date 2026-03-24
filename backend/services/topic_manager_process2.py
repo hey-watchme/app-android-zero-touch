@@ -14,12 +14,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from supabase import Client
 
+from services.llm_providers import LLMFactory, get_current_llm
 from services.prompts import build_topic_batch_group_prompt
 
 
 SESSION_TABLE = "zerotouch_sessions"
 TOPIC_TABLE = os.getenv("TOPIC_TABLE", "zerotouch_conversation_topics")
 RUN_TABLE = "zerotouch_topic_evaluation_runs"
+DEVICE_SETTINGS_TABLE = "zerotouch_device_settings"
 
 TOPIC_EVAL_PENDING = "pending"
 TOPIC_EVAL_PROCESSING = "processing"
@@ -81,6 +83,36 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
         except Exception:
             continue
     return None
+
+
+def resolve_device_llm_service(
+    supabase: Client,
+    device_id: str,
+    fallback_llm_service=None,
+):
+    if not device_id:
+        return fallback_llm_service or get_current_llm()
+
+    settings = (
+        supabase.table(DEVICE_SETTINGS_TABLE)
+        .select("llm_provider, llm_model")
+        .eq("device_id", device_id)
+        .single()
+        .execute()
+        .data
+    )
+    if not settings:
+        return fallback_llm_service or get_current_llm()
+
+    provider = (settings.get("llm_provider") or "").strip()
+    model = (settings.get("llm_model") or "").strip()
+    if not provider or not model:
+        return fallback_llm_service or get_current_llm()
+
+    try:
+        return LLMFactory.create(provider, model)
+    except Exception:
+        return fallback_llm_service or get_current_llm()
 
 
 def mark_session_for_topic_evaluation(

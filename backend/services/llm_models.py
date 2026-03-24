@@ -5,6 +5,9 @@ from typing import Dict, List
 
 SUPPORTED_LLM_MODELS: Dict[str, List[str]] = {
     "openai": [
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-4.1-nano",
         "gpt-4o",
         "gpt-4o-mini",
         "gpt-5.4",

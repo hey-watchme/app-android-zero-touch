@@ -36,16 +36,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.util.Log
+import com.example.zero_touch.api.ZeroTouchApi
 import com.example.zero_touch.audio.ambient.AmbientPreferences
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
 import com.example.zero_touch.ui.theme.ZtOutline
+import kotlinx.coroutines.launch
 
 /**
  * Mock settings bottom sheet.
@@ -60,12 +64,35 @@ fun SettingsSheet(
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var asrProvider by remember { mutableStateOf(AmbientPreferences.getAsrProvider(context)) }
+    var llmProvider by remember { mutableStateOf(AmbientPreferences.getLlmProvider(context)) }
+    var llmModel by remember { mutableStateOf(AmbientPreferences.getLlmModel(context)) }
     var vadEngine by remember { mutableStateOf(AmbientPreferences.getVadEngine(context)) }
     var ambientAudioSource by remember {
         mutableStateOf(AmbientPreferences.getAmbientAudioSource(context))
     }
     var hpfEnabled by remember {
         mutableStateOf(AmbientPreferences.isHighPassFilterEnabled(context))
+    }
+    val api = remember { ZeroTouchApi() }
+    val scope = rememberCoroutineScope()
+
+    // Sync settings from server on open, but keep local fallback if network fails.
+    androidx.compose.runtime.LaunchedEffect(deviceId) {
+        try {
+            val remote = api.getDeviceSettings(deviceId)
+            val remoteProvider = remote.llm_provider?.trim().orEmpty()
+            val remoteModel = remote.llm_model?.trim().orEmpty()
+            if (remoteProvider.isNotEmpty()) {
+                llmProvider = remoteProvider
+                AmbientPreferences.setLlmProvider(context, remoteProvider)
+            }
+            if (remoteModel.isNotEmpty()) {
+                llmModel = remoteModel
+                AmbientPreferences.setLlmModel(context, remoteModel)
+            }
+        } catch (e: Exception) {
+            Log.w("SettingsSheet", "Failed to sync device settings", e)
+        }
     }
 
     ModalBottomSheet(
@@ -214,6 +241,70 @@ fun SettingsSheet(
                             AmbientPreferences.setAsrProvider(context, "deepgram")
                         },
                         label = { Text("Deepgram") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            SectionHeader("LLM")
+            val llmSubtitle = when (llmModel) {
+                "gpt-4.1-nano" -> "OpenAI GPT-4.1 nano — lightweight + fast"
+                "gpt-4.1-mini" -> "OpenAI GPT-4.1 mini — balanced"
+                "gpt-4.1" -> "OpenAI GPT-4.1 — stronger reasoning"
+                "gpt-4o-mini" -> "OpenAI GPT-4o mini — fast"
+                else -> "OpenAI $llmModel"
+            }
+            SettingsRow(
+                icon = Icons.Outlined.Info,
+                title = "LLM Model",
+                subtitle = llmSubtitle
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = llmModel == "gpt-4.1-nano",
+                        onClick = {
+                            llmProvider = "openai"
+                            llmModel = "gpt-4.1-nano"
+                            AmbientPreferences.setLlmProvider(context, llmProvider)
+                            AmbientPreferences.setLlmModel(context, llmModel)
+                            scope.launch {
+                                api.updateDeviceSettings(deviceId, llmProvider, llmModel)
+                            }
+                        },
+                        label = { Text("4.1 nano") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                    FilterChip(
+                        selected = llmModel == "gpt-4.1-mini",
+                        onClick = {
+                            llmProvider = "openai"
+                            llmModel = "gpt-4.1-mini"
+                            AmbientPreferences.setLlmProvider(context, llmProvider)
+                            AmbientPreferences.setLlmModel(context, llmModel)
+                            scope.launch {
+                                api.updateDeviceSettings(deviceId, llmProvider, llmModel)
+                            }
+                        },
+                        label = { Text("4.1 mini") },
+                        colors = FilterChipDefaults.filterChipColors()
+                    )
+                    FilterChip(
+                        selected = llmModel == "gpt-4.1",
+                        onClick = {
+                            llmProvider = "openai"
+                            llmModel = "gpt-4.1"
+                            AmbientPreferences.setLlmProvider(context, llmProvider)
+                            AmbientPreferences.setLlmModel(context, llmModel)
+                            scope.launch {
+                                api.updateDeviceSettings(deviceId, llmProvider, llmModel)
+                            }
+                        },
+                        label = { Text("4.1") },
                         colors = FilterChipDefaults.filterChipColors()
                     )
                 }

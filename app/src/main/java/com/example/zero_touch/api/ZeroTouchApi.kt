@@ -99,6 +99,12 @@ data class TopicBackfillResponse(
     val result: TopicBackfillResult
 )
 
+data class DeviceSettings(
+    val device_id: String,
+    val llm_provider: String? = null,
+    val llm_model: String? = null
+)
+
 data class Card(
     val type: String,
     val title: String,
@@ -282,6 +288,55 @@ class ZeroTouchApi(
         }
         val type = object : TypeToken<Map<String, Any>>() {}.type
         gson.fromJson(response.body!!.string(), type)
+    }
+
+    suspend fun getDeviceSettings(deviceId: String): DeviceSettings = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/device-settings/$deviceId"
+        Log.d(TAG, "GET $url")
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "GET $url failed: ${response.code} ${response.message} body=$body")
+            throw Exception("Get device settings failed: ${response.code}")
+        }
+        gson.fromJson(body, DeviceSettings::class.java)
+    }
+
+    suspend fun updateDeviceSettings(
+        deviceId: String,
+        llmProvider: String?,
+        llmModel: String?
+    ): DeviceSettings = withContext(Dispatchers.IO) {
+        val payload = mutableMapOf<String, Any>()
+        llmProvider?.let { payload["llm_provider"] = it }
+        llmModel?.let { payload["llm_model"] = it }
+
+        val request = Request.Builder()
+            .url("$baseUrl/zerotouch/api/device-settings/$deviceId")
+            .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "POST device settings failed: ${response.code} ${response.message} body=$body")
+            throw Exception("Update device settings failed: ${response.code}")
+        }
+
+        val type = object : TypeToken<Map<String, Any>>() {}.type
+        val envelope: Map<String, Any> = gson.fromJson(body, type)
+        val settings = envelope["settings"]
+        return if (settings is Map<*, *>) {
+            val json = gson.toJson(settings)
+            gson.fromJson(json, DeviceSettings::class.java)
+        } else {
+            DeviceSettings(device_id = deviceId, llm_provider = llmProvider, llm_model = llmModel)
+        }
     }
 
     fun parseCards(cardsResult: Map<String, Any>?): List<Card> {

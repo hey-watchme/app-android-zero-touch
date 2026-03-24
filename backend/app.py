@@ -21,7 +21,10 @@ from services.llm_providers import LLMFactory, get_current_llm
 from services.llm_models import get_model_catalog
 from services.asr_providers import get_asr_service
 from services.background_tasks import transcribe_background, generate_cards_background
-from services.topic_manager_process2 import process_pending_topics_for_device
+from services.topic_manager_process2 import (
+    process_pending_topics_for_device,
+    resolve_device_llm_service,
+)
 from services.topic_manager import backfill_ungrouped_sessions, reconcile_topics
 
 
@@ -117,6 +120,11 @@ class TopicEvaluatePendingRequest(BaseModel):
     force: bool = False
     idle_seconds: int = 60
     max_sessions: int = 200
+
+
+class DeviceSettingsRequest(BaseModel):
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
 
 
 # --- Health ---
@@ -410,15 +418,55 @@ def backfill_topics(body: TopicBackfillRequest = None):
 def evaluate_pending_topics(body: TopicEvaluatePendingRequest):
     safe_idle = max(10, min(body.idle_seconds, 3600))
     safe_max_sessions = max(1, min(body.max_sessions, 500))
+    llm_service = resolve_device_llm_service(
+        supabase=supabase,
+        device_id=body.device_id,
+        fallback_llm_service=_get_topic_llm_service(),
+    )
     result = process_pending_topics_for_device(
         supabase=supabase,
         device_id=body.device_id,
-        llm_service=_get_topic_llm_service(),
+        llm_service=llm_service,
         idle_seconds=safe_idle,
         max_sessions=safe_max_sessions,
         force=body.force,
     )
     return {"status": "ok", "result": result}
+
+
+@app.get("/api/device-settings/{device_id}")
+def get_device_settings(device_id: str):
+    row = (
+        supabase.table("zerotouch_device_settings")
+        .select("*")
+        .eq("device_id", device_id)
+        .single()
+        .execute()
+        .data
+    )
+    if not row:
+        return {"device_id": device_id, "llm_provider": None, "llm_model": None}
+    return row
+
+
+@app.post("/api/device-settings/{device_id}")
+def update_device_settings(device_id: str, body: DeviceSettingsRequest):
+    payload: Dict[str, Any] = {
+        "device_id": device_id,
+        "updated_at": datetime.now().isoformat(),
+    }
+    if body.llm_provider is not None:
+        payload["llm_provider"] = body.llm_provider
+    if body.llm_model is not None:
+        payload["llm_model"] = body.llm_model
+
+    row = (
+        supabase.table("zerotouch_device_settings")
+        .upsert(payload)
+        .execute()
+        .data
+    )
+    return {"status": "ok", "settings": row[0] if row else payload}
 
 
 # --- Sessions ---
