@@ -467,6 +467,72 @@ def process_transcribed_session(
     }
 
 
+def force_assign_session_as_new_topic(
+    session_id: str,
+    supabase: Client,
+) -> Dict[str, Any]:
+    session_response = (
+        supabase.table(SESSION_TABLE)
+        .select("id, device_id, transcription, recorded_at, created_at")
+        .eq("id", session_id)
+        .single()
+        .execute()
+    )
+    session = session_response.data
+    if not session:
+        raise ValueError(f"Session not found: {session_id}")
+
+    transcript = (session.get("transcription") or "").strip()
+    if not transcript:
+        return {"session_id": session_id, "assigned": False, "reason": "empty_transcription"}
+
+    existing_topic_id = (
+        supabase.table(SESSION_TABLE)
+        .select("topic_id")
+        .eq("id", session_id)
+        .single()
+        .execute()
+        .data
+        .get("topic_id")
+    )
+    if existing_topic_id:
+        return {
+            "session_id": session_id,
+            "topic_id": existing_topic_id,
+            "assigned": False,
+            "reason": "already_assigned",
+        }
+
+    event_ts = _parse_timestamp(session.get("recorded_at") or session.get("created_at"))
+    topic = _create_topic(
+        supabase=supabase,
+        device_id=session["device_id"],
+        event_ts=event_ts,
+        transcript=transcript,
+    )
+    topic = _update_topic_with_session(
+        supabase=supabase,
+        topic=topic,
+        event_ts=event_ts,
+        reopen=False,
+    )
+    _assign_session_to_topic(
+        supabase=supabase,
+        session_id=session_id,
+        topic_id=topic["id"],
+        grouping_method=GROUPING_METHOD_TIME_RULE,
+        grouping_confidence=None,
+    )
+    return {
+        "session_id": session_id,
+        "device_id": session["device_id"],
+        "topic_id": topic["id"],
+        "decision": "new",
+        "reason": "forced_new_topic_fallback",
+        "confidence": None,
+    }
+
+
 def reconcile_topics(
     supabase: Client,
     llm_service=None,
@@ -558,7 +624,14 @@ def backfill_ungrouped_sessions(
             )
             processed += 1
         except Exception:
-            errors += 1
+            try:
+                force_assign_session_as_new_topic(
+                    session_id=row["id"],
+                    supabase=supabase,
+                )
+                processed += 1
+            except Exception:
+                errors += 1
 
     return {
         "target": len(rows),

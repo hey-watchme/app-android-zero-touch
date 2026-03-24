@@ -14,7 +14,11 @@ from datetime import datetime
 import boto3
 from supabase import Client
 from services.prompts import build_card_generation_prompt
-from services.topic_manager import process_transcribed_session, reconcile_topics
+from services.topic_manager import (
+    force_assign_session_as_new_topic,
+    process_transcribed_session,
+    reconcile_topics,
+)
 
 
 TABLE = "zerotouch_sessions"
@@ -112,7 +116,15 @@ def transcribe_background(
                 device_id=topic_result.get("device_id"),
             )
         except Exception as topic_error:
-            print(f"[Background] Topic assignment skipped due to error: {topic_error}")
+            print(f"[Background] Topic assignment failed, trying hard fallback: {topic_error}")
+            try:
+                fallback_result = force_assign_session_as_new_topic(
+                    session_id=session_id,
+                    supabase=supabase,
+                )
+                print(f"[Background] Topic hard fallback result: {fallback_result}")
+            except Exception as fallback_error:
+                print(f"[Background] Topic hard fallback also failed: {fallback_error}")
 
         # Auto-chain to card generation
         if auto_chain and llm_service:
