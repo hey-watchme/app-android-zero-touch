@@ -442,14 +442,16 @@ def evaluate_pending_topics(body: TopicEvaluatePendingRequest):
 
 @app.get("/api/device-settings/{device_id}")
 def get_device_settings(device_id: str):
-    row = (
+    rows = (
         supabase.table("zerotouch_device_settings")
         .select("*")
         .eq("device_id", device_id)
-        .single()
+        .limit(1)
         .execute()
         .data
+        or []
     )
+    row = rows[0] if rows else None
     if not row:
         return {"device_id": device_id, "llm_provider": None, "llm_model": None}
     return row

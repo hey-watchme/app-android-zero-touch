@@ -148,14 +148,20 @@ def resolve_device_llm_service(
     if not device_id:
         return fallback_llm_service or get_current_llm()
 
-    settings = (
-        supabase.table(DEVICE_SETTINGS_TABLE)
-        .select("llm_provider, llm_model")
-        .eq("device_id", device_id)
-        .single()
-        .execute()
-        .data
-    )
+    try:
+        rows = (
+            supabase.table(DEVICE_SETTINGS_TABLE)
+            .select("llm_provider, llm_model")
+            .eq("device_id", device_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        return fallback_llm_service or get_current_llm()
+
+    settings = rows[0] if rows else None
     if not settings:
         return fallback_llm_service or get_current_llm()
 
