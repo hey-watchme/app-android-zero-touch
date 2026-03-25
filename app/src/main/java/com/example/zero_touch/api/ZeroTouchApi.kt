@@ -99,6 +99,11 @@ data class TopicBackfillResponse(
     val result: TopicBackfillResult
 )
 
+data class TopicEvaluatePendingResponse(
+    val status: String,
+    val result: Map<String, Any>
+)
+
 data class DeviceSettings(
     val device_id: String,
     val llm_provider: String? = null,
@@ -274,6 +279,37 @@ class ZeroTouchApi(
             throw Exception("Backfill topics failed: ${response.code}")
         }
         gson.fromJson(body, TopicBackfillResponse::class.java)
+    }
+
+    suspend fun evaluatePendingTopics(
+        deviceId: String,
+        force: Boolean = false,
+        idleSeconds: Int = 60,
+        maxSessions: Int = 200
+    ): TopicEvaluatePendingResponse = withContext(Dispatchers.IO) {
+        val payload = mapOf(
+            "device_id" to deviceId,
+            "force" to force,
+            "idle_seconds" to idleSeconds,
+            "max_sessions" to maxSessions
+        )
+        val requestBody = gson.toJson(payload)
+            .toRequestBody("application/json".toMediaType())
+
+        val url = "$baseUrl/zerotouch/api/topics/evaluate-pending"
+        Log.d(TAG, "POST $url device=$deviceId force=$force idleSeconds=$idleSeconds maxSessions=$maxSessions")
+        val request = Request.Builder()
+            .url(url)
+            .post(requestBody)
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "POST $url failed: ${response.code} ${response.message} body=$body")
+            throw Exception("Evaluate pending topics failed: ${response.code}")
+        }
+        gson.fromJson(body, TopicEvaluatePendingResponse::class.java)
     }
 
     suspend fun generateCards(sessionId: String): Map<String, Any> = withContext(Dispatchers.IO) {

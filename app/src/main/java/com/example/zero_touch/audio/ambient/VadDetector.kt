@@ -9,6 +9,8 @@ interface VoiceActivityDetector {
     fun reset() = Unit
 
     fun close() = Unit
+
+    fun debugConfig(): String = "engine=${javaClass.simpleName}"
 }
 
 data class VadResult(
@@ -42,20 +44,29 @@ open class ThresholdVadDetector(
         noiseFloorRms = noiseFloorDecay * noiseFloorRms + (1 - noiseFloorDecay) * rms
         val ratio = rms / max(noiseFloorRms, 1.0f)
         val zcr = computeZcr(samples, length)
-        inSpeech = if (inSpeech) {
+
+        val wasSpeech = inSpeech
+        val gatePassed = if (wasSpeech) {
             ratio >= minHoldRatio && rms >= minHoldRms && zcr in minHoldZcr..maxHoldZcr
         } else {
             ratio >= minSpeechRatio && rms >= minSpeechRms && zcr in minSpeechZcr..maxSpeechZcr
         }
+        inSpeech = gatePassed
+
+        val ratioThreshold = if (wasSpeech) minHoldRatio else minSpeechRatio
+        val confidence = (ratio / ratioThreshold).coerceIn(0f, 1f)
+        val reason = buildDecisionReason(wasSpeech, gatePassed, ratio, rms, zcr)
+
         return VadResult(
             isSpeech = inSpeech,
             rms = rms,
             ratio = ratio,
             noiseFloorRms = noiseFloorRms,
             zeroCrossingRate = zcr,
-            confidence = ratio.coerceIn(0f, 1f),
+            confidence = confidence,
             engine = "threshold",
-            supported = true
+            supported = true,
+            reason = reason
         )
     }
 
@@ -87,6 +98,61 @@ open class ThresholdVadDetector(
     override fun reset() {
         noiseFloorRms = 200.0f
         inSpeech = false
+    }
+
+    override fun debugConfig(): String {
+        return "engine=threshold minSpeechRatio=$minSpeechRatio minHoldRatio=$minHoldRatio minSpeechRms=$minSpeechRms minHoldRms=$minHoldRms minSpeechZcr=$minSpeechZcr maxSpeechZcr=$maxSpeechZcr minHoldZcr=$minHoldZcr maxHoldZcr=$maxHoldZcr noiseFloorDecay=$noiseFloorDecay"
+    }
+
+    private fun buildDecisionReason(
+        wasSpeech: Boolean,
+        gatePassed: Boolean,
+        ratio: Float,
+        rms: Float,
+        zcr: Float
+    ): String {
+        val gateLabel = if (wasSpeech) "hold" else "start"
+        if (gatePassed) return "$gateLabel:ok"
+
+        val failed = if (wasSpeech) {
+            failedThresholds(
+                ratio = ratio,
+                rms = rms,
+                zcr = zcr,
+                minRatio = minHoldRatio,
+                minRms = minHoldRms,
+                minZcr = minHoldZcr,
+                maxZcr = maxHoldZcr
+            )
+        } else {
+            failedThresholds(
+                ratio = ratio,
+                rms = rms,
+                zcr = zcr,
+                minRatio = minSpeechRatio,
+                minRms = minSpeechRms,
+                minZcr = minSpeechZcr,
+                maxZcr = maxSpeechZcr
+            )
+        }
+        return "$gateLabel:fail(${failed.joinToString("+")})"
+    }
+
+    private fun failedThresholds(
+        ratio: Float,
+        rms: Float,
+        zcr: Float,
+        minRatio: Float,
+        minRms: Float,
+        minZcr: Float,
+        maxZcr: Float
+    ): List<String> {
+        val failed = mutableListOf<String>()
+        if (ratio < minRatio) failed += "ratio"
+        if (rms < minRms) failed += "rms"
+        if (zcr < minZcr || zcr > maxZcr) failed += "zcr"
+        if (failed.isEmpty()) failed += "unknown"
+        return failed
     }
 }
 

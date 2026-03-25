@@ -25,6 +25,9 @@ class AmbientRecordingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var recorder: AmbientRecorder? = null
     private var monitorRunning = false
+    private var watchdogRestartCount = 0
+    private var lastObservedRecordingState = false
+    private var lastWatchdogRestartAt = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -32,22 +35,31 @@ class AmbientRecordingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_START -> startAmbient()
-            ACTION_STOP -> stopAmbient()
+        val action = intent?.action ?: "null"
+        Log.d(
+            TAG,
+            "onStartCommand action=$action flags=$flags startId=$startId recorderActive=${recorder != null}"
+        )
+        when (action) {
+            ACTION_START -> startAmbient(trigger = "action_start")
+            ACTION_STOP -> stopAmbient(reason = "action_stop")
+            else -> Log.d(TAG, "onStartCommand ignored unknownAction=$action")
         }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        stopAmbient()
+        stopAmbient(reason = "service_destroy")
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun startAmbient() {
-        if (recorder != null) return
+    private fun startAmbient(trigger: String) {
+        if (recorder != null) {
+            Log.d(TAG, "Ambient start ignored reason=already_running trigger=$trigger")
+            return
+        }
         AmbientStatus.update(
             status = "Listening",
             speech = false,
@@ -70,12 +82,17 @@ class AmbientRecordingService : Service() {
             AmbientPreferences.VAD_ENGINE_WEBRTC -> WebRtcVadDetector()
             else -> VadDetector()
         }
+        Log.i(
+            TAG,
+            "Ambient start requested trigger=$trigger audioSourcePref=$selectedSource audioSourceResolved=${audioSourceName(audioSource)}($audioSource) hpfEnabled=$hpfEnabled vadEnginePref=$selectedVadEngine detector=${detector.javaClass.simpleName} detectorConfig=${detector.debugConfig()} outputDir=${outputDir.absolutePath}"
+        )
         recorder = AmbientRecorder(
             outputDir = outputDir,
             onSessionReady = { file, durationMs -> handleSessionReady(file, durationMs) },
             onStatusChanged = { status ->
                 AmbientStatus.update(status = status)
                 updateNotification(status)
+                Log.d(TAG, "Recorder status changed status=$status trigger=$trigger")
             },
             onLevelChanged = { ambientLevel, voiceLevel, speech ->
                 AmbientStatus.update(
@@ -90,6 +107,13 @@ class AmbientRecordingService : Service() {
                     recordingElapsedMs = elapsedMs,
                     recordingHeartbeatAt = SystemClock.elapsedRealtime()
                 )
+                if (lastObservedRecordingState != isRecording) {
+                    Log.d(
+                        TAG,
+                        "Recorder recordingState changed isRecording=$isRecording elapsedMs=$elapsedMs trigger=$trigger"
+                    )
+                    lastObservedRecordingState = isRecording
+                }
             },
             audioSource = audioSource,
             detector = detector,
@@ -98,14 +122,20 @@ class AmbientRecordingService : Service() {
         startMonitor()
         Log.d(
             TAG,
-            "Ambient service started audioSource=$selectedSource hpfEnabled=$hpfEnabled vadEngine=$selectedVadEngine detector=${detector.javaClass.simpleName}"
+            "Ambient service started trigger=$trigger audioSource=$selectedSource hpfEnabled=$hpfEnabled vadEngine=$selectedVadEngine detector=${detector.javaClass.simpleName}"
         )
     }
 
-    private fun stopAmbient() {
+    private fun stopAmbient(reason: String) {
+        Log.i(
+            TAG,
+            "Ambient stop requested reason=$reason recorderActive=${recorder != null} monitorRunning=$monitorRunning"
+        )
         recorder?.stop()
         recorder = null
         monitorRunning = false
+        lastObservedRecordingState = false
+        lastWatchdogRestartAt = 0L
         AmbientStatus.update(
             status = "Stopped",
             ambientLevel = 0f,
@@ -117,10 +147,14 @@ class AmbientRecordingService : Service() {
         )
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
-        Log.d(TAG, "Ambient service stopped")
+        Log.d(TAG, "Ambient service stopped reason=$reason")
     }
 
     private fun handleSessionReady(file: File, durationMs: Long) {
+        Log.i(
+            TAG,
+            "Session ready for upload file=${file.name} durationMs=$durationMs path=${file.absolutePath}"
+        )
         val current = AmbientStatus.state.value
         val entry = AmbientRecordingEntry(
             path = file.absolutePath,
@@ -149,7 +183,10 @@ class AmbientRecordingService : Service() {
                 )
                 val asrProvider = AmbientPreferences.getAsrProvider(this@AmbientRecordingService)
                 api.transcribe(upload.session_id, autoChain = false, provider = asrProvider)
-                Log.d(TAG, "Uploaded session=${upload.session_id} durationMs=$durationMs")
+                Log.d(
+                    TAG,
+                    "Uploaded session=${upload.session_id} durationMs=$durationMs provider=$asrProvider"
+                )
             } catch (e: Exception) {
                 Log.e(TAG, "Upload failed: ${file.name} ${e.message}")
             }
@@ -183,8 +220,12 @@ class AmbientRecordingService : Service() {
     }
 
     private fun startMonitor() {
-        if (monitorRunning) return
+        if (monitorRunning) {
+            Log.d(TAG, "Watchdog monitor start ignored reason=already_running")
+            return
+        }
         monitorRunning = true
+        Log.d(TAG, "Watchdog monitor started staleThresholdMs=$RECORDING_STALE_THRESHOLD_MS")
         scope.launch {
             while (monitorRunning) {
                 delay(1000)
@@ -192,17 +233,59 @@ class AmbientRecordingService : Service() {
                 if (!state.isRecording) continue
                 val ageMs = SystemClock.elapsedRealtime() - state.recordingHeartbeatAt
                 if (ageMs <= RECORDING_STALE_THRESHOLD_MS) continue
-                Log.w(TAG, "Recording heartbeat stale (${ageMs}ms). Restarting recorder.")
+                val now = SystemClock.elapsedRealtime()
+                if (recorder == null) {
+                    Log.w(
+                        TAG,
+                        "Watchdog stale heartbeat but recorder=null; resetting state ageMs=$ageMs thresholdMs=$RECORDING_STALE_THRESHOLD_MS"
+                    )
+                    AmbientStatus.update(
+                        status = "Listening",
+                        isRecording = false,
+                        recordingElapsedMs = 0,
+                        recordingHeartbeatAt = now
+                    )
+                    continue
+                }
+                if (now - lastWatchdogRestartAt < WATCHDOG_RESTART_COOLDOWN_MS) {
+                    Log.w(
+                        TAG,
+                        "Watchdog restart suppressed by cooldown ageMs=$ageMs cooldownMs=$WATCHDOG_RESTART_COOLDOWN_MS status=${state.status} speech=${state.speech} recordingElapsedMs=${state.recordingElapsedMs} lastEvent=${state.lastEvent}"
+                    )
+                    AmbientStatus.update(
+                        status = "Listening",
+                        isRecording = false,
+                        recordingElapsedMs = 0,
+                        recordingHeartbeatAt = now
+                    )
+                    continue
+                }
+                watchdogRestartCount++
+                lastWatchdogRestartAt = now
+                Log.w(
+                    TAG,
+                    "Watchdog restart triggered reason=recording_heartbeat_stale restartCount=$watchdogRestartCount ageMs=$ageMs thresholdMs=$RECORDING_STALE_THRESHOLD_MS status=${state.status} speech=${state.speech} recordingElapsedMs=${state.recordingElapsedMs} lastEvent=${state.lastEvent}"
+                )
                 recorder?.stop()
                 recorder = null
+                lastObservedRecordingState = false
                 AmbientStatus.update(
                     status = "Listening",
                     isRecording = false,
                     recordingElapsedMs = 0,
                     recordingHeartbeatAt = SystemClock.elapsedRealtime()
                 )
-                startAmbient()
+                startAmbient(trigger = "watchdog_stale_restart_$watchdogRestartCount")
+                Log.w(TAG, "Watchdog restart completed restartCount=$watchdogRestartCount")
             }
+        }
+    }
+
+    private fun audioSourceName(source: Int): String {
+        return when (source) {
+            MediaRecorder.AudioSource.MIC -> "mic"
+            MediaRecorder.AudioSource.VOICE_RECOGNITION -> "voice_recognition"
+            else -> "source_$source"
         }
     }
 
@@ -212,6 +295,7 @@ class AmbientRecordingService : Service() {
         private const val NOTIFICATION_ID = 7001
         private const val MAX_RECORDINGS = 50
         private const val RECORDING_STALE_THRESHOLD_MS = 4000L
+        private const val WATCHDOG_RESTART_COOLDOWN_MS = 10_000L
         const val ACTION_START = "com.example.zero_touch.AMBIENT_START"
         const val ACTION_STOP = "com.example.zero_touch.AMBIENT_STOP"
     }

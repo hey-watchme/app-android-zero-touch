@@ -11,4 +11,6 @@ class WebRtcVadDetector : VoiceActivityDetector {
             reason = "WebRTC VAD is not implemented yet"
         )
     }
+
+    override fun debugConfig(): String = "engine=webrtc supported=false reason=not_implemented"
 }

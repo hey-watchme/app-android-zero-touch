@@ -327,16 +327,15 @@ class ZeroTouchViewModel : ViewModel() {
     private suspend fun loadTopicCards(deviceId: String): List<TopicFeedCard> {
         return try {
             try {
-                val backfill = api.backfillTopics(
+                val eval = api.evaluatePendingTopics(
                     deviceId = deviceId,
-                    limit = PAGE_SIZE
+                    force = false,
+                    idleSeconds = 60,
+                    maxSessions = 200
                 )
-                Log.d(
-                    TAG,
-                    "topic backfill: device=$deviceId target=${backfill.result.target} processed=${backfill.result.processed} skipped=${backfill.result.skipped} errors=${backfill.result.errors}"
-                )
+                Log.d(TAG, "topic evaluate-pending: device=$deviceId result=${eval.result}")
             } catch (e: Exception) {
-                Log.w(TAG, "topic backfill failed: device=$deviceId", e)
+                Log.w(TAG, "topic evaluate-pending failed: device=$deviceId", e)
             }
 
             val response = api.listTopics(
@@ -352,6 +351,30 @@ class ZeroTouchViewModel : ViewModel() {
         } catch (e: Exception) {
             Log.e(TAG, "loadTopicCards failed: device=$deviceId", e)
             emptyList()
+        }
+    }
+
+    fun evaluatePendingTopics(
+        context: Context,
+        force: Boolean = true,
+        idleSeconds: Int = 60,
+        maxSessions: Int = 200,
+        reason: String = "ambient_stop"
+    ) {
+        viewModelScope.launch {
+            try {
+                val deviceId = DeviceIdProvider.getDeviceId(context)
+                val eval = api.evaluatePendingTopics(
+                    deviceId = deviceId,
+                    force = force,
+                    idleSeconds = idleSeconds,
+                    maxSessions = maxSessions
+                )
+                Log.d(TAG, "evaluate-pending triggered reason=$reason device=$deviceId result=${eval.result}")
+                refreshSessions(context)
+            } catch (e: Exception) {
+                Log.w(TAG, "evaluate-pending failed reason=$reason", e)
+            }
         }
     }
 

@@ -83,13 +83,19 @@ fun AmbientStatusBar(
                 Text(
                     text = when {
                         isRecording -> "Recording ${formatDuration(ambientState.recordingElapsedMs)}"
-                        ambientState.speech -> "Voice detected"
                         else -> "Listening..."
                     },
                     style = MaterialTheme.typography.labelLarge,
                     color = if (isRecording) ZtRecording else ZtOnSurfaceVariant
                 )
                 Spacer(Modifier.weight(1f))
+                if (!isRecording && ambientState.speech) {
+                    Text(
+                        text = "Voice detected",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtSuccess
+                    )
+                }
                 DualLevelEqualizer(
                     ambientLevel = ambientState.ambientLevel,
                     voiceLevel = ambientState.voiceLevel,

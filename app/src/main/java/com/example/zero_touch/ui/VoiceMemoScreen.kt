@@ -78,7 +78,8 @@ fun VoiceMemoScreen(
     onSelectCard: (String) -> Unit,
     onDismissDetail: () -> Unit,
     onLoadMore: () -> Unit,
-    onRetranscribeEnglish: (String) -> Unit
+    onRetranscribeEnglish: (String) -> Unit,
+    onAmbientStopped: () -> Unit
 ) {
     val context = LocalContext.current
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
@@ -226,6 +227,7 @@ fun VoiceMemoScreen(
                         AmbientPreferences.setAmbientEnabled(context, false)
                         ambientEnabled = false
                         stopAmbientService(context)
+                        onAmbientStopped()
                     }
                 }
             )

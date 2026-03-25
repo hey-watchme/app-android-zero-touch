@@ -219,6 +219,7 @@ android-zero-touch/
 
 - 企画書: `docs/ambient-agent-spec.md`
 - 会話パイプライン試行メモ: `docs/conversation-pipeline-processes.md`
+- アンビエント録音デバッグ手順: `docs/ambient-recording-debug-checklist.md`
 - モデルプロジェクト: `/Users/kaya.matsumoto/projects/watchme/business`
 - WatchMe インフラ: `/Users/kaya.matsumoto/projects/watchme/server-configs`
 

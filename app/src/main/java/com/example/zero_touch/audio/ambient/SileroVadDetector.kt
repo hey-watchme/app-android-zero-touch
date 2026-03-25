@@ -1,6 +1,7 @@
 package com.example.zero_touch.audio.ambient
 
 import android.content.Context
+import android.util.Log
 import com.konovalov.vad.silero.VadSilero
 import com.konovalov.vad.silero.config.FrameSize
 import com.konovalov.vad.silero.config.Mode
@@ -19,6 +20,7 @@ class SileroVadDetector(
 
     private var vad: VadSilero? = null
     private var initFailure: String? = null
+    private var lastUnavailableReason: String? = null
 
     private var bufferedSamples = 0
     private var pendingSamples = ShortArray(targetFrameSamples * 2)
@@ -35,8 +37,10 @@ class SileroVadDetector(
 
         val engine = vad
         if (engine == null) {
+            val reason = initFailure ?: "Silero VAD is unavailable"
+            logUnavailable(reason)
             return unsupportedResult(
-                reason = initFailure ?: "Silero VAD is unavailable",
+                reason = reason,
                 samples = samples,
                 length = safeLength
             )
@@ -50,6 +54,7 @@ class SileroVadDetector(
                 engine.isSpeech(frame)
             }.getOrElse { error ->
                 initFailure = "Silero inference failed: ${error.message ?: error.javaClass.simpleName}"
+                Log.e(TAG, "Silero inference failed: ${initFailure ?: "unknown"}")
                 releaseEngine()
                 return unsupportedResult(
                     reason = initFailure ?: "Silero inference failed",
@@ -72,12 +77,17 @@ class SileroVadDetector(
         bufferedSamples = 0
         pendingSamples = ShortArray(targetFrameSamples * 2)
         initFailure = null
+        lastUnavailableReason = null
         close()
         initializeEngine()
     }
 
     override fun close() {
         releaseEngine()
+    }
+
+    override fun debugConfig(): String {
+        return "engine=silero sampleRate=$sampleRate frameSize=${frameSize.value} mode=$mode speechDurationMs=$speechDurationMs silenceDurationMs=$silenceDurationMs"
     }
 
     private fun initializeEngine() {
@@ -93,9 +103,15 @@ class SileroVadDetector(
         }.onSuccess { created ->
             vad = created
             initFailure = null
+            lastUnavailableReason = null
+            Log.i(
+                TAG,
+                "Silero initialized sampleRate=$sampleRate frameSize=${frameSize.value} mode=$mode speechDurationMs=$speechDurationMs silenceDurationMs=$silenceDurationMs"
+            )
         }.onFailure { error ->
             initFailure = "Silero VAD init failed: ${error.message ?: error.javaClass.simpleName}"
             vad = null
+            logUnavailable(initFailure ?: "Silero VAD init failed")
         }
     }
 
@@ -186,6 +202,12 @@ class SileroVadDetector(
         )
     }
 
+    private fun logUnavailable(reason: String) {
+        if (reason == lastUnavailableReason) return
+        lastUnavailableReason = reason
+        Log.w(TAG, "Silero unavailable: $reason")
+    }
+
     private fun computeRms(samples: ShortArray, length: Int): Float {
         val count = length.coerceIn(0, samples.size)
         if (count <= 0) return 0f
@@ -212,5 +234,9 @@ class SileroVadDetector(
             previous = current
         }
         return crossings.toFloat() / (count - 1)
+    }
+
+    companion object {
+        private const val TAG = "SileroVadDetector"
     }
 }

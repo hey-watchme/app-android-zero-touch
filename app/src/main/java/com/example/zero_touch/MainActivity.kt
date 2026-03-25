@@ -228,7 +228,8 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 onSelectCard = { id -> viewModel.selectCard(id) },
                 onDismissDetail = { viewModel.clearSelection() },
                 onLoadMore = { viewModel.loadMoreSessions(context) },
-                onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") }
+                onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
+                onAmbientStopped = { viewModel.evaluatePendingTopics(context, force = true, reason = "ambient_stop") }
             )
             1 -> TimelineScreen(
                 modifier = Modifier.padding(innerPadding),
@@ -249,7 +250,8 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 onSelectCard = { id -> viewModel.selectCard(id) },
                 onDismissDetail = { viewModel.clearSelection() },
                 onLoadMore = { viewModel.loadMoreSessions(context) },
-                onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") }
+                onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
+                onAmbientStopped = { viewModel.evaluatePendingTopics(context, force = true, reason = "ambient_stop") }
             )
         }
     }

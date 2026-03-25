@@ -34,4 +34,9 @@ class PcmRingBuffer(
         System.arraycopy(buffer, 0, output, tail, writeIndex)
         return output
     }
+
+    fun reset() {
+        writeIndex = 0
+        filled = false
+    }
 }

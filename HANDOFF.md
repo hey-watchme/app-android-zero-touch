@@ -1,206 +1,127 @@
-# ZeroTouch - ロードマップ
+# ZeroTouch Handoff
 
-最終更新: 2026-03-23
+最終更新: 2026-03-25
 
----
+## 最初に読むもの
 
-## 現在の状態
+1. この `HANDOFF.md`
+2. GitHub Issues: `hey-watchme/app-android-zero-touch`
+3. [README.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/README.md)
+4. [docs/conversation-pipeline-processes.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/conversation-pipeline-processes.md)
 
-アンビエント録音 MVP が実装済み。**LLM カード生成は停止中**（Speechmatics の文字起こしのみ）。
+## このプロジェクトの現在地
 
-| コンポーネント | 状態 |
-|---|---|
-| バックエンド（FastAPI :8061） | EC2 稼働中、CI/CD 正常 |
-| Nginx `/zerotouch/` → `:8061` | 設定済み |
-| Android アプリ（Notion風UI + BottomSheet） | 実機動作確認済み（Xiaomi Redmi タブレット） |
-| Supabase `zerotouch_sessions` | 作成済み |
-| GitHub Actions → ECR → EC2 | 正常動作 |
+ZeroTouch は WatchMe の既存インフラを使った派生サービスです。
+Android タブレットを現場に置き、アンビエント録音から会話カードとトピックを生成するプロダクトです。
 
-### 現在のパイプライン（アンビエント自動）
+ただし現在は「Process 2 への移行途中」であり、さらに録音/VAD の基本動作が不安定です。
+先に Process 2 を完成させるのではなく、まず ambient recording の正常化を優先してください。
 
-```
-Android: VAD 検出 → 自動録音 → Upload
-  ↓
-Backend: S3保存 → Speechmatics文字起こし
-  ↓
-Android: 5秒ポーリング → カード表示
-```
+## 重要な判断
 
-**録音ルール（現在値）**
-- 先頭 2 秒リングバッファを含めて保存
-- 無音 5 秒でセッション終了
-- 最小 3 秒未満は破棄
+- Process 2 の backend 中核はかなり実装済み
+- しかし Android 側と topic フローには旧実装が混在している
+- さらに ambient recording が不安定で、発話セッションが正しく閉じない
+- そのため、最優先は録音/VAD の安定化
+- Process 2 の実装再開は、その後
 
----
+## このセッションでやったこと（2026-03-25）
 
-## ゴール：アンビエント録音アーキテクチャ
+- `#6` の計測ログを実装（録音開始/終了理由、VAD 遷移、read stall、watchdog 再起動理由の可視化）
+  - `app/src/main/java/com/example/zero_touch/audio/ambient/AmbientRecorder.kt`
+  - `app/src/main/java/com/example/zero_touch/audio/ambient/AmbientRecordingService.kt`
+  - `app/src/main/java/com/example/zero_touch/audio/ambient/VadDetector.kt`
+  - `app/src/main/java/com/example/zero_touch/audio/ambient/SileroVadDetector.kt`
+  - `app/src/main/java/com/example/zero_touch/audio/ambient/WebRtcVadDetector.kt`
+- デバッグチェックリストを追加: `docs/ambient-recording-debug-checklist.md`
+- README にチェックリストへの参照を追加
+- Java Runtime を `openjdk@21` で導入し、`./gradlew :app:compileDebugKotlin` が成功
+- 無音環境ログ（エアコン停止）を採取し、誤起動が出ないことを確認
+  - 2026-03-25 22:19:51〜22:20:41（JST）
+  - `recording=false` のまま推移、`Recording started` なし
+  - 暫定分類: `no_false_start`（無音では起動しない）
+- VAD 開始/継続の確認条件を強化
+  - 連続 `speech` フレーム + `confidence` しきい値を満たした場合のみ録音開始
+  - 録音中も短いスパイクで silence がリセットされないように調整
+- Watchdog 再起動のクールダウンを追加
+  - 連続再起動ループを抑止（10秒クールダウン）
+  - recorder が null の場合は状態だけリセットして再起動しない
+- UI の音声検出表示を録音状態と分離
+  - 録音中のみステータスを "Recording" に固定
+  - 録音していない場合は "Listening..." を維持し、音声検出は補助ラベル表示
+- リングバッファのプリロールをセッションごとにリセット
+  - 録音終了時に `PcmRingBuffer` をクリアして前セッションの音が混ざらないようにする
+- Android 側の topic フローを `evaluate-pending` に切替（backfill を runtime から除外）
+  - `ZeroTouchViewModel.loadTopicCards` が `evaluate-pending` を呼ぶ
+- アンビエント停止時に `evaluate-pending` を強制実行
+  - `VoiceMemoScreen` のトグルOFFで `evaluate-pending` をトリガー
 
-「置くだけで、会話がカードになる」を実現する。
-ユーザー操作なし、コスト効率の高い常時録音パイプライン。
+## テスト / 実行
 
-### 最終形：カスケードフィルタ方式
+- `./gradlew :app:compileDebugKotlin`（JDK 21 で成功）
+  - `JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home`
 
-```
-Tier 0 ─ VAD（常時稼働、無料）
-  │  人の声を検出。沈黙・環境音を除外。
-  ▼
-Tier 1 ─ オンデバイス STT（無料）
-  │  Android SpeechRecognizer で粗い文字起こし。
-  │  短すぎる発話・無意味な音を除外。
-  ▼
-Tier 2 ─ セッション境界判定
-  │  発話の塊を「1セッション」にまとめる。
-  │  30秒沈黙 → セッション区切り。最大5分で強制分割。
-  ▼
-Tier 3 ─ クラウド処理（有料）
-  │  Speechmatics 高精度文字起こし + GPT カード生成。
-  ▼
-結果 → Supabase → アプリ表示
-```
 
-コスト目標：8時間の営業でクラウド処理は1-2時間分のみ（月$30-45）。
+## GitHub Issues
 
----
+このセッションで、次の実行順で Issue を作成済みです。
+次セッションの担当者には「まず GitHub Issue を上から順に見てください」で通じます。
 
-## ロードマップ
+- `#5` P0 Umbrella: stabilize ambient recording before Process 2 rollout
+- `#6` P0: add instrumentation for ambient recording and VAD session lifecycle
+- `#7` P0: fix false-positive VAD causing endless ambient recording sessions
+- `#8` P0: fix stale-heartbeat auto-restart loop in AmbientRecordingService
+- `#9` P1: separate UI speech indication from actual recording state
+- `#10` P1: prevent ring-buffer pre-roll leakage across ambient sessions
+- `#11` P1: switch Android topic flow from backfillTopics to evaluate-pending
+- `#12` P1: trigger Process 2 topic evaluation when ambient mode stops
+- `#13` P2: remove legacy Process 1 topic flow from the runtime path
+- `#14` P2: align Process 2 topic lifecycle and evaluation-run metadata with spec
 
-### Step 1：VAD + 自動録音/停止（完了）
+推奨順:
 
-**目的**: 「ボタンを押さなくても会話がカードになる」体験の成立確認。
+`#6 -> #7 -> #8 -> #9 -> #10 -> #11 -> #12 -> #13 -> #14`
 
-**変更範囲**: Android のみ（バックエンド変更なし）
+## 次セッションの開始メッセージ
 
-**実装内容**:
-- `AudioRecord` + 簡易 VAD（エネルギー + ZCR）を実装
-- 音声検出 → 録音開始、無音 5 秒 → 録音停止
-- 停止時に自動で既存の `/api/upload` → `/api/transcribe` を呼ぶ
-- UI にアンビエントトグル / ステータス / カード一覧を追加
-- Foreground Service で画面オフでも動作
-- 先頭 2 秒のリングバッファを保存
+次の担当者には、まずこれを伝えれば十分です。
 
-**検証項目**:
-- 会話の開始/終了を正しく拾えるか
-- 1日何セッション生成されるか
-- 誤検出率（テレビ、BGM、関係ない独り言）
-- バッテリー消費（充電中想定だが計測）
+> ZeroTouch は Process 2 移行途中ですが、今は機能追加より先に ambient recording の正常化が必要です。  
+> GitHub の `hey-watchme/app-android-zero-touch` で `#5` を親として順に進めます。  
+> `#6` の計測ログは実装済みなので、まず実機 or エミュレータでログを1本採取して受け入れ条件を満たしてください。  
+> その後 `#7`（VAD false-positive 調整）に進みます。  
+> README と conversation-pipeline-processes.md を再確認して、Issue の受け入れ条件に沿って進めてください。
 
-**セッション境界ルール（初期値）**:
-```
-沈黙 < 5秒    → 同一セッション（息継ぎ・間）
-沈黙 >= 5秒   → 新セッション（現行）
-連続発話 > 5分 → 強制分割
-最小セッション長 < 3秒 → 破棄
-```
+## 現状の技術的な要点
 
-**成功基準**: 手動操作なしで、意味のあるカードが1日5枚以上生成される。
+録音/VAD の主な確認箇所:
 
----
+- [AmbientRecorder.kt](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/app/src/main/java/com/example/zero_touch/audio/ambient/AmbientRecorder.kt)
+- [AmbientRecordingService.kt](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/app/src/main/java/com/example/zero_touch/audio/ambient/AmbientRecordingService.kt)
+- [VadDetector.kt](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/app/src/main/java/com/example/zero_touch/audio/ambient/VadDetector.kt)
+- [SileroVadDetector.kt](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/app/src/main/java/com/example/zero_touch/audio/ambient/SileroVadDetector.kt)
 
-### Step 2：オンデバイス STT フィルタ（コスト最適化）
+Process 2 の主な確認箇所:
 
-**目的**: クラウド処理に送る前に、無意味なセッションをデバイス上で除外する。
+- [topic_manager_process2.py](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/backend/services/topic_manager_process2.py)
+- [background_tasks.py](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/backend/services/background_tasks.py)
+- [app.py](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/backend/app.py)
+- [004_process2_topic_pipeline.sql](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/backend/migrations/004_process2_topic_pipeline.sql)
+- [005_add_device_settings.sql](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/backend/migrations/005_add_device_settings.sql)
 
-**変更範囲**: Android のみ
+Android 側で旧フローが残っている箇所:
 
-**実装内容**:
-- Android `SpeechRecognizer` API（オフライン対応）でリアルタイム粗文字起こし
-- フィルタ条件:
-  - 文字数 < 10文字 → 破棄（「はい」「うん」だけ等）
-  - 業務キーワード辞書によるスコアリング（予約、確認、連絡、お願い 等）
-  - スコアが閾値未満 → 破棄
-- フィルタ通過率の計測ログ
+- [ZeroTouchViewModel.kt](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/app/src/main/java/com/example/zero_touch/ui/ZeroTouchViewModel.kt)
+- [VoiceMemoScreen.kt](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/app/src/main/java/com/example/zero_touch/ui/VoiceMemoScreen.kt)
+- [ZeroTouchApi.kt](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/app/src/main/java/com/example/zero_touch/api/ZeroTouchApi.kt)
 
-**検証項目**:
-- フィルタで何%のセッションが除外されるか（目標: 60-80%）
-- 除外されたセッションに本来処理すべきものがなかったか（偽陰性率）
-- オンデバイス STT の CPU/メモリ負荷
+## いま実装しないこと
 
-**成功基準**: クラウド処理量が Step 1 比で 50%以上削減、かつ偽陰性率 5%以下。
+- Process 2 の追加機能拡張
+- topic/task extraction の高度化
+- UI の大幅リデザイン
 
----
+## 停止点
 
-### Step 3：セッション品質の向上
-
-**目的**: カード生成の精度と実用性を上げる。
-
-**変更範囲**: Android + バックエンド
-
-**実装内容**:
-- セッション境界ルールのチューニング（Step 1-2 の実データに基づく）
-- 話者分離情報の活用（Speechmatics の diarization 結果をカードに反映）
-- セッションメタデータの充実:
-  - オンデバイス STT のプレビューテキスト
-  - 発話者数の推定
-  - 環境ノイズレベル
-- バックエンドのプロンプト改善（現場コンテキストを反映）
-
-**検証項目**:
-- カードの「使える率」（ユーザーが実際に参照するか）
-- 1セッションあたりのカード数と種類分布
-
----
-
-### Step 4：ナレッジ化パイプライン（Phase 2）
-
-**目的**: 単発カードの蓄積から、現場固有のナレッジを構築する。
-
-**変更範囲**: バックエンド + 新 UI
-
-**実装内容**:
-- カードの自動分類・統合（同じ顧客、同じトピック）
-- ファクト抽出 → アノテーション（Business プロジェクトの手法を転用）
-- 検索可能なナレッジベース
-- 現場固有の用語辞書の自動構築
-
----
-
-## 実装ファイルマップ
-
-### Android
-| ファイル | 役割 |
-|---|---|
-| `app/.../MainActivity.kt` | Scaffold + TopAppBar + BottomNav + Settings |
-| `app/.../api/ZeroTouchApi.kt` | APIクライアント（OkHttp） |
-| `app/.../api/DeviceIdProvider.kt` | デバイスID（SharedPreferences + UUID） |
-| `app/.../ui/ZeroTouchViewModel.kt` | 状態管理、アップロード、ポーリング、カード選択 |
-| `app/.../ui/VoiceMemoScreen.kt` | メイン画面（カードリスト + 検索 + アンビエント制御） |
-| `app/.../ui/SettingsScreen.kt` | 設定 BottomSheet（モック） |
-| `app/.../ui/components/AmbientIndicator.kt` | パルスドット + ステータスバナー |
-| `app/.../ui/components/TranscriptCardView.kt` | Notion風カードUI |
-| `app/.../ui/components/CardDetailSheet.kt` | カード詳細 BottomSheet |
-| `app/.../ui/components/ShimmerEffect.kt` | シマーローディング |
-| `app/.../audio/ambient/AmbientRecordingService.kt` | Foreground Service |
-| `app/.../audio/ambient/AmbientRecorder.kt` | VAD / 録音 / セッション分割 |
-| `app/.../audio/ambient/VadDetector.kt` | 簡易 VAD（エネルギー + ZCR） |
-| `app/.../audio/ambient/PcmRingBuffer.kt` | 先頭 2 秒バッファ |
-| `app/.../audio/ambient/Mp4AudioWriter.kt` | AAC/MP4 エンコード |
-
-### バックエンド
-| ファイル | 役割 |
-|---|---|
-| `backend/app.py` | FastAPI メインアプリ（ポート 8061） |
-| `backend/services/prompts.py` | カード生成プロンプト |
-| `backend/services/background_tasks.py` | 非同期処理（文字起こし→カード生成チェーン） |
-| `backend/services/llm_providers.py` | OpenAI/Gemini 抽象化 |
-| `backend/services/llm_models.py` | モデルカタログ（デフォルト: gpt-5.4） |
-| `backend/services/asr_providers/speechmatics_provider.py` | Speechmatics 話者分離 |
-| `backend/docker-compose.prod.yml` | 本番コンテナ（ポート 8061） |
-
-### インフラ
-| リソース | 詳細 |
-|---|---|
-| EC2 | 3.24.16.82（既存 WatchMe サーバー） |
-| ECR | `zerotouch-api` |
-| S3 | `watchme-vault/zerotouch/{device_id}/{date}/{session_id}.m4a` |
-| Supabase | プロジェクト `qvtlwotzuzbavrzqhyvt`、テーブル `zerotouch_sessions` |
-| Nginx | `api.hey-watch.me/zerotouch/` → `localhost:8061` |
-| CI/CD | `.github/workflows/deploy-to-ecr.yml` |
-
----
-
-## 参考
-
-- 企画書: `docs/ambient-agent-spec.md`
-- モデルプロジェクト: `/Users/kaya.matsumoto/projects/watchme/business`
-- WatchMe インフラ: `/Users/kaya.matsumoto/projects/watchme/server-configs`
-- GitHub: `hey-watchme/app-android-zero-touch`
+`#6` の実装とコンパイルまで完了しています。
+次のセッションでは、デバイスまたはエミュレータでログ採取を行い、`#6` の受け入れ条件を満たす証跡を作ってから `#7` に進んでください。
