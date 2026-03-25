@@ -368,7 +368,11 @@ class ZeroTouchViewModel : ViewModel() {
                     deviceId = deviceId,
                     force = force,
                     idleSeconds = idleSeconds,
-                    maxSessions = maxSessions
+                    maxSessions = maxSessions,
+                    boundaryReason = when (reason) {
+                        "ambient_stop" -> "ambient_stopped"
+                        else -> if (force) "manual" else null
+                    }
                 )
                 Log.d(TAG, "evaluate-pending triggered reason=$reason device=$deviceId result=${eval.result}")
                 refreshSessions(context)

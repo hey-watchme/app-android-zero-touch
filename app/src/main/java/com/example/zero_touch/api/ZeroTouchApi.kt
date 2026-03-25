@@ -285,14 +285,18 @@ class ZeroTouchApi(
         deviceId: String,
         force: Boolean = false,
         idleSeconds: Int = 60,
-        maxSessions: Int = 200
+        maxSessions: Int = 200,
+        boundaryReason: String? = null
     ): TopicEvaluatePendingResponse = withContext(Dispatchers.IO) {
-        val payload = mapOf(
+        val payload = mutableMapOf<String, Any>(
             "device_id" to deviceId,
             "force" to force,
             "idle_seconds" to idleSeconds,
             "max_sessions" to maxSessions
         )
+        if (!boundaryReason.isNullOrBlank()) {
+            payload["boundary_reason"] = boundaryReason
+        }
         val requestBody = gson.toJson(payload)
             .toRequestBody("application/json".toMediaType())
 

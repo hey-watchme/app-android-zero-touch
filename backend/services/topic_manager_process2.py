@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from supabase import Client
 
 from services.llm_providers import LLMFactory, get_current_llm
-from services.prompts import build_topic_batch_group_prompt
+from services.prompts import build_topic_batch_group_prompt, build_topic_finalize_prompt
 
 
 SESSION_TABLE = "zerotouch_sessions"
@@ -35,8 +35,11 @@ RUN_STATUS_NEEDS_RETRY = "needs_retry"
 GROUPING_STATUS_GROUPED = "grouped"
 GROUPING_METHOD_LLM_BATCH = "llm_batch_60s_idle"
 GROUPING_METHOD_FALLBACK_BATCH = "fallback_batch_60s_idle"
+GROUPING_METHOD_LIVE_ACTIVE_TOPIC = "live_active_topic"
 
 DEFAULT_IDLE_SECONDS = 60
+VALID_BOUNDARY_REASONS = {"idle_timeout", "ambient_stopped", "manual", "legacy_repair"}
+OPTIONAL_TOPIC_COLUMNS = {"live_description", "final_description", "boundary_reason"}
 
 
 def _now_utc() -> datetime:
@@ -85,6 +88,58 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _error_mentions_missing_column(error: Exception, column: str) -> bool:
+    message = str(error).lower()
+    column_name = column.lower()
+    return column_name in message and (
+        "column" in message
+        or "schema cache" in message
+        or "could not find" in message
+    )
+
+
+def _insert_topic_with_compat(
+    supabase: Client,
+    payload: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    candidate = dict(payload)
+    while True:
+        try:
+            return supabase.table(TOPIC_TABLE).insert(candidate).execute().data or []
+        except Exception as error:
+            missing = [
+                column
+                for column in OPTIONAL_TOPIC_COLUMNS
+                if column in candidate and _error_mentions_missing_column(error, column)
+            ]
+            if not missing:
+                raise
+            for column in missing:
+                candidate.pop(column, None)
+
+
+def _update_topic_with_compat(
+    supabase: Client,
+    topic_id: str,
+    payload: Dict[str, Any],
+) -> None:
+    candidate = dict(payload)
+    while True:
+        try:
+            supabase.table(TOPIC_TABLE).update(candidate).eq("id", topic_id).execute()
+            return
+        except Exception as error:
+            missing = [
+                column
+                for column in OPTIONAL_TOPIC_COLUMNS
+                if column in candidate and _error_mentions_missing_column(error, column)
+            ]
+            if not missing:
+                raise
+            for column in missing:
+                candidate.pop(column, None)
+
+
 def resolve_device_llm_service(
     supabase: Client,
     device_id: str,
@@ -115,6 +170,384 @@ def resolve_device_llm_service(
         return fallback_llm_service or get_current_llm()
 
 
+def _build_live_topic_title(transcript: str) -> str:
+    text = (transcript or "").strip()
+    if not text:
+        return "Conversation"
+    title = text[:28].strip()
+    return title or "Conversation"
+
+
+def _build_live_topic_summary(transcript: str) -> Optional[str]:
+    text = (transcript or "").strip()
+    if not text:
+        return None
+    return text[:220]
+
+
+def _build_live_topic_description(transcript: str) -> Optional[str]:
+    text = (transcript or "").strip()
+    if not text:
+        return None
+    return text[:500]
+
+
+def _get_active_topic(
+    supabase: Client,
+    device_id: str,
+) -> Optional[Dict[str, Any]]:
+    try:
+        rows = (
+            supabase.table(TOPIC_TABLE)
+            .select(
+                "id, device_id, topic_status, start_at, end_at, last_utterance_at, "
+                "utterance_count, live_title, live_summary, live_description"
+            )
+            .eq("device_id", device_id)
+            .eq("topic_status", "active")
+            .order("last_utterance_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as error:
+        if not _error_mentions_missing_column(error, "live_description"):
+            raise
+        rows = (
+            supabase.table(TOPIC_TABLE)
+            .select(
+                "id, device_id, topic_status, start_at, end_at, last_utterance_at, "
+                "utterance_count, live_title, live_summary"
+            )
+            .eq("device_id", device_id)
+            .eq("topic_status", "active")
+            .order("last_utterance_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+    return rows[0] if rows else None
+
+
+def _create_active_topic(
+    supabase: Client,
+    device_id: str,
+    event_ts: datetime,
+    transcript: str,
+) -> Dict[str, Any]:
+    now_iso = _iso_now()
+    payload = {
+        "device_id": device_id,
+        "topic_status": "active",
+        "start_at": event_ts.isoformat(),
+        "end_at": event_ts.isoformat(),
+        "last_utterance_at": event_ts.isoformat(),
+        "utterance_count": 0,
+        "live_title": _build_live_topic_title(transcript),
+        "live_summary": _build_live_topic_summary(transcript),
+        "live_description": _build_live_topic_description(transcript),
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    try:
+        rows = _insert_topic_with_compat(supabase=supabase, payload=payload)
+        if not rows:
+            raise RuntimeError("Failed to create active topic")
+        return rows[0]
+    except Exception:
+        # Another concurrent session may have created the active topic.
+        existing = _get_active_topic(supabase=supabase, device_id=device_id)
+        if existing:
+            return existing
+        raise
+
+
+def _touch_active_topic_with_session(
+    supabase: Client,
+    topic: Dict[str, Any],
+    event_ts: datetime,
+    transcript: str,
+) -> None:
+    now_iso = _iso_now()
+    current_end = _parse_timestamp(topic.get("end_at"))
+    updated_end = max(current_end, event_ts).isoformat()
+    current_count = int(topic.get("utterance_count") or 0)
+    current_summary = topic.get("live_summary")
+    current_description = topic.get("live_description")
+
+    payload: Dict[str, Any] = {
+        "end_at": updated_end,
+        "last_utterance_at": event_ts.isoformat(),
+        "utterance_count": current_count + 1,
+        "updated_at": now_iso,
+    }
+    if not current_summary:
+        payload["live_summary"] = _build_live_topic_summary(transcript)
+    if not current_description:
+        payload["live_description"] = _build_live_topic_description(transcript)
+
+    _update_topic_with_compat(
+        supabase=supabase,
+        topic_id=topic["id"],
+        payload=payload,
+    )
+
+
+def assign_session_to_active_topic(
+    session_id: str,
+    supabase: Client,
+) -> Dict[str, Any]:
+    response = (
+        supabase.table(SESSION_TABLE)
+        .select("id, device_id, status, topic_id, transcription, recorded_at, created_at")
+        .eq("id", session_id)
+        .single()
+        .execute()
+    )
+    session = response.data
+    if not session:
+        raise ValueError(f"Session not found: {session_id}")
+
+    device_id = session.get("device_id")
+    if not device_id:
+        raise ValueError(f"device_id is missing for session: {session_id}")
+
+    if session.get("topic_id"):
+        return {
+            "session_id": session_id,
+            "device_id": device_id,
+            "topic_id": session.get("topic_id"),
+            "assigned": False,
+            "reason": "already_assigned",
+        }
+
+    if session.get("status") != "transcribed":
+        return {
+            "session_id": session_id,
+            "device_id": device_id,
+            "assigned": False,
+            "reason": "status_not_transcribed",
+        }
+
+    transcript = (session.get("transcription") or "").strip()
+    event_ts = _parse_timestamp(session.get("recorded_at") or session.get("created_at"))
+    topic = _get_active_topic(supabase=supabase, device_id=device_id)
+    created_new_topic = False
+    if not topic:
+        topic = _create_active_topic(
+            supabase=supabase,
+            device_id=device_id,
+            event_ts=event_ts,
+            transcript=transcript,
+        )
+        created_new_topic = True
+
+    now_iso = _iso_now()
+    supabase.table(SESSION_TABLE).update(
+        {
+            "topic_id": topic["id"],
+            "grouping_status": GROUPING_STATUS_GROUPED,
+            "grouping_method": GROUPING_METHOD_LIVE_ACTIVE_TOPIC,
+            "topic_assigned_at": now_iso,
+            "topic_eval_status": TOPIC_EVAL_GROUPED,
+            "topic_eval_run_id": None,
+            "topic_eval_marked_at": now_iso,
+            "topic_eval_error": None,
+            "updated_at": now_iso,
+        }
+    ).eq("id", session_id).execute()
+
+    _touch_active_topic_with_session(
+        supabase=supabase,
+        topic=topic,
+        event_ts=event_ts,
+        transcript=transcript,
+    )
+
+    return {
+        "session_id": session_id,
+        "device_id": device_id,
+        "topic_id": topic["id"],
+        "assigned": True,
+        "created_new_topic": created_new_topic,
+        "reason": "assigned_to_active_topic",
+    }
+
+
+def _collect_topic_sessions(
+    supabase: Client,
+    topic_id: str,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    return (
+        supabase.table(SESSION_TABLE)
+        .select("id, transcription, recorded_at, created_at")
+        .eq("topic_id", topic_id)
+        .order("created_at", desc=False)
+        .limit(limit)
+        .execute()
+        .data
+        or []
+    )
+
+
+def _normalize_boundary_reason(
+    boundary_reason: Optional[str],
+    force: bool,
+) -> str:
+    reason = (boundary_reason or "").strip().lower()
+    if reason in VALID_BOUNDARY_REASONS:
+        return reason
+    if force:
+        return "manual"
+    return "idle_timeout"
+
+
+def _build_finalize_defaults(
+    topic: Dict[str, Any],
+    sessions: List[Dict[str, Any]],
+) -> Tuple[str, str, str]:
+    texts = [
+        (row.get("transcription") or "").strip()
+        for row in sessions
+        if (row.get("transcription") or "").strip()
+    ]
+    title = str(topic.get("live_title") or "").strip() or "Conversation"
+    summary = str(topic.get("live_summary") or "").strip()
+    if not summary:
+        summary = " ".join(texts[:2])[:220] if texts else ""
+    description = str(topic.get("live_description") or "").strip()
+    if not description:
+        description = " ".join(texts[:4])[:500] if texts else summary
+    return title, summary, description
+
+
+def _run_llm_topic_finalize(
+    llm_service,
+    sessions: List[Dict[str, Any]],
+    fallback_title: str,
+    fallback_summary: str,
+    fallback_description: str,
+) -> Tuple[str, str, str, bool]:
+    texts = [
+        (row.get("transcription") or "").strip()
+        for row in sessions
+        if (row.get("transcription") or "").strip()
+    ]
+    if not llm_service or not texts:
+        return fallback_title, fallback_summary, fallback_description, False
+
+    try:
+        prompt = build_topic_finalize_prompt(texts)
+        raw_output = llm_service.generate(prompt)
+        payload = _extract_json(raw_output) or {}
+
+        title = str(payload.get("final_title") or "").strip() or fallback_title
+        summary = str(payload.get("final_summary") or "").strip() or fallback_summary
+        description = str(
+            payload.get("final_description")
+            or payload.get("description")
+            or ""
+        ).strip()
+        if not description:
+            description = fallback_description or summary
+        return title[:80], summary[:500], description[:500], True
+    except Exception:
+        return fallback_title, fallback_summary, fallback_description, False
+
+
+def _extract_llm_metadata(llm_service) -> Tuple[Optional[str], Optional[str]]:
+    model_name = str(getattr(llm_service, "model_name", "") or "").strip()
+    if not model_name:
+        return None, None
+    if "/" in model_name:
+        provider, model = model_name.split("/", 1)
+        return provider or None, model or None
+    return None, model_name
+
+
+def finalize_active_topic_for_device(
+    supabase: Client,
+    device_id: str,
+    llm_service=None,
+    idle_seconds: int = DEFAULT_IDLE_SECONDS,
+    force: bool = False,
+    boundary_reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    if not device_id:
+        raise ValueError("device_id is required")
+
+    topic = _get_active_topic(supabase=supabase, device_id=device_id)
+    if not topic:
+        return {
+            "device_id": device_id,
+            "ready": False,
+            "reason": "no_active_topic",
+        }
+
+    latest_ts = _parse_timestamp(topic.get("last_utterance_at") or topic.get("end_at") or topic.get("updated_at"))
+    idle_elapsed = (_now_utc() - latest_ts).total_seconds()
+    if not force and idle_elapsed < idle_seconds:
+        return {
+            "device_id": device_id,
+            "ready": False,
+            "reason": "idle_threshold_not_reached",
+            "idle_elapsed_seconds": int(idle_elapsed),
+            "idle_threshold_seconds": idle_seconds,
+            "topic_id": topic["id"],
+        }
+
+    sessions = _collect_topic_sessions(supabase=supabase, topic_id=topic["id"])
+    fallback_title, fallback_summary, fallback_description = _build_finalize_defaults(topic, sessions)
+    final_title, final_summary, final_description, used_llm = _run_llm_topic_finalize(
+        llm_service=llm_service,
+        sessions=sessions,
+        fallback_title=fallback_title,
+        fallback_summary=fallback_summary,
+        fallback_description=fallback_description,
+    )
+    provider, model = _extract_llm_metadata(llm_service if used_llm else None)
+    normalized_boundary_reason = _normalize_boundary_reason(boundary_reason=boundary_reason, force=force)
+
+    now_iso = _iso_now()
+    update_payload: Dict[str, Any] = {
+        "topic_status": "finalized",
+        "final_title": final_title,
+        "final_summary": final_summary or None,
+        "final_description": final_description or None,
+        "boundary_reason": normalized_boundary_reason,
+        "finalized_at": now_iso,
+        "updated_at": now_iso,
+    }
+    if not (topic.get("live_title") or "").strip():
+        update_payload["live_title"] = final_title
+    if not (topic.get("live_summary") or "").strip() and final_summary:
+        update_payload["live_summary"] = final_summary
+    if not (topic.get("live_description") or "").strip() and final_description:
+        update_payload["live_description"] = final_description
+
+    _update_topic_with_compat(
+        supabase=supabase,
+        topic_id=topic["id"],
+        payload=update_payload,
+    )
+
+    return {
+        "device_id": device_id,
+        "ready": True,
+        "reason": "topic_finalized",
+        "topic_id": topic["id"],
+        "idle_elapsed_seconds": int(idle_elapsed),
+        "boundary_reason": normalized_boundary_reason,
+        "used_llm": used_llm,
+        "llm_provider": provider,
+        "llm_model": model,
+    }
+
+
+# Legacy path kept temporarily for /api/topics/evaluate-pending during migration.
 def mark_session_for_topic_evaluation(
     session_id: str,
     supabase: Client,

@@ -17,18 +17,28 @@
 必要に応じて、このリポジトリのGitHub Actionsは  
 `.github/workflows/` 配下を確認してください。
 
-## 現在の実装（MVP）
+`HANDOFF.md` は廃止済みです。次の担当者は README と `docs/conversation-pipeline-processes.md` を起点に状況を把握してください。
 
-**パイプライン**: アンビエント録音 → S3アップロード → ASR文字起こし（Speechmatics / Deepgram）→ アプリ表示  
-※ **LLM カード生成は一旦停止中**（`/api/generate-cards` は未使用）
+## 現在の方針
 
-この方式は、会話パイプライン設計上の **`Process 1`** として扱います。  
-試行中の設計メモは `docs/conversation-pipeline-processes.md` を参照してください。
+**ソースオブトゥルース**: `docs/conversation-pipeline-processes.md`
+
+ZeroTouch の会話可視化パイプラインは、現在以下のモデルへ整理し直しています。
+
+- `Card` は発言の最小単位で、ASR 完了後に必ず生成される
+- `Topic` は Card を受ける live な箱で、Card と同時に必ず存在する
+- Topic の境界は `60秒無発言` または `Ambient Off` の機械ルールで決まる
+- LLM は Topic を分割せず、Topic 確定時にタイトル、要約、説明文を整える
+
+**目標パイプライン**: アンビエント録音 → S3アップロード → ASR文字起こし（Speechmatics / Deepgram）→ Card生成 → active Topic へ即時紐付け → アプリ表示 → idle / ambient stop で Topic finalize → LLM で Topic 要約
+
+※ **LLM カード生成は一旦停止中**（`/api/generate-cards` は未使用）  
+※ コードベースには旧 `pending -> batch grouping` モデルの実装が一部残っており、現在はこの README と `docs/conversation-pipeline-processes.md` を基準に整理中です。
 
 **ASRプロバイダー**: Speechmatics / Deepgram（アプリの設定から選択）
 
 > 重要: ZeroTouch は WatchMe のインフラ（同一 Supabase / S3 / EC2）を「間借り」していますが、  
-> **DB は `zerotouch_sessions`（発言）と `conversation_topics`（会話グループ）**のみを使用する POC です。WatchMe 本家の既存テーブル/パイプラインには触れません。
+> **DB は `zerotouch_sessions`（Card）と `zerotouch_conversation_topics`（Topic）を中心に使う POC** です。WatchMe 本家の既存テーブル/パイプラインには触れません。
 
 ## 対象タブレット
 
@@ -48,9 +58,9 @@ Backend API (FastAPI :8061)
   ↓ ASR (Speechmatics / Deepgram)
 Transcription
   ↓
-Supabase (zerotouch_sessions / conversation_topics)
+Supabase (zerotouch_sessions / zerotouch_conversation_topics)
   ↓ Polling (5s)
-Android App (Card Display)
+Android App (Card-first Display)
 ```
 
 ### Android アプリ（Notion風UI）
@@ -80,7 +90,7 @@ Android App (Card Display)
 | `/api/generate-cards/{id}` | POST | カード生成開始（202 Accepted / 現在は未使用） |
 | `/api/topics` | GET | トピック一覧取得 |
 | `/api/topics/{topic_id}` | GET | トピック詳細取得 |
-| `/api/topics/evaluate-pending` | POST | `device_id` 単位で pending 発言を Process 2 評価 |
+| `/api/topics/evaluate-pending` | POST | active topic の finalize トリガー（エンドポイント名は旧名を踏襲） |
 | `/api/device-settings/{device_id}` | GET | デバイス設定（LLM）取得 |
 | `/api/device-settings/{device_id}` | POST | デバイス設定（LLM）更新 |
 | `/api/sessions/{id}` | GET | セッション詳細取得 |
@@ -93,9 +103,9 @@ Android App (Card Display)
 ### データベース
 
 - テーブル:
-  - `zerotouch_sessions`（発言単位）
-  - `zerotouch_conversation_topics`（発言を束ねるトピック単位）
-  - `zerotouch_topic_evaluation_runs`（Process 2 の評価バッチ管理）
+  - `zerotouch_sessions`（Card / 発言単位）
+  - `zerotouch_conversation_topics`（Topic / Card を束ねる会話区間）
+  - `zerotouch_topic_evaluation_runs`（旧 Process 2 の評価バッチ管理。整理対象）
   - `zerotouch_device_settings`（デバイスごとの LLM 設定）
 - ステータス遷移: `recording → uploaded → transcribing → transcribed → generating → completed / failed`
   - ※ 現在は `transcribed` までを利用
@@ -126,7 +136,7 @@ cp .env.example .env
 # - Deepgram: DEEPGRAM_API_KEY
 # Optional:
 # - ASR_PROVIDER / ASR_MODEL / ASR_LANGUAGE（デフォルト設定）
-# - TOPIC_PIPELINE_MODE（`process1` または `process2`、デフォルト: `process2`）
+# - TOPIC_PIPELINE_MODE は旧トピック実装の切り替え用。新モデルへ移行後は整理予定
 
 python3 -m venv venv
 source venv/bin/activate
@@ -144,6 +154,7 @@ Supabase SQL Editorで以下を順に実行:
 3. `backend/migrations/003_add_conversation_topics.sql`
 4. `backend/migrations/004_process2_topic_pipeline.sql`
 5. `backend/migrations/005_add_device_settings.sql`
+6. `backend/migrations/006_live_topic_container_constraints.sql`（1 device 1 active topic 制約 + topic description/boundary metadata）
 
 ### Android
 
@@ -191,7 +202,7 @@ android-zero-touch/
 │   │   ├── llm_models.py       # モデルカタログ
 │   │   ├── prompts.py          # カード生成プロンプト
 │   │   ├── background_tasks.py  # 非同期処理
-│   │   ├── topic_manager_process2.py # Process 2 (60秒無発言バッチ評価)
+│   │   ├── topic_manager_process2.py # 旧 Process 2 実装。live-topic モデルへ置換予定
 │   │   └── asr_providers/
 │   │       └── speechmatics_provider.py
 │   ├── migrations/
@@ -199,13 +210,14 @@ android-zero-touch/
 │   │   ├── 002_lockdown_zerotouch_sessions_rls.sql
 │   │   ├── 003_add_conversation_topics.sql
 │   │   ├── 004_process2_topic_pipeline.sql
-│   │   └── 005_add_device_settings.sql
+│   │   ├── 005_add_device_settings.sql
+│   │   └── 006_live_topic_container_constraints.sql
 │   ├── Dockerfile
 │   ├── docker-compose.prod.yml
 │   └── requirements.txt
 └── docs/
     ├── ambient-agent-spec.md    # 企画書
-    └── conversation-pipeline-processes.md # Process 1 / 2 試行メモ
+    └── conversation-pipeline-processes.md # 現行の会話可視化パイプライン定義
 ```
 
 ## 今後の拡張（Phase 2+）

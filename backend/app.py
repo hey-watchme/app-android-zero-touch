@@ -22,7 +22,7 @@ from services.llm_models import get_model_catalog
 from services.asr_providers import get_asr_service
 from services.background_tasks import transcribe_background, generate_cards_background
 from services.topic_manager_process2 import (
-    process_pending_topics_for_device,
+    finalize_active_topic_for_device,
     resolve_device_llm_service,
 )
 from services.topic_manager import backfill_ungrouped_sessions, reconcile_topics
@@ -120,6 +120,7 @@ class TopicEvaluatePendingRequest(BaseModel):
     force: bool = False
     idle_seconds: int = 60
     max_sessions: int = 200
+    boundary_reason: Optional[str] = None
 
 
 class DeviceSettingsRequest(BaseModel):
@@ -417,19 +418,24 @@ def backfill_topics(body: TopicBackfillRequest = None):
 @app.post("/api/topics/evaluate-pending")
 def evaluate_pending_topics(body: TopicEvaluatePendingRequest):
     safe_idle = max(10, min(body.idle_seconds, 3600))
-    safe_max_sessions = max(1, min(body.max_sessions, 500))
     llm_service = resolve_device_llm_service(
         supabase=supabase,
         device_id=body.device_id,
         fallback_llm_service=_get_topic_llm_service(),
     )
-    result = process_pending_topics_for_device(
+    reason = (body.boundary_reason or "").strip().lower()
+    if not reason:
+        reason = "manual" if body.force else "idle_timeout"
+    if reason not in {"idle_timeout", "ambient_stopped", "manual", "legacy_repair"}:
+        reason = "manual" if body.force else "idle_timeout"
+
+    result = finalize_active_topic_for_device(
         supabase=supabase,
         device_id=body.device_id,
         llm_service=llm_service,
         idle_seconds=safe_idle,
-        max_sessions=safe_max_sessions,
         force=body.force,
+        boundary_reason=reason,
     )
     return {"status": "ok", "result": result}
 

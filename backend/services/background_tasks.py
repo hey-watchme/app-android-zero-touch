@@ -16,8 +16,8 @@ import boto3
 from supabase import Client
 from services.prompts import build_card_generation_prompt
 from services.topic_manager_process2 import (
-    mark_session_for_topic_evaluation,
-    process_pending_topics_for_device,
+    assign_session_to_active_topic,
+    finalize_active_topic_for_device,
     resolve_device_llm_service,
 )
 from services.topic_manager import (
@@ -43,7 +43,7 @@ def _format_llm_error(error: Exception) -> str:
     return f"LLM generation failed: {message}"
 
 
-def _run_delayed_process2_evaluation(
+def _run_delayed_active_topic_finalize(
     device_id: str,
     supabase: Client,
     topic_llm_service,
@@ -52,16 +52,17 @@ def _run_delayed_process2_evaluation(
     safe_delay = max(5, min(delay_seconds, 300))
     time.sleep(safe_delay)
     try:
-        result = process_pending_topics_for_device(
+        result = finalize_active_topic_for_device(
             supabase=supabase,
             device_id=device_id,
             llm_service=topic_llm_service,
             idle_seconds=60,
             force=False,
+            boundary_reason="idle_timeout",
         )
-        print(f"[Background] Process2 delayed evaluate result: {result}")
+        print(f"[Background] Delayed topic finalize result: {result}")
     except Exception as error:
-        print(f"[Background] Process2 delayed evaluate failed: device={device_id} error={error}")
+        print(f"[Background] Delayed topic finalize failed: device={device_id} error={error}")
 
 
 def transcribe_background(
@@ -131,47 +132,52 @@ def transcribe_background(
         print(f"[Background] Transcription completed in {processing_time:.2f}s for session: {session_id}")
 
         # Topic pipeline mode:
-        # - process2: queue card -> evaluate by device after 60s without new utterances
+        # - process2: assign each transcribed card to current active topic immediately
         # - process1: legacy immediate topic assignment
         if TOPIC_PIPELINE_MODE == "process2":
             try:
-                queue_result = mark_session_for_topic_evaluation(
+                assignment_result = assign_session_to_active_topic(
                     session_id=session_id,
                     supabase=supabase,
                 )
-                print(f"[Background] Process2 queue result: {queue_result}")
-                device_id = queue_result.get("device_id")
-                if queue_result.get("queued") and device_id:
+                print(f"[Background] Process2 immediate topic assignment: {assignment_result}")
+                device_id = assignment_result.get("device_id")
+                if assignment_result.get("assigned") and device_id:
                     device_llm = resolve_device_llm_service(
                         supabase=supabase,
                         device_id=device_id,
                         fallback_llm_service=topic_llm_service,
                     )
-                    eval_result = process_pending_topics_for_device(
+                    finalize_result = finalize_active_topic_for_device(
                         supabase=supabase,
                         device_id=device_id,
                         llm_service=device_llm,
                         idle_seconds=60,
+                        force=False,
+                        boundary_reason="idle_timeout",
                     )
-                    print(f"[Background] Process2 evaluate result: {eval_result}")
-                    # Ensure Process 2 still runs when no new utterance arrives after this one.
-                    delay_seconds = 65
-                    if eval_result.get("reason") == "idle_threshold_not_reached":
-                        elapsed = int(eval_result.get("idle_elapsed_seconds") or 0)
-                        threshold = int(eval_result.get("idle_threshold_seconds") or 60)
+                    print(f"[Background] Process2 topic finalize check: {finalize_result}")
+                    if finalize_result.get("reason") == "idle_threshold_not_reached":
+                        elapsed = int(finalize_result.get("idle_elapsed_seconds") or 0)
+                        threshold = int(finalize_result.get("idle_threshold_seconds") or 60)
                         delay_seconds = max(5, (threshold - elapsed) + 5)
-                    threading.Thread(
-                        target=_run_delayed_process2_evaluation,
-                        kwargs={
-                            "device_id": device_id,
-                            "supabase": supabase,
-                            "topic_llm_service": device_llm,
-                            "delay_seconds": delay_seconds,
-                        },
-                        daemon=True,
-                    ).start()
+                        threading.Thread(
+                            target=_run_delayed_active_topic_finalize,
+                            kwargs={
+                                "device_id": device_id,
+                                "supabase": supabase,
+                                "topic_llm_service": device_llm,
+                                "delay_seconds": delay_seconds,
+                            },
+                            daemon=True,
+                        ).start()
             except Exception as topic_error:
                 print(f"[Background] Process2 topic pipeline failed: {topic_error}")
+                supabase.table(TABLE).update({
+                    'topic_eval_status': 'needs_retry',
+                    'topic_eval_error': str(topic_error)[:500],
+                    'updated_at': datetime.now().isoformat()
+                }).eq('id', session_id).execute()
         else:
             try:
                 topic_result = process_transcribed_session(
