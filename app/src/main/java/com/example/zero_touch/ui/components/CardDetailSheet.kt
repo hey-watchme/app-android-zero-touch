@@ -1,6 +1,8 @@
 package com.example.zero_touch.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,7 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -19,6 +23,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -34,14 +39,16 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.example.zero_touch.ui.TranscriptCard
 import com.example.zero_touch.ui.theme.ZtCaption
+import com.example.zero_touch.ui.theme.ZtCardRowDivider
 import com.example.zero_touch.ui.theme.ZtError
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
 import com.example.zero_touch.ui.theme.ZtOutline
 import com.example.zero_touch.ui.theme.ZtPrimary
+import com.example.zero_touch.ui.theme.ZtSuccess
+import com.example.zero_touch.ui.theme.ZtWarning
 
 /**
- * Bottom sheet showing full transcript detail.
- * Includes full text (selectable), metadata, and action buttons.
+ * Bottom sheet showing full transcript detail with enhanced metadata display.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,67 +67,81 @@ fun CardDetailSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 40.dp)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header
-            Text(
-                text = card.displayTitle,
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = card.displayDate,
-                style = MaterialTheme.typography.bodyMedium,
-                color = ZtOnSurfaceVariant
-            )
-
-            // Duration row
-            if (card.durationSeconds > 0) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Outlined.Timer,
-                        contentDescription = null,
-                        tint = ZtOnSurfaceVariant,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = formatDetailDuration(card.durationSeconds),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ZtOnSurfaceVariant
-                    )
-                }
-            }
-
-            // Status
+            // Header: title + status badge inline
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Text(
+                    text = card.displayTitle,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
                 StatusPill(card.displayStatus, card.status)
             }
 
-            // ASR provider/model
-            val asrLabel = buildAsrLabel(card.asrProvider, card.asrModel, card.asrLanguage)
-            if (asrLabel.isNotBlank()) {
+            // Metadata row: date + duration + ASR info
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = "ASR: $asrLabel",
+                    text = card.displayDate,
                     style = MaterialTheme.typography.bodySmall,
                     color = ZtOnSurfaceVariant
                 )
+                if (card.durationSeconds > 0) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Outlined.Timer,
+                            contentDescription = null,
+                            tint = ZtCaption,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = formatDetailDuration(card.durationSeconds),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ZtOnSurfaceVariant
+                        )
+                    }
+                }
+                val asrLabel = buildAsrLabel(card.asrProvider, card.asrModel, card.asrLanguage)
+                if (asrLabel.isNotBlank()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Outlined.Translate,
+                            contentDescription = null,
+                            tint = ZtCaption,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = asrLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ZtCaption
+                        )
+                    }
+                }
             }
 
-            HorizontalDivider(color = ZtOutline)
+            HorizontalDivider(color = ZtCardRowDivider, thickness = 0.5.dp)
 
             // Transcription content (selectable)
             if (card.isProcessing) {
@@ -134,18 +155,19 @@ fun CardDetailSheet(
                     Text(
                         text = card.text,
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        lineHeight = MaterialTheme.typography.bodyLarge.lineHeight
                     )
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
-            HorizontalDivider(color = ZtOutline)
+            Spacer(Modifier.height(4.dp))
+            HorizontalDivider(color = ZtCardRowDivider, thickness = 0.5.dp)
 
             // Action buttons row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 SheetActionButton(
                     icon = Icons.Outlined.ContentCopy,
@@ -170,15 +192,14 @@ fun CardDetailSheet(
                     modifier = Modifier.weight(1f),
                     tint = ZtError
                 )
-            }
-
-            if (!card.isProcessing && onRetranscribeEnglish != null) {
-                SheetActionButton(
-                    icon = Icons.Outlined.Refresh,
-                    label = "Re-Transcribe EN",
-                    onClick = onRetranscribeEnglish,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (!card.isProcessing && onRetranscribeEnglish != null) {
+                    SheetActionButton(
+                        icon = Icons.Outlined.Refresh,
+                        label = "EN",
+                        onClick = onRetranscribeEnglish,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
     }
@@ -187,25 +208,19 @@ fun CardDetailSheet(
 @Composable
 private fun StatusPill(displayStatus: String, status: String) {
     val (bgColor, textColor) = when (status) {
-        "transcribed", "completed" -> Pair(
-            com.example.zero_touch.ui.theme.ZtSuccess.copy(alpha = 0.1f),
-            com.example.zero_touch.ui.theme.ZtSuccess
-        )
+        "transcribed", "completed" -> Pair(ZtSuccess.copy(alpha = 0.1f), ZtSuccess)
         "failed" -> Pair(ZtError.copy(alpha = 0.1f), ZtError)
-        else -> Pair(
-            com.example.zero_touch.ui.theme.ZtWarning.copy(alpha = 0.1f),
-            com.example.zero_touch.ui.theme.ZtWarning
-        )
+        else -> Pair(ZtWarning.copy(alpha = 0.1f), ZtWarning)
     }
     Surface(
-        shape = RoundedCornerShape(6.dp),
+        shape = RoundedCornerShape(4.dp),
         color = bgColor
     ) {
         Text(
             text = displayStatus,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelSmall,
             color = textColor,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
         )
     }
 }
@@ -221,20 +236,20 @@ private fun SheetActionButton(
     val contentColor = tint ?: ZtOnSurfaceVariant
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         onClick = onClick
     ) {
         Column(
-            modifier = Modifier.padding(vertical = 12.dp),
+            modifier = Modifier.padding(vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Icon(
                 icon,
                 contentDescription = label,
                 tint = contentColor,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(18.dp)
             )
             Text(
                 text = label,
@@ -270,9 +285,9 @@ private fun buildAsrLabel(provider: String?, model: String?, language: String?):
         ?.uppercase()
 
     return when {
-        providerLabel != null && modelLabel != null && languageLabel != null -> "$providerLabel · $modelLabel · $languageLabel"
-        providerLabel != null && modelLabel != null -> "$providerLabel · $modelLabel"
-        providerLabel != null && languageLabel != null -> "$providerLabel · $languageLabel"
+        providerLabel != null && modelLabel != null && languageLabel != null -> "$providerLabel $modelLabel $languageLabel"
+        providerLabel != null && modelLabel != null -> "$providerLabel $modelLabel"
+        providerLabel != null && languageLabel != null -> "$providerLabel $languageLabel"
         providerLabel != null -> providerLabel
         modelLabel != null -> modelLabel
         languageLabel != null -> languageLabel

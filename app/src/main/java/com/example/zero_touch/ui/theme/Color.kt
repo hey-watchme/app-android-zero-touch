@@ -33,3 +33,27 @@ val ZtOutlineVariant = Color(0xFFD6D3D1)
 // Shimmer
 val ZtShimmerBase = Color(0xFFF5F5F4)
 val ZtShimmerHighlight = Color(0xFFEBEAE8)
+
+// --- Extended palette for enhanced UI ---
+
+// Topic container
+val ZtTopicSurface = Color(0xFFFCFCFB)
+val ZtTopicBorder = Color(0xFFEEEDEC)
+
+// Compact card row (within topics)
+val ZtCardRowHover = Color(0xFFF7F7F6)
+val ZtCardRowDivider = Color(0xFFF0EFEE)
+
+// Badge / notification
+val ZtBadge = Color(0xFFEF4444)
+
+// Avatar placeholder
+val ZtAvatarBg = Color(0xFFE0E7FF)
+val ZtAvatarText = Color(0xFF4338CA)
+
+// Filter chip
+val ZtFilterSelected = Color(0xFFEEF2FF)
+val ZtFilterBorder = Color(0xFFE2E8F0)
+
+// Subtle tints for interactive feedback
+val ZtPressedOverlay = Color(0x0A000000)

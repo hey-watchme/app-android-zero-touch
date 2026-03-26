@@ -31,8 +31,7 @@ import com.example.zero_touch.ui.theme.ZtShimmerBase
 import com.example.zero_touch.ui.theme.ZtShimmerHighlight
 
 /**
- * Shimmer loading placeholder cards.
- * Shows 3 skeleton cards while data is loading.
+ * Shimmer loading placeholder — matches the compact topic+card layout.
  */
 @Composable
 fun ShimmerCardList(
@@ -41,16 +40,16 @@ fun ShimmerCardList(
 ) {
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         repeat(count) {
-            ShimmerCard()
+            ShimmerTopicCard()
         }
     }
 }
 
 @Composable
-private fun ShimmerCard() {
+private fun ShimmerTopicCard() {
     val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
     val translateAnim by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -62,81 +61,85 @@ private fun ShimmerCard() {
         label = "shimmer_translate"
     )
     val shimmerBrush = Brush.linearGradient(
-        colors = listOf(
-            ZtShimmerBase,
-            ZtShimmerHighlight,
-            ZtShimmerBase,
-        ),
+        colors = listOf(ZtShimmerBase, ZtShimmerHighlight, ZtShimmerBase),
         start = Offset(translateAnim - 200f, 0f),
         end = Offset(translateAnim + 200f, 0f)
     )
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(10.dp),
         color = androidx.compose.ui.graphics.Color.White,
-        shadowElevation = 1.dp
+        shadowElevation = 0.5.dp
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Header row
+            // Topic header skeleton
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .background(shimmerBrush, RoundedCornerShape(3.dp))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(120.dp)
+                            .height(14.dp)
+                            .background(shimmerBrush, RoundedCornerShape(3.dp))
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .width(48.dp)
+                        .height(14.dp)
+                        .background(shimmerBrush, RoundedCornerShape(3.dp))
+                )
+            }
+            // Summary line
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .height(10.dp)
+                    .background(shimmerBrush, RoundedCornerShape(3.dp))
+            )
+            // Compact card rows
+            repeat(2) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(6.dp)
+                            .size(5.dp)
                             .background(shimmerBrush, CircleShape)
                     )
                     Box(
                         modifier = Modifier
-                            .width(48.dp)
-                            .height(16.dp)
-                            .background(shimmerBrush, RoundedCornerShape(4.dp))
+                            .width(32.dp)
+                            .height(10.dp)
+                            .background(shimmerBrush, RoundedCornerShape(2.dp))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(10.dp)
+                            .background(shimmerBrush, RoundedCornerShape(2.dp))
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .width(36.dp)
-                        .height(16.dp)
-                        .background(shimmerBrush, RoundedCornerShape(4.dp))
-                )
             }
-            // Body lines
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.95f)
-                    .height(12.dp)
-                    .background(shimmerBrush, RoundedCornerShape(4.dp))
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.8f)
-                    .height(12.dp)
-                    .background(shimmerBrush, RoundedCornerShape(4.dp))
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.6f)
-                    .height(12.dp)
-                    .background(shimmerBrush, RoundedCornerShape(4.dp))
-            )
-            // Status
-            Spacer(Modifier.height(2.dp))
-            Box(
-                modifier = Modifier
-                    .width(72.dp)
-                    .height(10.dp)
-                    .background(shimmerBrush, RoundedCornerShape(4.dp))
-            )
         }
     }
 }

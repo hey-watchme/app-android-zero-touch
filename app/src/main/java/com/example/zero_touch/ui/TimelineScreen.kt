@@ -7,12 +7,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,12 +32,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.zero_touch.audio.ambient.AmbientStatus
 import com.example.zero_touch.ui.components.CardDetailSheet
 import com.example.zero_touch.ui.components.TranscriptCardView
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
+import com.example.zero_touch.ui.theme.ZtPrimary
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -99,7 +104,7 @@ fun TimelineScreen(
             }
     }
 
-    // --- Bottom sheet for card detail ---
+    // --- Bottom sheet ---
     val selectedCard = uiState.selectedCardId?.let { id ->
         feedCards.find { it.id == id }
     }
@@ -118,8 +123,8 @@ fun TimelineScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         TimelineHeader(
             selectedDate = selectedDate,
@@ -130,7 +135,8 @@ fun TimelineScreen(
                 }
             },
             canGoNext = selectedDate.isBefore(today),
-            statusText = if (ambientState.isRecording || ambientState.speech) "Ambient: On" else "Ambient: Off"
+            cardCount = cardsForDay.size,
+            isAmbientOn = ambientState.isRecording || ambientState.speech
         )
 
         if (cardsForDay.isEmpty() && !uiState.isLoading && !uiState.isLoadingMore) {
@@ -138,8 +144,8 @@ fun TimelineScreen(
         } else {
             LazyColumn(
                 state = listState,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 16.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(bottom = 12.dp)
             ) {
                 items(cardsForDay, key = { it.id }) { card ->
                     TranscriptCardView(
@@ -155,13 +161,13 @@ fun TimelineScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 12.dp),
+                                .padding(vertical = 8.dp),
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = "Loading more...",
+                                text = "Loading...",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = ZtOnSurfaceVariant
+                                color = ZtCaption
                             )
                         }
                     }
@@ -177,56 +183,72 @@ private fun TimelineHeader(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     canGoNext: Boolean,
-    statusText: String
+    cardCount: Int,
+    isAmbientOn: Boolean
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onPrevious) {
+            IconButton(onClick = onPrevious, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.Outlined.ChevronLeft,
+                    contentDescription = "Previous day",
+                    tint = ZtOnSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Icon(
-                        Icons.Outlined.ChevronLeft,
-                        contentDescription = "Previous day",
-                        tint = ZtOnSurfaceVariant
+                        Icons.Outlined.CalendarToday,
+                        contentDescription = null,
+                        tint = ZtPrimary,
+                        modifier = Modifier.size(14.dp)
                     )
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = formatTimelineDate(selectedDate),
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         text = formatTimelineSubDate(selectedDate),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = ZtCaption
                     )
-                }
-                IconButton(onClick = onNext, enabled = canGoNext) {
-                    Icon(
-                        Icons.Outlined.ChevronRight,
-                        contentDescription = "Next day",
-                        tint = if (canGoNext) ZtOnSurfaceVariant else ZtCaption
+                    Text(
+                        text = "$cardCount cards",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtCaption
                     )
                 }
             }
 
-            Text(
-                text = statusText,
-                style = MaterialTheme.typography.labelSmall,
-                color = ZtCaption,
-                modifier = Modifier.padding(start = 8.dp)
-            )
+            IconButton(onClick = onNext, enabled = canGoNext, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.Outlined.ChevronRight,
+                    contentDescription = "Next day",
+                    tint = if (canGoNext) ZtOnSurfaceVariant else ZtCaption.copy(alpha = 0.3f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }
@@ -238,17 +260,17 @@ private fun EmptyTimelineState(selectedDate: LocalDate) {
             .fillMaxWidth()
             .padding(vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
             text = "No recordings",
             style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface
+            color = ZtOnSurfaceVariant
         )
         Text(
-            text = "${formatTimelineDate(selectedDate)} に録音がありません",
+            text = "No activity on ${formatTimelineDate(selectedDate)}",
             style = MaterialTheme.typography.bodySmall,
-            color = ZtOnSurfaceVariant
+            color = ZtCaption
         )
     }
 }

@@ -47,7 +47,6 @@ import kotlin.math.max
 
 /**
  * Compact ambient recording status banner.
- * Shows a pulsing dot + status text when ambient mode is active.
  */
 @Composable
 fun AmbientStatusBar(
@@ -62,23 +61,24 @@ fun AmbientStatusBar(
     ) {
         val isRecording = ambientState.isRecording
         val bgColor by animateColorAsState(
-            targetValue = if (isRecording) ZtRecording.copy(alpha = 0.06f) else ZtSurfaceVariant,
+            targetValue = if (isRecording) ZtRecording.copy(alpha = 0.05f) else ZtSurfaceVariant,
             label = "ambient_bg"
         )
 
         Surface(
             modifier = modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(8.dp),
             color = bgColor
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 PulsingDot(
                     color = if (isRecording) ZtRecording else ZtSuccess,
-                    isActive = isRecording
+                    isActive = isRecording,
+                    size = 7
                 )
                 Text(
                     text = when {
@@ -91,7 +91,7 @@ fun AmbientStatusBar(
                 Spacer(Modifier.weight(1f))
                 if (!isRecording && ambientState.speech) {
                     Text(
-                        text = "Voice detected",
+                        text = "Voice",
                         style = MaterialTheme.typography.labelSmall,
                         color = ZtSuccess
                     )
@@ -125,15 +125,16 @@ fun AmbientDot(isEnabled: Boolean, isRecording: Boolean) {
     )
     Box(
         modifier = Modifier
-            .size(8.dp)
+            .size(7.dp)
             .background(color.copy(alpha = alpha), CircleShape)
     )
 }
 
 @Composable
 private fun PulsingDot(
-    color: androidx.compose.ui.graphics.Color,
-    isActive: Boolean
+    color: Color,
+    isActive: Boolean,
+    size: Int = 7
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val animatedAlpha by infiniteTransition.animateFloat(
@@ -148,7 +149,7 @@ private fun PulsingDot(
     val alpha = if (isActive) animatedAlpha else 1f
     Box(
         modifier = Modifier
-            .size(8.dp)
+            .size(size.dp)
             .background(color.copy(alpha = alpha), CircleShape)
     )
 }
@@ -159,7 +160,7 @@ private fun DualLevelEqualizer(
     voiceLevel: Float,
     speechDetected: Boolean
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         EqualizerStrip(
             label = "SND",
             level = ambientLevel,
@@ -187,20 +188,20 @@ private fun EqualizerStrip(
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp)
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(1.5.dp),
             verticalAlignment = Alignment.Bottom
         ) {
             EQ_PATTERN.forEach { weight ->
-                val barHeight = 3.dp + (10f * animatedLevel * weight).dp
+                val barHeight = 2.dp + (8f * animatedLevel * weight).dp
                 val alpha = (0.22f + (animatedLevel * 0.78f * weight)).coerceIn(0.18f, 1f)
                 Box(
                     modifier = Modifier
-                        .width(3.dp)
+                        .width(2.5.dp)
                         .height(barHeight)
-                        .clip(RoundedCornerShape(1.5.dp))
+                        .clip(RoundedCornerShape(1.dp))
                         .background(color.copy(alpha = alpha))
                 )
             }

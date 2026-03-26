@@ -12,11 +12,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -42,18 +46,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import android.util.Log
 import com.example.zero_touch.api.ZeroTouchApi
 import com.example.zero_touch.audio.ambient.AmbientPreferences
 import com.example.zero_touch.ui.theme.ZtCaption
+import com.example.zero_touch.ui.theme.ZtCardRowDivider
+import com.example.zero_touch.ui.theme.ZtFilterBorder
+import com.example.zero_touch.ui.theme.ZtFilterSelected
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
 import com.example.zero_touch.ui.theme.ZtOutline
+import com.example.zero_touch.ui.theme.ZtPrimary
+import com.example.zero_touch.ui.theme.ZtSuccess
 import kotlinx.coroutines.launch
 
 /**
- * Mock settings bottom sheet.
- * Contains realistic-looking but non-functional controls.
+ * Settings bottom sheet — refined layout with grouped sections and better spacing.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,7 +85,7 @@ fun SettingsSheet(
     val api = remember { ZeroTouchApi() }
     val scope = rememberCoroutineScope()
 
-    // Sync settings from server on open, but keep local fallback if network fails.
+    // Sync settings from server
     androidx.compose.runtime.LaunchedEffect(deviceId) {
         try {
             val remote = api.getDeviceSettings(deviceId)
@@ -99,31 +108,30 @@ fun SettingsSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 40.dp)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
                 text = "Settings",
                 style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
-            // --- Recording Section ---
-            SectionHeader("Recording")
+            // === Recording ===
+            SectionHeader(icon = Icons.Outlined.Mic, title = "Recording")
 
-            // Sensitivity slider (mock)
             var sensitivity by remember { mutableFloatStateOf(0.5f) }
             SettingsRow(
-                icon = Icons.Outlined.Speed,
                 title = "Sensitivity",
                 subtitle = "VAD detection threshold"
             ) {
@@ -139,50 +147,36 @@ fun SettingsSheet(
             }
 
             val vadSubtitle = when (vadEngine) {
-                AmbientPreferences.VAD_ENGINE_SILERO -> "Silero VAD — model-backed detector"
-                AmbientPreferences.VAD_ENGINE_WEBRTC -> "WebRTC VAD — hidden compatibility mode"
-                else -> "Threshold VAD — default lightweight detector"
+                AmbientPreferences.VAD_ENGINE_SILERO -> "Silero — model-backed"
+                AmbientPreferences.VAD_ENGINE_WEBRTC -> "WebRTC — compatibility mode"
+                else -> "Threshold — lightweight default"
             }
             SettingsRow(
-                icon = Icons.Outlined.Speed,
                 title = "VAD engine",
                 subtitle = vadSubtitle
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
+                ChipGroup {
+                    SettingsChip(
+                        label = "Threshold",
                         selected = vadEngine == AmbientPreferences.VAD_ENGINE_THRESHOLD,
                         onClick = {
                             vadEngine = AmbientPreferences.VAD_ENGINE_THRESHOLD
-                            AmbientPreferences.setVadEngine(
-                                context,
-                                AmbientPreferences.VAD_ENGINE_THRESHOLD
-                            )
-                        },
-                        label = { Text("Threshold") },
-                        colors = FilterChipDefaults.filterChipColors()
+                            AmbientPreferences.setVadEngine(context, AmbientPreferences.VAD_ENGINE_THRESHOLD)
+                        }
                     )
-                    FilterChip(
+                    SettingsChip(
+                        label = "Silero",
                         selected = vadEngine == AmbientPreferences.VAD_ENGINE_SILERO,
                         onClick = {
                             vadEngine = AmbientPreferences.VAD_ENGINE_SILERO
-                            AmbientPreferences.setVadEngine(
-                                context,
-                                AmbientPreferences.VAD_ENGINE_SILERO
-                            )
-                        },
-                        label = { Text("Silero") },
-                        colors = FilterChipDefaults.filterChipColors()
+                            AmbientPreferences.setVadEngine(context, AmbientPreferences.VAD_ENGINE_SILERO)
+                        }
                     )
                 }
             }
 
-            // Min session length (mock)
             var minLength by remember { mutableFloatStateOf(3f) }
             SettingsRow(
-                icon = Icons.Outlined.Timer,
                 title = "Minimum length",
                 subtitle = "${minLength.toInt()}s — discard shorter clips"
             ) {
@@ -199,161 +193,130 @@ fun SettingsSheet(
                 )
             }
 
-            // Auto-transcribe toggle (mock)
             var autoTranscribe by remember { mutableStateOf(true) }
             SettingsToggleRow(
-                icon = Icons.Outlined.Mic,
                 title = "Auto-transcribe",
-                subtitle = "Automatically transcribe after recording",
+                subtitle = "Transcribe after recording",
                 checked = autoTranscribe,
                 onCheckedChange = { autoTranscribe = it }
             )
 
-            Spacer(Modifier.height(8.dp))
+            SettingsDivider()
 
-            SectionHeader("Transcription")
+            // === Transcription ===
+            SectionHeader(icon = Icons.Outlined.Language, title = "Transcription")
             val providerSubtitle = when (asrProvider) {
-                "deepgram" -> "Deepgram (nova-3) — fast + smart format"
-                else -> "Speechmatics (batch) — diarization + entities"
+                "deepgram" -> "Deepgram nova-3 — fast + smart format"
+                else -> "Speechmatics batch — diarization + entities"
             }
             SettingsRow(
-                icon = Icons.Outlined.Mic,
                 title = "ASR Provider",
                 subtitle = providerSubtitle
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
+                ChipGroup {
+                    SettingsChip(
+                        label = "Speechmatics",
                         selected = asrProvider == "speechmatics",
                         onClick = {
                             asrProvider = "speechmatics"
                             AmbientPreferences.setAsrProvider(context, "speechmatics")
-                        },
-                        label = { Text("Speechmatics") },
-                        colors = FilterChipDefaults.filterChipColors()
+                        }
                     )
-                    FilterChip(
+                    SettingsChip(
+                        label = "Deepgram",
                         selected = asrProvider == "deepgram",
                         onClick = {
                             asrProvider = "deepgram"
                             AmbientPreferences.setAsrProvider(context, "deepgram")
-                        },
-                        label = { Text("Deepgram") },
-                        colors = FilterChipDefaults.filterChipColors()
+                        }
                     )
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            SettingsDivider()
 
-            SectionHeader("LLM")
+            // === LLM ===
+            SectionHeader(icon = Icons.Outlined.Psychology, title = "LLM")
             val llmSubtitle = when (llmModel) {
-                "gpt-4.1-nano" -> "OpenAI GPT-4.1 nano — lightweight + fast"
-                "gpt-4.1-mini" -> "OpenAI GPT-4.1 mini — balanced"
-                "gpt-4.1" -> "OpenAI GPT-4.1 — stronger reasoning"
-                "gpt-4o-mini" -> "OpenAI GPT-4o mini — fast"
+                "gpt-4.1-nano" -> "GPT-4.1 nano — lightweight"
+                "gpt-4.1-mini" -> "GPT-4.1 mini — balanced"
+                "gpt-4.1" -> "GPT-4.1 — stronger reasoning"
+                "gpt-4o-mini" -> "GPT-4o mini — fast"
                 else -> "OpenAI $llmModel"
             }
             SettingsRow(
-                icon = Icons.Outlined.Info,
                 title = "LLM Model",
                 subtitle = llmSubtitle
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
+                ChipGroup {
+                    SettingsChip(
+                        label = "4.1 nano",
                         selected = llmModel == "gpt-4.1-nano",
                         onClick = {
-                            llmProvider = "openai"
-                            llmModel = "gpt-4.1-nano"
+                            llmProvider = "openai"; llmModel = "gpt-4.1-nano"
                             AmbientPreferences.setLlmProvider(context, llmProvider)
                             AmbientPreferences.setLlmModel(context, llmModel)
-                            scope.launch {
-                                api.updateDeviceSettings(deviceId, llmProvider, llmModel)
-                            }
-                        },
-                        label = { Text("4.1 nano") },
-                        colors = FilterChipDefaults.filterChipColors()
+                            scope.launch { api.updateDeviceSettings(deviceId, llmProvider, llmModel) }
+                        }
                     )
-                    FilterChip(
+                    SettingsChip(
+                        label = "4.1 mini",
                         selected = llmModel == "gpt-4.1-mini",
                         onClick = {
-                            llmProvider = "openai"
-                            llmModel = "gpt-4.1-mini"
+                            llmProvider = "openai"; llmModel = "gpt-4.1-mini"
                             AmbientPreferences.setLlmProvider(context, llmProvider)
                             AmbientPreferences.setLlmModel(context, llmModel)
-                            scope.launch {
-                                api.updateDeviceSettings(deviceId, llmProvider, llmModel)
-                            }
-                        },
-                        label = { Text("4.1 mini") },
-                        colors = FilterChipDefaults.filterChipColors()
+                            scope.launch { api.updateDeviceSettings(deviceId, llmProvider, llmModel) }
+                        }
                     )
-                    FilterChip(
+                    SettingsChip(
+                        label = "4.1",
                         selected = llmModel == "gpt-4.1",
                         onClick = {
-                            llmProvider = "openai"
-                            llmModel = "gpt-4.1"
+                            llmProvider = "openai"; llmModel = "gpt-4.1"
                             AmbientPreferences.setLlmProvider(context, llmProvider)
                             AmbientPreferences.setLlmModel(context, llmModel)
-                            scope.launch {
-                                api.updateDeviceSettings(deviceId, llmProvider, llmModel)
-                            }
-                        },
-                        label = { Text("4.1") },
-                        colors = FilterChipDefaults.filterChipColors()
+                            scope.launch { api.updateDeviceSettings(deviceId, llmProvider, llmModel) }
+                        }
                     )
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            SettingsDivider()
 
-            SectionHeader("Ambient")
+            // === Ambient ===
+            SectionHeader(icon = Icons.Outlined.GraphicEq, title = "Ambient")
             val ambientSubtitle = when (ambientAudioSource) {
-                "voice_recognition" -> "Voice recognition stream — system-level input"
-                else -> "Microphone input — raw ambient audio"
+                "voice_recognition" -> "Voice recognition — system-level"
+                else -> "Microphone — raw ambient"
             }
             SettingsRow(
-                icon = Icons.Outlined.Mic,
                 title = "Audio source",
                 subtitle = ambientSubtitle
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
+                ChipGroup {
+                    SettingsChip(
+                        label = "Mic",
                         selected = ambientAudioSource == "mic",
                         onClick = {
                             ambientAudioSource = "mic"
                             AmbientPreferences.setAmbientAudioSource(context, "mic")
-                        },
-                        label = { Text("Mic") },
-                        colors = FilterChipDefaults.filterChipColors()
+                        }
                     )
-                    FilterChip(
+                    SettingsChip(
+                        label = "Voice recognition",
                         selected = ambientAudioSource == "voice_recognition",
                         onClick = {
                             ambientAudioSource = "voice_recognition"
-                            AmbientPreferences.setAmbientAudioSource(
-                                context,
-                                "voice_recognition"
-                            )
-                        },
-                        label = { Text("Voice recognition") },
-                        colors = FilterChipDefaults.filterChipColors()
+                            AmbientPreferences.setAmbientAudioSource(context, "voice_recognition")
+                        }
                     )
                 }
             }
 
             SettingsToggleRow(
-                icon = Icons.Outlined.Speed,
                 title = "High-pass filter",
-                subtitle = "Reduce low-frequency noise before transcription",
+                subtitle = "Reduce low-frequency noise",
                 checked = hpfEnabled,
                 onCheckedChange = {
                     hpfEnabled = it
@@ -361,80 +324,81 @@ fun SettingsSheet(
                 }
             )
 
-            Spacer(Modifier.height(8.dp))
-            HorizontalDivider(color = ZtOutline)
-            Spacer(Modifier.height(8.dp))
+            SettingsDivider()
 
-            // --- Device Section ---
-            SectionHeader("Device")
+            // === Device ===
+            SectionHeader(icon = Icons.Outlined.Storage, title = "Device")
 
             SettingsRow(
-                icon = Icons.Outlined.Storage,
                 title = "Device ID",
                 subtitle = deviceId.take(8) + "..."
             )
 
             SettingsRow(
-                icon = Icons.Outlined.Info,
                 title = "API Status",
-                subtitle = "Connected — api.hey-watch.me"
+                subtitle = "Connected",
+                trailingColor = ZtSuccess
             )
 
-            Spacer(Modifier.height(8.dp))
-            HorizontalDivider(color = ZtOutline)
-            Spacer(Modifier.height(8.dp))
+            SettingsDivider()
 
-            // --- About Section ---
-            SectionHeader("About")
+            // === About ===
+            SectionHeader(icon = Icons.Outlined.Info, title = "About")
 
             SettingsRow(
-                icon = null,
                 title = "ZeroTouch",
-                subtitle = "Version 0.1.0 — MVP"
+                subtitle = "Version 0.2.0 — Redesign"
             )
         }
     }
 }
 
+// --- Reusable settings components ---
+
 @Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.labelLarge,
-        color = ZtCaption,
-        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-    )
+private fun SectionHeader(icon: ImageVector, title: String) {
+    Row(
+        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = ZtCaption
+        )
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = ZtCaption
+        )
+    }
 }
 
 @Composable
 private fun SettingsRow(
-    icon: ImageVector?,
     title: String,
     subtitle: String,
+    trailingColor: androidx.compose.ui.graphics.Color? = null,
     content: (@Composable () -> Unit)? = null
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (icon != null) {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = ZtOnSurfaceVariant
-                    )
-                }
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleSmall,
@@ -445,6 +409,19 @@ private fun SettingsRow(
                         style = MaterialTheme.typography.bodySmall,
                         color = ZtOnSurfaceVariant
                     )
+                }
+                if (trailingColor != null) {
+                    Surface(
+                        shape = RoundedCornerShape(3.dp),
+                        color = trailingColor.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = "OK",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = trailingColor,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                        )
+                    }
                 }
             }
             content?.invoke()
@@ -454,7 +431,6 @@ private fun SettingsRow(
 
 @Composable
 private fun SettingsToggleRow(
-    icon: ImageVector,
     title: String,
     subtitle: String,
     checked: Boolean,
@@ -462,37 +438,25 @@ private fun SettingsToggleRow(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
     ) {
         Row(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = ZtOnSurfaceVariant
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-                Column {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ZtOnSurfaceVariant
-                    )
-                }
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ZtOnSurfaceVariant
+                )
             }
             Switch(
                 checked = checked,
@@ -504,4 +468,54 @@ private fun SettingsToggleRow(
             )
         }
     }
+}
+
+@Composable
+private fun ChipGroup(content: @Composable () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun SettingsChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium
+            )
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = ZtFilterSelected,
+            selectedLabelColor = ZtPrimary,
+            containerColor = MaterialTheme.colorScheme.surface,
+            labelColor = ZtOnSurfaceVariant
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            borderColor = ZtFilterBorder,
+            selectedBorderColor = ZtPrimary.copy(alpha = 0.3f),
+            borderWidth = 0.5.dp,
+            selectedBorderWidth = 0.5.dp
+        ),
+        shape = RoundedCornerShape(6.dp)
+    )
+}
+
+@Composable
+private fun SettingsDivider() {
+    Spacer(Modifier.height(6.dp))
+    HorizontalDivider(color = ZtCardRowDivider, thickness = 0.5.dp)
+    Spacer(Modifier.height(2.dp))
 }

@@ -235,23 +235,37 @@ android-zero-touch/
 - モデルプロジェクト: `/Users/kaya.matsumoto/projects/watchme/business`
 - WatchMe インフラ: `/Users/kaya.matsumoto/projects/watchme/server-configs`
 
-## 最近の変更（運用メモ / 2026-03-24）
+## 最近の変更（運用メモ / 2026-03-25）
 
-### Listeningの可視化（2軸）
+### UIリデザイン（全面刷新）
 
-- `SND`: 環境音レベル（物音なども含む）
-- `VOC`: VADが「声」と判定した度合い
+Material Design 3 × Notion ミニマリズムをベースに全コンポーネントを刷新。
 
-実装: `app/src/main/java/com/example/zero_touch/ui/components/AmbientIndicator.kt`
+#### 情報密度の改善
+- Topic はデフォルト展開（全カードがすぐ見える）、手動で折りたたみも可能
+- Topic 内の Card は可変高さ（内容に応じて 1〜3 行）
+- カード間スペース縮小、余白も全体的に引き締め
 
-### VAD関連（オンデバイス）
+#### 3段階カードアニメーション
+- **Stage 1 (録音検出)**: 赤いパルスドット + "Listening..." — カード即時表示
+- **Stage 2 (文字起こし中)**: オレンジ "Transcribing..." + アニメーションドット
+- **Stage 3 (完了)**: テキストフェードイン
+- カード出現時のバウンスアニメーション（scale + alpha）
+- Topic 確定 cooling 中は "Analyzing conversation..." パルス表示
 
-- 設定で `VAD engine` / `Audio source` / `High-pass filter` を切り替え可能
-- `Silero VAD` を実装（声の判定はこれがメイン）
-- `WebRTC VAD` は現状未実装（選択しても `supported=false` 扱い）
+#### UI新機能（モック含む）
+- ユーザーアバター（TopBar 左）+ Ambient dot オーバーレイ
+- BottomNav バッジ: アクティブ Topic 数 / ブックマーク数
+- フィルターチップ: All / Today / Live / Finalized
+- 検索バーに FilterList アイコン追加
+- 設定シートのセクションヘッダーにアイコン追加
 
-### 英語会議の再トランスクライブ
+#### テーマ
+- `Color.kt` に Topic/CardRow/Badge/Avatar/FilterChip 用カラー追加
+- `Type.kt` タイポグラフィ引き締め（フォントサイズ 1-2sp 縮小）
 
-- カード詳細に `Re-Transcribe EN` ボタンを追加（事後的に英語で再文字起こし）
-- API: `POST /api/transcribe/{id}?language=en`（`ja|en`）
-- `transcription_metadata.language` に実際に使った言語を保存
+#### 以前の変更（2026-03-24）
+
+- `SND` / `VOC` 2軸のリスニング可視化
+- Silero VAD 実装（声判定メイン）、WebRTC VAD は未実装
+- カード詳細 `Re-Transcribe EN` ボタン（API: `POST /api/transcribe/{id}?language=en`）
