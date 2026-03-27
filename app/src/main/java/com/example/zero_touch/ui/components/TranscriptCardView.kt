@@ -27,8 +27,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -40,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -138,19 +135,31 @@ private fun CompactCardRow(
                 StatusDot(card.status, size = 5)
             }
 
-            // Time label (fixed width, top-aligned)
-            Text(
-                text = card.displayTitle,
-                style = MaterialTheme.typography.labelLarge,
-                color = ZtOnSurfaceVariant,
-                modifier = Modifier.width(40.dp).padding(top = 1.dp)
-            )
+            Column(
+                modifier = Modifier.width(52.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = card.displayTitle,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = ZtOnSurfaceVariant,
+                    modifier = Modifier.padding(top = 1.dp)
+                )
+                if (card.durationSeconds > 0) {
+                    Text(
+                        text = formatCompactDuration(card.durationSeconds),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtCaption
+                    )
+                }
+            }
 
             // Content area (fill, variable height)
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
+                SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
                 when {
                     // Stage 1: Recording / just created — pulsing "new" indicator
                     card.status == "recording" || card.status == "pending" -> {
@@ -171,16 +180,6 @@ private fun CompactCardRow(
                         )
                     }
                 }
-            }
-
-            // Trailing: duration
-            if (card.durationSeconds > 0) {
-                Text(
-                    text = formatCompactDuration(card.durationSeconds),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ZtCaption,
-                    modifier = Modifier.padding(top = 1.dp)
-                )
             }
         }
     }
@@ -229,6 +228,7 @@ private fun FullCardView(
                     if (card.durationSeconds > 0) {
                         DurationChip(card.durationSeconds)
                     }
+                    SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
                 }
             }
 
@@ -287,7 +287,6 @@ private fun RecordingPulseLabel() {
         Text(
             text = "録音中...",
             style = MaterialTheme.typography.bodySmall,
-            fontStyle = FontStyle.Italic,
             color = ZtRecording.copy(alpha = alpha)
         )
     }

@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.zero_touch.api.DeviceIdProvider
+import com.example.zero_touch.api.SessionListResponse
 import com.example.zero_touch.api.SessionSummary
 import com.example.zero_touch.api.TopicSummary
 import com.example.zero_touch.api.TopicUtteranceSummary
@@ -33,7 +34,9 @@ data class TranscriptCard(
     val displayDate: String = "",
     val asrProvider: String? = null,
     val asrModel: String? = null,
-    val asrLanguage: String? = null
+    val asrLanguage: String? = null,
+    val speakerCount: Int = 0,
+    val speakerLabels: List<String> = emptyList()
 )
 
 data class TopicFeedCard(
@@ -47,6 +50,12 @@ data class TopicFeedCard(
     val utterances: List<TranscriptCard> = emptyList(),
     val llmProvider: String? = null,
     val llmModel: String? = null
+)
+
+private data class TopicPageResult(
+    val cards: List<TopicFeedCard>,
+    val rawCount: Int,
+    val hasMore: Boolean
 )
 
 data class ZeroTouchUiState(
@@ -80,13 +89,17 @@ class ZeroTouchViewModel : ViewModel() {
     private val dismissedIds = mutableSetOf<String>()
     private val favoriteIds = mutableSetOf<String>()
     private var currentOffset = 0
-    private var hasMore = true
+    private var hasMoreSessions = true
+    private var currentTopicOffset = 0
+    private var hasMoreTopics = true
     private val optimisticTranscribing = mutableMapOf<String, Long>()
 
     fun loadSessions(context: Context) {
         viewModelScope.launch {
             currentOffset = 0
-            hasMore = true
+            hasMoreSessions = true
+            currentTopicOffset = 0
+            hasMoreTopics = true
             _uiState.value = _uiState.value.copy(
                 isLoading = true,
                 isLoadingMore = false,
@@ -99,16 +112,18 @@ class ZeroTouchViewModel : ViewModel() {
                 val sorted = response.sessions.sortedByDescending { it.created_at }
                 val cards = sorted.mapNotNull { summary -> buildTranscriptCard(summary) }
                 val filteredCards = filterDismissed(cards)
-                val topicCards = loadTopicCards(deviceId)
+                val topicPage = loadTopicCards(deviceId = deviceId, offset = 0)
                 Log.d(TAG, "loadSessions success: device=$deviceId sessions=${sorted.size}")
                 currentOffset = response.sessions.size
-                hasMore = response.count == PAGE_SIZE
+                hasMoreSessions = response.count == PAGE_SIZE
+                currentTopicOffset = topicPage.rawCount
+                hasMoreTopics = topicPage.hasMore
                 _uiState.value = _uiState.value.copy(
                     sessions = sorted,
                     feedCards = filteredCards,
-                    topicCards = topicCards,
+                    topicCards = topicPage.cards,
                     isLoading = false,
-                    hasMore = hasMore,
+                    hasMore = hasMoreSessions || hasMoreTopics,
                     dismissedIds = dismissedIds.toSet(),
                     favoriteIds = favoriteIds.toSet()
                 )
@@ -137,12 +152,19 @@ class ZeroTouchViewModel : ViewModel() {
                 val freshCards = fresh.mapNotNull { summary -> buildTranscriptCard(summary) }
                 val mergedCards = mergeCards(_uiState.value.feedCards, freshCards, mergedSessions)
                 val filteredCards = filterDismissed(mergedCards)
-                val topicCards = loadTopicCards(deviceId)
+                val topicPage = loadTopicCards(deviceId = deviceId, offset = 0)
+                val newTopicItems = topicPage.cards.count { freshTopic ->
+                    _uiState.value.topicCards.none { it.id == freshTopic.id }
+                }
+                if (newTopicItems > 0) currentTopicOffset += newTopicItems
+                hasMoreTopics = topicPage.hasMore || hasMoreTopics
+                val mergedTopicCards = mergeTopicCards(_uiState.value.topicCards, topicPage.cards)
                 Log.d(TAG, "refreshSessions success: device=$deviceId newItems=$newItems")
                 _uiState.value = _uiState.value.copy(
                     sessions = mergedSessions,
                     feedCards = filteredCards,
-                    topicCards = topicCards,
+                    topicCards = mergedTopicCards,
+                    hasMore = hasMoreSessions || hasMoreTopics,
                     dismissedIds = dismissedIds.toSet(),
                     favoriteIds = favoriteIds.toSet()
                 )
@@ -155,26 +177,39 @@ class ZeroTouchViewModel : ViewModel() {
     }
 
     fun loadMoreSessions(context: Context) {
-        if (_uiState.value.isLoadingMore || !hasMore) return
+        if (_uiState.value.isLoadingMore || (!hasMoreSessions && !hasMoreTopics)) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingMore = true)
             try {
                 val deviceId = DeviceIdProvider.getDeviceId(context)
-                val response = api.listSessions(deviceId = deviceId, limit = PAGE_SIZE, offset = currentOffset)
+                val response = if (hasMoreSessions) {
+                    api.listSessions(deviceId = deviceId, limit = PAGE_SIZE, offset = currentOffset)
+                } else {
+                    SessionListResponse(sessions = emptyList(), count = 0)
+                }
                 val nextSessions = response.sessions.sortedByDescending { it.created_at }
                 val mergedSessions = mergeSessions(_uiState.value.sessions, nextSessions)
                 val nextCards = nextSessions.mapNotNull { summary -> buildTranscriptCard(summary) }
                 val mergedCards = mergeCards(_uiState.value.feedCards, nextCards, mergedSessions)
                 val filteredCards = filterDismissed(mergedCards)
+                val topicPage = if (hasMoreTopics) {
+                    loadTopicCards(deviceId = deviceId, offset = currentTopicOffset)
+                } else {
+                    TopicPageResult(cards = emptyList(), rawCount = 0, hasMore = false)
+                }
+                val mergedTopicCards = mergeTopicCards(_uiState.value.topicCards, topicPage.cards)
 
                 currentOffset += response.sessions.size
-                hasMore = response.count == PAGE_SIZE
+                hasMoreSessions = response.count == PAGE_SIZE
+                currentTopicOffset += topicPage.rawCount
+                hasMoreTopics = topicPage.hasMore
 
                 _uiState.value = _uiState.value.copy(
                     sessions = mergedSessions,
                     feedCards = filteredCards,
+                    topicCards = mergedTopicCards,
                     isLoadingMore = false,
-                    hasMore = hasMore,
+                    hasMore = hasMoreSessions || hasMoreTopics,
                     dismissedIds = dismissedIds.toSet(),
                     favoriteIds = favoriteIds.toSet()
                 )
@@ -316,6 +351,8 @@ class ZeroTouchViewModel : ViewModel() {
             val asrProvider = metadata["provider"] as? String
             val asrModel = metadata["model"] as? String
             val asrLanguage = metadata["language"] as? String
+            val speakerCount = extractSpeakerCount(metadata)
+            val speakerLabels = extractSpeakerLabels(metadata, asrProvider)
             TranscriptCard(
                 id = summary.id,
                 createdAt = summary.created_at,
@@ -329,7 +366,9 @@ class ZeroTouchViewModel : ViewModel() {
                 displayDate = displayDate,
                 asrProvider = asrProvider,
                 asrModel = asrModel,
-                asrLanguage = asrLanguage
+                asrLanguage = asrLanguage,
+                speakerCount = speakerCount,
+                speakerLabels = speakerLabels
             )
         } catch (e: Exception) {
             TranscriptCard(
@@ -345,38 +384,50 @@ class ZeroTouchViewModel : ViewModel() {
                 displayDate = "",
                 asrProvider = null,
                 asrModel = null,
-                asrLanguage = null
+                asrLanguage = null,
+                speakerCount = 0,
+                speakerLabels = emptyList()
             )
         }
     }
 
-    private suspend fun loadTopicCards(deviceId: String): List<TopicFeedCard> {
+    private suspend fun loadTopicCards(
+        deviceId: String,
+        offset: Int
+    ): TopicPageResult {
         return try {
-            try {
-                val eval = api.evaluatePendingTopics(
-                    deviceId = deviceId,
-                    force = false,
-                    idleSeconds = TOPIC_IDLE_SECONDS,
-                    maxSessions = 200
-                )
-                Log.d(TAG, "topic evaluate-pending: device=$deviceId result=${eval.result}")
-            } catch (e: Exception) {
-                Log.w(TAG, "topic evaluate-pending failed: device=$deviceId", e)
+            if (offset == 0) {
+                try {
+                    val eval = api.evaluatePendingTopics(
+                        deviceId = deviceId,
+                        force = false,
+                        idleSeconds = TOPIC_IDLE_SECONDS,
+                        maxSessions = 200
+                    )
+                    Log.d(TAG, "topic evaluate-pending: device=$deviceId result=${eval.result}")
+                } catch (e: Exception) {
+                    Log.w(TAG, "topic evaluate-pending failed: device=$deviceId", e)
+                }
             }
 
             val response = api.listTopics(
                 deviceId = deviceId,
                 limit = PAGE_SIZE,
-                offset = 0,
+                offset = offset,
                 includeChildren = true
             )
-            response.topics
+            val cards = response.topics
                 .mapNotNull { topic -> buildTopicCard(topic) }
                 .filter { it.utterances.isNotEmpty() }
                 .sortedByDescending { it.updatedAtEpochMs }
+            TopicPageResult(
+                cards = cards,
+                rawCount = response.count,
+                hasMore = response.count == PAGE_SIZE
+            )
         } catch (e: Exception) {
-            Log.e(TAG, "loadTopicCards failed: device=$deviceId", e)
-            emptyList()
+            Log.e(TAG, "loadTopicCards failed: device=$deviceId offset=$offset", e)
+            TopicPageResult(cards = emptyList(), rawCount = 0, hasMore = false)
         }
     }
 
@@ -446,6 +497,8 @@ class ZeroTouchViewModel : ViewModel() {
         val asrProvider = metadata["provider"] as? String
         val asrModel = metadata["model"] as? String
         val asrLanguage = metadata["language"] as? String
+        val speakerCount = extractSpeakerCount(metadata)
+        val speakerLabels = extractSpeakerLabels(metadata, asrProvider)
         val text = utterance.transcription?.trim().orEmpty()
         val displayText = when {
             text.isNotEmpty() -> text
@@ -467,8 +520,53 @@ class ZeroTouchViewModel : ViewModel() {
             displayDate = buildDisplayDate(sourceTimestamp),
             asrProvider = asrProvider,
             asrModel = asrModel,
-            asrLanguage = asrLanguage
+            asrLanguage = asrLanguage,
+            speakerCount = speakerCount,
+            speakerLabels = speakerLabels
         )
+    }
+
+    private fun extractSpeakerCount(metadata: Map<String, Any>): Int {
+        val raw = metadata["speaker_count"] ?: return 0
+        return when (raw) {
+            is Number -> raw.toInt()
+            is String -> raw.toIntOrNull() ?: 0
+            else -> 0
+        }.coerceAtLeast(0)
+    }
+
+    private fun extractSpeakerLabels(
+        metadata: Map<String, Any>,
+        provider: String?
+    ): List<String> {
+        val utteranceLabels = (metadata["utterances"] as? List<*>)
+            .orEmpty()
+            .mapNotNull { item ->
+                val speaker = (item as? Map<*, *>)?.get("speaker") ?: return@mapNotNull null
+                normalizeSpeakerLabel(speaker, provider)
+            }
+            .distinct()
+
+        if (utteranceLabels.isNotEmpty()) return utteranceLabels
+
+        val speakerCount = extractSpeakerCount(metadata)
+        return (1..speakerCount).map { "Speaker $it" }
+    }
+
+    private fun normalizeSpeakerLabel(raw: Any, provider: String?): String? {
+        val normalizedProvider = provider?.trim()?.lowercase(Locale.ROOT)
+        val speakerNumber = when (raw) {
+            is Number -> raw.toInt()
+            is String -> Regex("""\d+""").find(raw)?.value?.toIntOrNull()
+            else -> null
+        } ?: return null
+
+        val oneBased = if (normalizedProvider == "deepgram") {
+            speakerNumber + 1
+        } else {
+            speakerNumber.coerceAtLeast(1)
+        }
+        return "Speaker $oneBased"
     }
 
     private fun mapStatus(status: String): Pair<String, Boolean> {
@@ -571,6 +669,16 @@ class ZeroTouchViewModel : ViewModel() {
         current.forEach { map[it.id] = it }
         incoming.forEach { map[it.id] = it }
         return orderedSessions.mapNotNull { map[it.id] }
+    }
+
+    private fun mergeTopicCards(
+        current: List<TopicFeedCard>,
+        incoming: List<TopicFeedCard>
+    ): List<TopicFeedCard> {
+        val map = LinkedHashMap<String, TopicFeedCard>()
+        current.forEach { map[it.id] = it }
+        incoming.forEach { map[it.id] = it }
+        return map.values.sortedByDescending { it.updatedAtEpochMs }
     }
 
     private fun buildTitle(timestamp: String?): String {

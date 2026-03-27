@@ -74,6 +74,7 @@ import com.example.zero_touch.ui.components.AnimatedProcessingDots
 import com.example.zero_touch.ui.components.CardDetailSheet
 import com.example.zero_touch.ui.components.ShimmerCardList
 import com.example.zero_touch.ui.components.SideDetailDrawer
+import com.example.zero_touch.ui.components.SpeakerIdentityBadge
 import com.example.zero_touch.ui.components.TranscriptCardView
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtCardRowDivider
@@ -125,6 +126,7 @@ fun VoiceMemoScreen(
     val pendingTopicCards = buildPendingTopicCards(
         recordings = ambientState.recordings,
         sessions = uiState.sessions,
+        loadedCards = uiState.feedCards,
         topicChildIds = topicChildIds
     )
     val mergedTopicCards = (topicCards + pendingTopicCards)
@@ -595,6 +597,7 @@ private fun TopicDetailDrawer(
                                     color = if (card.status == "failed") ZtError else ZtWarning
                                 )
                             }
+                            SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
                             Text(
                                 text = card.text,
                                 style = MaterialTheme.typography.bodyMedium,
@@ -692,12 +695,14 @@ private fun TopicStatusBadge(status: String) {
 private fun buildPendingTopicCards(
     recordings: List<AmbientRecordingEntry>,
     sessions: List<SessionSummary>,
+    loadedCards: List<TranscriptCard>,
     topicChildIds: Set<String>
 ): List<TopicFeedCard> {
     val pendingCards = mutableListOf<TopicFeedCard>()
     if (recordings.isEmpty() && sessions.isEmpty()) return emptyList()
 
     val sessionById = sessions.associateBy { it.id }
+    val loadedCardById = loadedCards.associateBy { it.id }
     val recordingSessionIds = recordings.mapNotNull { it.sessionId }.toSet()
 
     fun addPendingCard(
@@ -708,51 +713,74 @@ private fun buildPendingTopicCards(
     ) {
         if (sessionId != null && topicChildIds.contains(sessionId)) return
 
-        val displayStatus = when (status) {
-            "pending" -> "データ取得中"
-            "uploaded" -> "データ取得中"
-            "transcribing" -> "データ取得中"
-            "generating" -> "データ取得中"
-            "failed" -> "失敗"
-            else -> "データ取得中"
-        }
-        val isProcessing = status != "failed"
-        val displayText = if (status == "failed") "処理に失敗しました" else "データ取得中..."
+        val existingCard = sessionId?.let { loadedCardById[it] }
         val cardId = sessionId ?: "pending_${createdAtEpochMs}"
-        val displayTitle = formatEpochTime(createdAtEpochMs)
-        val displayDate = formatEpochDate(createdAtEpochMs)
-        val visualStatus = when (status) {
-            "failed" -> "failed"
-            "uploaded", "transcribing", "generating" -> status
-            else -> "transcribing"
-        }
+        val fallbackDisplayTitle = formatEpochTime(createdAtEpochMs)
+        val fallbackDisplayDate = formatEpochDate(createdAtEpochMs)
+        val card = existingCard ?: run {
+            val displayStatus = when (status) {
+                "pending", "uploaded", "transcribing", "generating" -> "データ取得中"
+                "transcribed", "completed" -> "文字起こし済み"
+                "failed" -> "失敗"
+                else -> "データ取得中"
+            }
+            val isProcessing = status in setOf("pending", "uploaded", "transcribing", "generating")
+            val displayText = when (status) {
+                "transcribed", "completed" -> "音声が検出されませんでした"
+                "failed" -> "処理に失敗しました"
+                else -> "データ取得中..."
+            }
+            val visualStatus = when (status) {
+                "failed" -> "failed"
+                "transcribed", "completed" -> "transcribed"
+                "uploaded", "transcribing", "generating" -> status
+                else -> "transcribing"
+            }
 
-        val card = TranscriptCard(
-            id = cardId,
-            createdAt = "",
-            createdAtEpochMs = createdAtEpochMs,
-            status = visualStatus,
-            displayStatus = displayStatus,
-            isProcessing = isProcessing,
-            text = displayText,
-            displayTitle = displayTitle,
-            durationSeconds = durationSeconds,
-            displayDate = displayDate
-        )
+            TranscriptCard(
+                id = cardId,
+                createdAt = "",
+                createdAtEpochMs = createdAtEpochMs,
+                status = visualStatus,
+                displayStatus = displayStatus,
+                isProcessing = isProcessing,
+                text = displayText,
+                displayTitle = fallbackDisplayTitle,
+                durationSeconds = durationSeconds,
+                displayDate = fallbackDisplayDate
+            )
+        }
 
         val topicId = "pending_topic_${cardId}"
-        val topicStatus = if (status == "failed") "failed" else "processing"
-        val title = if (status == "failed") "処理に失敗しました" else "データ取得中"
+        val topicStatus = when (card.status) {
+            "failed" -> "failed"
+            "uploaded", "transcribing", "generating", "recording", "pending" -> "processing"
+            else -> "finalized"
+        }
+        val title = when {
+            card.status == "failed" -> "処理に失敗しました"
+            card.isProcessing -> "データ取得中"
+            card.text.isNotBlank() && card.text != "音声が検出されませんでした" ->
+                card.text.take(24)
+            else -> "カード"
+        }
+        val summary = when {
+            card.isProcessing -> ""
+            card.text.isNotBlank() &&
+                card.text !in setOf("音声が検出されませんでした", "処理に失敗しました") ->
+                card.text.take(120)
+            else -> ""
+        }
 
         pendingCards.add(
             TopicFeedCard(
                 id = topicId,
                 status = topicStatus,
                 title = title,
-                summary = "",
+                summary = summary,
                 utteranceCount = 1,
-                updatedAtEpochMs = createdAtEpochMs,
-                displayDate = displayDate,
+                updatedAtEpochMs = card.createdAtEpochMs.takeIf { it > 0 } ?: createdAtEpochMs,
+                displayDate = card.displayDate.ifBlank { fallbackDisplayDate },
                 utterances = listOf(card)
             )
         )

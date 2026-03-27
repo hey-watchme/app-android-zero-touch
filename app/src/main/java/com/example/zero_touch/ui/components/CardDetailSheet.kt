@@ -85,6 +85,8 @@ fun CardDetailSheet(
                 StatusPill(card.displayStatus, card.status)
             }
 
+            SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
+
             // Metadata row: date + duration + ASR info
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -114,7 +116,12 @@ fun CardDetailSheet(
                         )
                     }
                 }
-                val asrLabel = buildAsrLabel(card.asrProvider, card.asrModel, card.asrLanguage)
+                val asrLabel = buildAsrLabel(
+                    card.asrProvider,
+                    card.asrModel,
+                    card.asrLanguage,
+                    card.speakerLabels
+                )
                 if (asrLabel.isNotBlank()) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -282,15 +289,20 @@ private fun formatDetailDuration(seconds: Int): String {
     }
 }
 
-private fun buildAsrLabel(provider: String?, model: String?, language: String?): String {
+private fun buildAsrLabel(
+    provider: String?,
+    model: String?,
+    language: String?,
+    speakerLabels: List<String>
+): String {
     val providerLabel = provider?.trim()?.takeIf { it.isNotEmpty() }
         ?.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
     val modelLabel = model?.trim()?.takeIf { it.isNotEmpty() }
         ?.let { if (it.contains("/")) it.substringAfter("/") else it }
     val languageLabel = language?.trim()?.takeIf { it.isNotEmpty() }
         ?.uppercase()
-
-    return when {
+    val speakerLabel = buildSpeakerLabelSummary(speakerLabels)
+    val asrBase = when {
         providerLabel != null && modelLabel != null && languageLabel != null -> "$providerLabel $modelLabel $languageLabel"
         providerLabel != null && modelLabel != null -> "$providerLabel $modelLabel"
         providerLabel != null && languageLabel != null -> "$providerLabel $languageLabel"
@@ -298,5 +310,10 @@ private fun buildAsrLabel(provider: String?, model: String?, language: String?):
         modelLabel != null -> modelLabel
         languageLabel != null -> languageLabel
         else -> ""
+    }
+
+    return when {
+        asrBase.isNotBlank() -> "$asrBase / $speakerLabel"
+        else -> speakerLabel
     }
 }
