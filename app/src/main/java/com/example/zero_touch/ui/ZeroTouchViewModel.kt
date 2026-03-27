@@ -68,6 +68,7 @@ class ZeroTouchViewModel : ViewModel() {
         private const val TAG = "ZeroTouchVM"
         private const val PAGE_SIZE = 10
         private const val OPTIMISTIC_TIMEOUT_MS = 60_000L
+        private const val TOPIC_IDLE_SECONDS = 30
     }
 
     private val api = ZeroTouchApi()
@@ -355,7 +356,7 @@ class ZeroTouchViewModel : ViewModel() {
                 val eval = api.evaluatePendingTopics(
                     deviceId = deviceId,
                     force = false,
-                    idleSeconds = 60,
+                    idleSeconds = TOPIC_IDLE_SECONDS,
                     maxSessions = 200
                 )
                 Log.d(TAG, "topic evaluate-pending: device=$deviceId result=${eval.result}")

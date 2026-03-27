@@ -22,6 +22,7 @@ from services.llm_models import get_model_catalog
 from services.asr_providers import get_asr_service
 from services.background_tasks import transcribe_background, generate_cards_background
 from services.topic_manager_process2 import (
+    DEFAULT_IDLE_SECONDS,
     finalize_active_topic_for_device,
     resolve_device_llm_service,
 )
@@ -118,7 +119,7 @@ class TopicBackfillRequest(BaseModel):
 class TopicEvaluatePendingRequest(BaseModel):
     device_id: str
     force: bool = False
-    idle_seconds: int = 60
+    idle_seconds: int = DEFAULT_IDLE_SECONDS
     max_sessions: int = 200
     boundary_reason: Optional[str] = None
 

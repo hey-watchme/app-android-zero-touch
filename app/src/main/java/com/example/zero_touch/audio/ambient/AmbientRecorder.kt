@@ -32,8 +32,10 @@ class AmbientRecorder(
     private val continueDebounceFrames = 2
     private val continueConfidenceThreshold = 0.50f
     private val displaySpeechHoldMs = 3_000
-    private val silenceStopMs = 5_000
-    private val maxSessionMs = 5 * 60_000
+    private val baseSilenceStopMs = 5_000
+    private val longSessionThresholdMs = 2 * 60_000
+    private val longSessionSilenceStopMs = 2_500
+    private val maxSessionMs = 10 * 60_000
     private val minSessionMs = 3_000
     private val preRollSeconds = 2
     private val bitRate = 64_000
@@ -94,7 +96,7 @@ class AmbientRecorder(
         speechStreakFrames = 0
         Log.i(
             TAG,
-            "Ambient recorder start config source=${audioSourceName(audioSource)}($audioSource) sampleRate=$sampleRate frameMs=$frameMs frameSamples=$frameSamples startDebounceMs=$startDebounceMs startDebounceFrames=$startDebounceFrames startConfidenceThreshold=${format2(startConfidenceThreshold)} continueDebounceFrames=$continueDebounceFrames continueConfidenceThreshold=${format2(continueConfidenceThreshold)} displaySpeechHoldMs=$displaySpeechHoldMs silenceStopMs=$silenceStopMs maxSessionMs=$maxSessionMs minSessionMs=$minSessionMs preRollSeconds=$preRollSeconds detector=${detector.javaClass.simpleName} detectorConfig=${detector.debugConfig()} preprocessor=${preprocessor.javaClass.simpleName}"
+            "Ambient recorder start config source=${audioSourceName(audioSource)}($audioSource) sampleRate=$sampleRate frameMs=$frameMs frameSamples=$frameSamples startDebounceMs=$startDebounceMs startDebounceFrames=$startDebounceFrames startConfidenceThreshold=${format2(startConfidenceThreshold)} continueDebounceFrames=$continueDebounceFrames continueConfidenceThreshold=${format2(continueConfidenceThreshold)} displaySpeechHoldMs=$displaySpeechHoldMs baseSilenceStopMs=$baseSilenceStopMs longSessionThresholdMs=$longSessionThresholdMs longSessionSilenceStopMs=$longSessionSilenceStopMs maxSessionMs=$maxSessionMs minSessionMs=$minSessionMs preRollSeconds=$preRollSeconds detector=${detector.javaClass.simpleName} detectorConfig=${detector.debugConfig()} preprocessor=${preprocessor.javaClass.simpleName}"
         )
         startAudioRecord()
         worker = Thread { captureLoop() }.apply { start() }
@@ -245,8 +247,13 @@ class AmbientRecorder(
                 }
                 activeSessionMaxSpeechScore = max(activeSessionMaxSpeechScore, speechScore)
 
-                val silenceMs = silenceFrames * frameMs
                 val elapsedMs = now - sessionStartElapsed
+                val silenceStopMs = if (elapsedMs >= longSessionThresholdMs) {
+                    longSessionSilenceStopMs
+                } else {
+                    baseSilenceStopMs
+                }
+                val silenceMs = silenceFrames * frameMs
 
                 if (silenceMs >= silenceStopMs || elapsedMs >= maxSessionMs) {
                     val reason = if (silenceMs >= silenceStopMs) "silence_timeout" else "max_session_timeout"

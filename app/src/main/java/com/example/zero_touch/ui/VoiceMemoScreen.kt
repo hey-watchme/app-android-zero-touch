@@ -57,7 +57,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -65,8 +64,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import kotlinx.coroutines.delay
 import com.example.zero_touch.api.SessionSummary
@@ -76,6 +73,7 @@ import com.example.zero_touch.ui.components.AmbientStatusBar
 import com.example.zero_touch.ui.components.AnimatedProcessingDots
 import com.example.zero_touch.ui.components.CardDetailSheet
 import com.example.zero_touch.ui.components.ShimmerCardList
+import com.example.zero_touch.ui.components.SideDetailDrawer
 import com.example.zero_touch.ui.components.TranscriptCardView
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtCardRowDivider
@@ -208,21 +206,15 @@ fun VoiceMemoScreen(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 contentPadding = PaddingValues(bottom = 12.dp)
             ) {
-            // Search bar (scrolls away)
-            item(key = "search_bar") {
-                SearchBar()
-            }
-
-            // Filter chips (scrolls away)
-            if (!showFavoritesOnly) {
-                item(key = "filter_chips") {
-                    FilterChipRow(
-                        options = filterOptions,
-                        activeFilter = activeFilter,
-                        onFilterSelected = { activeFilter = it },
-                        topicCount = topicCards.size
-                    )
-                }
+            // Search and filters (scroll away together)
+            item(key = "search_filters") {
+                SearchAndFilterRow(
+                    showFavoritesOnly = showFavoritesOnly,
+                    filterOptions = filterOptions,
+                    activeFilter = activeFilter,
+                    onFilterSelected = { activeFilter = it },
+                    topicCount = topicCards.size
+                )
             }
 
             // Feed content
@@ -540,169 +532,93 @@ private fun TopicDetailDrawer(
     topic: TopicFeedCard,
     onClose: () -> Unit
 ) {
-    val configuration = LocalConfiguration.current
-    val drawerWidth = (configuration.screenWidthDp * 0.82f).dp
-    val scrollState = rememberScrollState()
-    val scrimInteraction = remember { MutableInteractionSource() }
-    var visible by remember { mutableStateOf(true) }
-
-    LaunchedEffect(visible) {
-        if (!visible) {
-            delay(180)
-            onClose()
-        }
-    }
-
-    Dialog(
-        onDismissRequest = { visible = false },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    SideDetailDrawer(
+        title = "トピック詳細",
+        onClose = onClose
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
-                    .clickable(
-                        interactionSource = scrimInteraction,
-                        indication = null
-                    ) { visible = false }
+        DetailSection(title = "タイトル") {
+            Text(
+                text = topic.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
             )
+        }
 
-            AnimatedVisibility(
-                visible = visible,
-                enter = slideInHorizontally(
-                    initialOffsetX = { it },
-                    animationSpec = tween(220, easing = FastOutSlowInEasing)
-                ),
-                exit = slideOutHorizontally(
-                    targetOffsetX = { it },
-                    animationSpec = tween(180, easing = FastOutSlowInEasing)
-                ),
-                modifier = Modifier.align(Alignment.CenterEnd)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .width(drawerWidth)
-                        .background(Color.White)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(scrollState)
-                            .padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+        DetailSection(title = "説明") {
+            Text(
+                text = if (topic.summary.isBlank()) "説明はまだありません" else topic.summary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = ZtOnSurfaceVariant,
+                lineHeight = 20.sp
+            )
+        }
+
+        DetailSection(title = "メタデータ") {
+            DetailRow(label = "トピックID", value = topic.id)
+            DetailRow(label = "ステータス", value = topicStatusLabel(topic.status))
+            DetailRow(label = "発話数", value = topic.utteranceCount.toString())
+            DetailRow(label = "更新日時", value = formatEpochDateTime(topic.updatedAtEpochMs))
+            DetailRow(label = "解析日時", value = formatEpochDateTime(topic.updatedAtEpochMs))
+            DetailRow(
+                label = "LLM",
+                value = listOfNotNull(topic.llmProvider, topic.llmModel)
+                    .takeIf { it.isNotEmpty() }
+                    ?.joinToString(" / ")
+                    ?: "不明"
+            )
+        }
+
+        DetailSection(title = "カード") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                topic.utterances.forEach { card ->
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = card.displayTitle,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = ZtOnSurfaceVariant
+                                )
+                                Text(
+                                    text = card.displayStatus,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (card.status == "failed") ZtError else ZtWarning
+                                )
+                            }
                             Text(
-                                text = "トピック詳細",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Icon(
-                                Icons.Outlined.Close,
-                                contentDescription = "閉じる",
-                                tint = ZtOnSurfaceVariant,
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) { visible = false }
-                            )
-                        }
-
-                        DetailSection(title = "タイトル") {
-                            Text(
-                                text = topic.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        DetailSection(title = "説明") {
-                            Text(
-                                text = if (topic.summary.isBlank()) "説明はまだありません" else topic.summary,
+                                text = card.text,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = ZtOnSurfaceVariant,
-                                lineHeight = 20.sp
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                        }
-
-                        DetailSection(title = "メタデータ") {
-                            DetailRow(label = "トピックID", value = topic.id)
-                            DetailRow(label = "ステータス", value = topicStatusLabel(topic.status))
-                            DetailRow(label = "発話数", value = topic.utteranceCount.toString())
-                            DetailRow(label = "更新日時", value = formatEpochDateTime(topic.updatedAtEpochMs))
-                            DetailRow(label = "解析日時", value = formatEpochDateTime(topic.updatedAtEpochMs))
                             DetailRow(
-                                label = "LLM",
-                                value = listOfNotNull(topic.llmProvider, topic.llmModel)
+                                label = "長さ",
+                                value = if (card.durationSeconds > 0) "${card.durationSeconds}秒" else "-"
+                            )
+                            DetailRow(
+                                label = "録音日時",
+                                value = formatEpochDateTime(card.createdAtEpochMs)
+                            )
+                            DetailRow(
+                                label = "ステータス",
+                                value = card.displayStatus
+                            )
+                            DetailRow(
+                                label = "ASR",
+                                value = listOfNotNull(card.asrProvider, card.asrModel, card.asrLanguage)
                                     .takeIf { it.isNotEmpty() }
                                     ?.joinToString(" / ")
                                     ?: "不明"
                             )
-                        }
-
-                        DetailSection(title = "カード") {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                topic.utterances.forEach { card ->
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(12.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = card.displayTitle,
-                                                    style = MaterialTheme.typography.labelLarge,
-                                                    color = ZtOnSurfaceVariant
-                                                )
-                                                Text(
-                                                    text = card.displayStatus,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = if (card.status == "failed") ZtError else ZtWarning
-                                                )
-                                            }
-                                            Text(
-                                                text = card.text,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            DetailRow(
-                                                label = "長さ",
-                                                value = if (card.durationSeconds > 0) "${card.durationSeconds}秒" else "-"
-                                            )
-                                            DetailRow(
-                                                label = "録音日時",
-                                                value = formatEpochDateTime(card.createdAtEpochMs)
-                                            )
-                                            DetailRow(
-                                                label = "ステータス",
-                                                value = card.displayStatus
-                                            )
-                                            DetailRow(
-                                                label = "ASR",
-                                                value = listOfNotNull(card.asrProvider, card.asrModel, card.asrLanguage)
-                                                    .takeIf { it.isNotEmpty() }
-                                                    ?.joinToString(" / ")
-                                                    ?: "不明"
-                                            )
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -899,13 +815,44 @@ private fun TopicAnalyzingLabel(modifier: Modifier = Modifier) {
 // --- Filter Chip Row ---
 
 @Composable
+private fun SearchAndFilterRow(
+    showFavoritesOnly: Boolean,
+    filterOptions: List<String>,
+    activeFilter: String,
+    onFilterSelected: (String) -> Unit,
+    topicCount: Int
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SearchBar(
+            modifier = Modifier.weight(if (showFavoritesOnly) 1f else 0.48f)
+        )
+
+        if (!showFavoritesOnly) {
+            FilterChipRow(
+                modifier = Modifier.weight(0.52f),
+                options = filterOptions,
+                activeFilter = activeFilter,
+                onFilterSelected = onFilterSelected,
+                topicCount = topicCount
+            )
+        }
+    }
+}
+
+@Composable
 private fun FilterChipRow(
+    modifier: Modifier = Modifier,
     options: List<String>,
     activeFilter: String,
     onFilterSelected: (String) -> Unit,
     topicCount: Int
 ) {
     LazyRow(
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         items(options) { option ->
@@ -942,9 +889,9 @@ private fun FilterChipRow(
 // --- Sub-composables ---
 
 @Composable
-private fun SearchBar() {
+private fun SearchBar(modifier: Modifier = Modifier) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
     ) {
@@ -963,13 +910,9 @@ private fun SearchBar() {
                 text = "文字起こしを検索...",
                 style = MaterialTheme.typography.bodyMedium,
                 color = ZtCaption,
-                modifier = Modifier.weight(1f)
-            )
-            Icon(
-                Icons.Outlined.FilterList,
-                contentDescription = "フィルター",
-                tint = ZtCaption,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

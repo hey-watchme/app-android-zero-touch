@@ -40,6 +40,10 @@ val ZtShimmerHighlight = Color(0xFFEBEAE8)
 val ZtTopicSurface = Color(0xFFFCFCFB)
 val ZtTopicBorder = Color(0xFFEEEDEC)
 
+// Sidebar
+val ZtSidebarSurface = Color(0xFFF7F6F3)
+val ZtSidebarSelected = Color(0xFFEAE7E1)
+
 // Compact card row (within topics)
 val ZtCardRowHover = Color(0xFFF7F7F6)
 val ZtCardRowDivider = Color(0xFFF0EFEE)

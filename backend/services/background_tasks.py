@@ -16,6 +16,7 @@ import boto3
 from supabase import Client
 from services.prompts import build_card_generation_prompt
 from services.topic_manager_process2 import (
+    DEFAULT_IDLE_SECONDS,
     assign_session_to_active_topic,
     finalize_active_topic_for_device,
     resolve_device_llm_service,
@@ -47,7 +48,7 @@ def _run_delayed_active_topic_finalize(
     device_id: str,
     supabase: Client,
     topic_llm_service,
-    delay_seconds: int = 65,
+    delay_seconds: int = DEFAULT_IDLE_SECONDS + 5,
 ):
     safe_delay = max(5, min(delay_seconds, 300))
     time.sleep(safe_delay)
@@ -56,7 +57,7 @@ def _run_delayed_active_topic_finalize(
             supabase=supabase,
             device_id=device_id,
             llm_service=topic_llm_service,
-            idle_seconds=60,
+            idle_seconds=DEFAULT_IDLE_SECONDS,
             force=False,
             boundary_reason="idle_timeout",
         )
@@ -152,14 +153,14 @@ def transcribe_background(
                         supabase=supabase,
                         device_id=device_id,
                         llm_service=device_llm,
-                        idle_seconds=60,
+                        idle_seconds=DEFAULT_IDLE_SECONDS,
                         force=False,
                         boundary_reason="idle_timeout",
                     )
                     print(f"[Background] Process2 topic finalize check: {finalize_result}")
                     if finalize_result.get("reason") == "idle_threshold_not_reached":
                         elapsed = int(finalize_result.get("idle_elapsed_seconds") or 0)
-                        threshold = int(finalize_result.get("idle_threshold_seconds") or 60)
+                        threshold = int(finalize_result.get("idle_threshold_seconds") or DEFAULT_IDLE_SECONDS)
                         delay_seconds = max(5, (threshold - elapsed) + 5)
                         threading.Thread(
                             target=_run_delayed_active_topic_finalize,

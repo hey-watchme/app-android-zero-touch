@@ -8,9 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Info
@@ -21,20 +19,17 @@ import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -51,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import android.util.Log
 import com.example.zero_touch.api.ZeroTouchApi
 import com.example.zero_touch.audio.ambient.AmbientPreferences
+import com.example.zero_touch.ui.components.SideDetailDrawer
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtCardRowDivider
 import com.example.zero_touch.ui.theme.ZtFilterBorder
@@ -62,16 +58,14 @@ import com.example.zero_touch.ui.theme.ZtSuccess
 import kotlinx.coroutines.launch
 
 /**
- * Settings bottom sheet — refined layout with grouped sections and better spacing.
+ * Settings drawer — refined layout with grouped sections and better spacing.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSheet(
     deviceId: String,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var asrProvider by remember { mutableStateOf(AmbientPreferences.getAsrProvider(context)) }
     var llmProvider by remember { mutableStateOf(AmbientPreferences.getLlmProvider(context)) }
     var llmModel by remember { mutableStateOf(AmbientPreferences.getLlmModel(context)) }
@@ -104,28 +98,18 @@ fun SettingsSheet(
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    SideDetailDrawer(
+        title = "設定",
+        onClose = onDismiss
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp)
-                .verticalScroll(rememberScrollState()),
+                .padding(horizontal = 4.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Text(
-                text = "設定",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(4.dp))
 
             // === Recording ===
             SectionHeader(icon = Icons.Outlined.Mic, title = "録音")
@@ -344,6 +328,11 @@ fun SettingsSheet(
 
             // === About ===
             SectionHeader(icon = Icons.Outlined.Info, title = "情報")
+
+            SettingsRow(
+                title = "現在のチューニング",
+                subtitle = "録音は通常 5 秒無音で区切り、2 分を超える連続会話は 2.5 秒無音で区切ります。1 セッションの上限は 10 分です。Topic は 30 秒無発言で確定します。これらの値は今後調整する可能性があります。"
+            )
 
             SettingsRow(
                 title = "ZeroTouch",

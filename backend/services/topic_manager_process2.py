@@ -1,7 +1,7 @@
 """
 Process 2 topic evaluation:
 - cards are shown immediately from zerotouch_sessions
-- topics are generated in batch after 60s without new utterances per device
+- topics are finalized after 30s without new utterances per device
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ GROUPING_METHOD_LLM_BATCH = "llm_batch_60s_idle"
 GROUPING_METHOD_FALLBACK_BATCH = "fallback_batch_60s_idle"
 GROUPING_METHOD_LIVE_ACTIVE_TOPIC = "live_active_topic"
 
-DEFAULT_IDLE_SECONDS = 60
+DEFAULT_IDLE_SECONDS = 30
 VALID_BOUNDARY_REASONS = {"idle_timeout", "ambient_stopped", "manual", "legacy_repair"}
 OPTIONAL_TOPIC_COLUMNS = {"live_description", "final_description", "boundary_reason"}
 
