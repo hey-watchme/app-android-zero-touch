@@ -36,7 +36,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import com.example.zero_touch.ui.TranscriptCard
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtCardRowDivider
@@ -59,9 +61,11 @@ fun CardDetailSheet(
     onToggleFavorite: () -> Unit,
     onDelete: () -> Unit,
     onCopy: () -> Unit,
-    onRetranscribeEnglish: (() -> Unit)? = null
+    onRetranscribeEnglish: (() -> Unit)? = null,
+    onRetryTranscribe: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val context = LocalContext.current
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -146,7 +150,7 @@ fun CardDetailSheet(
             // Transcription content (selectable)
             if (card.isProcessing) {
                 Text(
-                    text = "Transcription in progress...",
+                    text = "文字起こし中...",
                     style = MaterialTheme.typography.bodyLarge,
                     color = ZtCaption
                 )
@@ -171,20 +175,20 @@ fun CardDetailSheet(
             ) {
                 SheetActionButton(
                     icon = Icons.Outlined.ContentCopy,
-                    label = "Copy",
+                    label = "コピー",
                     onClick = onCopy,
                     modifier = Modifier.weight(1f)
                 )
                 SheetActionButton(
                     icon = if (isFavorite) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                    label = if (isFavorite) "Saved" else "Save",
+                    label = if (isFavorite) "保存済み" else "保存",
                     onClick = onToggleFavorite,
                     modifier = Modifier.weight(1f),
                     tint = if (isFavorite) ZtPrimary else null
                 )
                 SheetActionButton(
                     icon = Icons.Outlined.Delete,
-                    label = "Remove",
+                    label = "削除",
                     onClick = {
                         onDelete()
                         onDismiss()
@@ -195,8 +199,20 @@ fun CardDetailSheet(
                 if (!card.isProcessing && onRetranscribeEnglish != null) {
                     SheetActionButton(
                         icon = Icons.Outlined.Refresh,
-                        label = "EN",
+                        label = "英語",
                         onClick = onRetranscribeEnglish,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (card.status == "failed" && onRetryTranscribe != null) {
+                    SheetActionButton(
+                        icon = Icons.Outlined.Refresh,
+                        label = "再試行",
+                        onClick = {
+                            onRetryTranscribe()
+                            Toast.makeText(context, "再試行を開始しました", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                        },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -265,14 +281,14 @@ private fun formatDetailDuration(seconds: Int): String {
         seconds >= 3600 -> {
             val h = seconds / 3600
             val m = (seconds % 3600) / 60
-            "${h}h ${m}m"
+            "${h}時間 ${m}分"
         }
         seconds >= 60 -> {
             val m = seconds / 60
             val s = seconds % 60
-            "${m}m ${s}s"
+            "${m}分${s}秒"
         }
-        else -> "${seconds}s"
+        else -> "${seconds}秒"
     }
 }
 

@@ -329,7 +329,7 @@ def list_topics(
                 supabase.table(TABLE)
                 .select(
                     "id, topic_id, device_id, status, transcription, duration_seconds, "
-                    "recorded_at, created_at, updated_at"
+                    "transcription_metadata, recorded_at, created_at, updated_at"
                 )
                 .in_("topic_id", topic_ids)
                 .order("created_at", desc=False)

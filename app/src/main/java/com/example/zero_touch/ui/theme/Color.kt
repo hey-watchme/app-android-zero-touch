@@ -10,7 +10,7 @@ val ZtPrimaryContainer = Color(0xFFDBEAFE)
 val ZtOnPrimary = Color(0xFFFFFFFF)
 
 // Background & Surface
-val ZtBackground = Color(0xFFFAFAF9)
+val ZtBackground = Color(0xFFEFEFEF)
 val ZtSurface = Color(0xFFFFFFFF)
 val ZtSurfaceVariant = Color(0xFFF5F5F4)
 

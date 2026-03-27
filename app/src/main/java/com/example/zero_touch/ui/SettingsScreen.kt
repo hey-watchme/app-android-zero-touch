@@ -119,7 +119,7 @@ fun SettingsSheet(
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
-                text = "Settings",
+                text = "設定",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -128,12 +128,12 @@ fun SettingsSheet(
             Spacer(Modifier.height(12.dp))
 
             // === Recording ===
-            SectionHeader(icon = Icons.Outlined.Mic, title = "Recording")
+            SectionHeader(icon = Icons.Outlined.Mic, title = "録音")
 
             var sensitivity by remember { mutableFloatStateOf(0.5f) }
             SettingsRow(
-                title = "Sensitivity",
-                subtitle = "VAD detection threshold"
+                title = "感度",
+                subtitle = "VAD検出しきい値"
             ) {
                 Slider(
                     value = sensitivity,
@@ -147,17 +147,17 @@ fun SettingsSheet(
             }
 
             val vadSubtitle = when (vadEngine) {
-                AmbientPreferences.VAD_ENGINE_SILERO -> "Silero — model-backed"
-                AmbientPreferences.VAD_ENGINE_WEBRTC -> "WebRTC — compatibility mode"
-                else -> "Threshold — lightweight default"
+                AmbientPreferences.VAD_ENGINE_SILERO -> "Silero — モデルベース"
+                AmbientPreferences.VAD_ENGINE_WEBRTC -> "WebRTC — 互換モード"
+                else -> "しきい値 — 軽量デフォルト"
             }
             SettingsRow(
-                title = "VAD engine",
+                title = "VADエンジン",
                 subtitle = vadSubtitle
             ) {
                 ChipGroup {
                     SettingsChip(
-                        label = "Threshold",
+                        label = "しきい値",
                         selected = vadEngine == AmbientPreferences.VAD_ENGINE_THRESHOLD,
                         onClick = {
                             vadEngine = AmbientPreferences.VAD_ENGINE_THRESHOLD
@@ -177,8 +177,8 @@ fun SettingsSheet(
 
             var minLength by remember { mutableFloatStateOf(3f) }
             SettingsRow(
-                title = "Minimum length",
-                subtitle = "${minLength.toInt()}s — discard shorter clips"
+                title = "最小長さ",
+                subtitle = "${minLength.toInt()}秒 — これ未満は破棄"
             ) {
                 Slider(
                     value = minLength,
@@ -195,8 +195,8 @@ fun SettingsSheet(
 
             var autoTranscribe by remember { mutableStateOf(true) }
             SettingsToggleRow(
-                title = "Auto-transcribe",
-                subtitle = "Transcribe after recording",
+                title = "自動文字起こし",
+                subtitle = "録音後に文字起こし",
                 checked = autoTranscribe,
                 onCheckedChange = { autoTranscribe = it }
             )
@@ -204,13 +204,13 @@ fun SettingsSheet(
             SettingsDivider()
 
             // === Transcription ===
-            SectionHeader(icon = Icons.Outlined.Language, title = "Transcription")
+            SectionHeader(icon = Icons.Outlined.Language, title = "文字起こし")
             val providerSubtitle = when (asrProvider) {
-                "deepgram" -> "Deepgram nova-3 — fast + smart format"
-                else -> "Speechmatics batch — diarization + entities"
+                "deepgram" -> "Deepgram nova-3 — 高速・整形あり"
+                else -> "Speechmatics batch — 話者分離・エンティティ"
             }
             SettingsRow(
-                title = "ASR Provider",
+                title = "ASRプロバイダー",
                 subtitle = providerSubtitle
             ) {
                 ChipGroup {
@@ -238,14 +238,14 @@ fun SettingsSheet(
             // === LLM ===
             SectionHeader(icon = Icons.Outlined.Psychology, title = "LLM")
             val llmSubtitle = when (llmModel) {
-                "gpt-4.1-nano" -> "GPT-4.1 nano — lightweight"
-                "gpt-4.1-mini" -> "GPT-4.1 mini — balanced"
-                "gpt-4.1" -> "GPT-4.1 — stronger reasoning"
-                "gpt-4o-mini" -> "GPT-4o mini — fast"
+                "gpt-4.1-nano" -> "GPT-4.1 nano — 軽量"
+                "gpt-4.1-mini" -> "GPT-4.1 mini — バランス"
+                "gpt-4.1" -> "GPT-4.1 — 高い推論力"
+                "gpt-4o-mini" -> "GPT-4o mini — 高速"
                 else -> "OpenAI $llmModel"
             }
             SettingsRow(
-                title = "LLM Model",
+                title = "LLMモデル",
                 subtitle = llmSubtitle
             ) {
                 ChipGroup {
@@ -285,18 +285,18 @@ fun SettingsSheet(
             SettingsDivider()
 
             // === Ambient ===
-            SectionHeader(icon = Icons.Outlined.GraphicEq, title = "Ambient")
+            SectionHeader(icon = Icons.Outlined.GraphicEq, title = "アンビエント")
             val ambientSubtitle = when (ambientAudioSource) {
-                "voice_recognition" -> "Voice recognition — system-level"
-                else -> "Microphone — raw ambient"
+                "voice_recognition" -> "音声認識 — システムレベル"
+                else -> "マイク — 生音"
             }
             SettingsRow(
-                title = "Audio source",
+                title = "音声ソース",
                 subtitle = ambientSubtitle
             ) {
                 ChipGroup {
                     SettingsChip(
-                        label = "Mic",
+                        label = "マイク",
                         selected = ambientAudioSource == "mic",
                         onClick = {
                             ambientAudioSource = "mic"
@@ -304,7 +304,7 @@ fun SettingsSheet(
                         }
                     )
                     SettingsChip(
-                        label = "Voice recognition",
+                        label = "音声認識",
                         selected = ambientAudioSource == "voice_recognition",
                         onClick = {
                             ambientAudioSource = "voice_recognition"
@@ -315,8 +315,8 @@ fun SettingsSheet(
             }
 
             SettingsToggleRow(
-                title = "High-pass filter",
-                subtitle = "Reduce low-frequency noise",
+                title = "ハイパスフィルター",
+                subtitle = "低周波ノイズを低減",
                 checked = hpfEnabled,
                 onCheckedChange = {
                     hpfEnabled = it
@@ -327,27 +327,27 @@ fun SettingsSheet(
             SettingsDivider()
 
             // === Device ===
-            SectionHeader(icon = Icons.Outlined.Storage, title = "Device")
+            SectionHeader(icon = Icons.Outlined.Storage, title = "デバイス")
 
             SettingsRow(
-                title = "Device ID",
+                title = "デバイスID",
                 subtitle = deviceId.take(8) + "..."
             )
 
             SettingsRow(
-                title = "API Status",
-                subtitle = "Connected",
+                title = "APIステータス",
+                subtitle = "接続済み",
                 trailingColor = ZtSuccess
             )
 
             SettingsDivider()
 
             // === About ===
-            SectionHeader(icon = Icons.Outlined.Info, title = "About")
+            SectionHeader(icon = Icons.Outlined.Info, title = "情報")
 
             SettingsRow(
                 title = "ZeroTouch",
-                subtitle = "Version 0.2.0 — Redesign"
+                subtitle = "バージョン 0.2.0 — リデザイン"
             )
         }
     }
@@ -416,7 +416,7 @@ private fun SettingsRow(
                         color = trailingColor.copy(alpha = 0.15f)
                     ) {
                         Text(
-                            text = "OK",
+                            text = "正常",
                             style = MaterialTheme.typography.labelSmall,
                             color = trailingColor,
                             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)

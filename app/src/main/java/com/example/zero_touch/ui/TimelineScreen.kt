@@ -57,7 +57,8 @@ fun TimelineScreen(
     onSelectCard: (String) -> Unit,
     onDismissDetail: () -> Unit,
     onLoadMore: () -> Unit,
-    onRetranscribeEnglish: (String) -> Unit
+    onRetranscribeEnglish: (String) -> Unit,
+    onRetryTranscribe: (String) -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
     val ambientState by AmbientStatus.state.collectAsState()
@@ -116,7 +117,8 @@ fun TimelineScreen(
             onToggleFavorite = { onToggleFavorite(selectedCard.id) },
             onDelete = { onDeleteCard(selectedCard.id) },
             onCopy = { clipboardManager.setText(AnnotatedString(selectedCard.text)) },
-            onRetranscribeEnglish = { onRetranscribeEnglish(selectedCard.id) }
+            onRetranscribeEnglish = { onRetranscribeEnglish(selectedCard.id) },
+            onRetryTranscribe = { onRetryTranscribe(selectedCard.id) }
         )
     }
 
@@ -165,7 +167,7 @@ fun TimelineScreen(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = "Loading...",
+                                text = "読み込み中...",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ZtCaption
                             )
@@ -201,7 +203,7 @@ private fun TimelineHeader(
             IconButton(onClick = onPrevious, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Outlined.ChevronLeft,
-                    contentDescription = "Previous day",
+                    contentDescription = "前日",
                     tint = ZtOnSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
@@ -234,7 +236,7 @@ private fun TimelineHeader(
                         color = ZtCaption
                     )
                     Text(
-                        text = "$cardCount cards",
+                        text = "カード ${cardCount}件",
                         style = MaterialTheme.typography.labelSmall,
                         color = ZtCaption
                     )
@@ -244,7 +246,7 @@ private fun TimelineHeader(
             IconButton(onClick = onNext, enabled = canGoNext, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Outlined.ChevronRight,
-                    contentDescription = "Next day",
+                    contentDescription = "翌日",
                     tint = if (canGoNext) ZtOnSurfaceVariant else ZtCaption.copy(alpha = 0.3f),
                     modifier = Modifier.size(20.dp)
                 )
@@ -263,12 +265,12 @@ private fun EmptyTimelineState(selectedDate: LocalDate) {
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
-            text = "No recordings",
+            text = "録音はありません",
             style = MaterialTheme.typography.titleSmall,
             color = ZtOnSurfaceVariant
         )
         Text(
-            text = "No activity on ${formatTimelineDate(selectedDate)}",
+            text = "${formatTimelineDate(selectedDate)} の記録はありません",
             style = MaterialTheme.typography.bodySmall,
             color = ZtCaption
         )
@@ -283,8 +285,8 @@ private fun dateFromEpoch(epochMs: Long): LocalDate? {
 private fun formatTimelineDate(date: LocalDate): String {
     val today = LocalDate.now()
     return when (date) {
-        today -> "Today"
-        today.minusDays(1) -> "Yesterday"
+        today -> "今日"
+        today.minusDays(1) -> "昨日"
         else -> date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN))
     }
 }

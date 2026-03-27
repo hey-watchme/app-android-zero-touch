@@ -44,7 +44,9 @@ data class TopicFeedCard(
     val utteranceCount: Int,
     val updatedAtEpochMs: Long,
     val displayDate: String,
-    val utterances: List<TranscriptCard> = emptyList()
+    val utterances: List<TranscriptCard> = emptyList(),
+    val llmProvider: String? = null,
+    val llmModel: String? = null
 )
 
 data class ZeroTouchUiState(
@@ -65,6 +67,7 @@ class ZeroTouchViewModel : ViewModel() {
     companion object {
         private const val TAG = "ZeroTouchVM"
         private const val PAGE_SIZE = 10
+        private const val OPTIMISTIC_TIMEOUT_MS = 60_000L
     }
 
     private val api = ZeroTouchApi()
@@ -77,6 +80,7 @@ class ZeroTouchViewModel : ViewModel() {
     private val favoriteIds = mutableSetOf<String>()
     private var currentOffset = 0
     private var hasMore = true
+    private val optimisticTranscribing = mutableMapOf<String, Long>()
 
     fun loadSessions(context: Context) {
         viewModelScope.launch {
@@ -111,7 +115,7 @@ class ZeroTouchViewModel : ViewModel() {
                 Log.e(TAG, "loadSessions failed", e)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = "Failed to load sessions: ${e.message}"
+                    error = "セッションの取得に失敗しました: ${e.message}"
                 )
             }
         }
@@ -200,7 +204,7 @@ class ZeroTouchViewModel : ViewModel() {
                 Log.e(TAG, "Upload failed", e)
                 _uiState.value = _uiState.value.copy(
                     isUploading = false,
-                    error = "Upload failed: ${e.message}"
+                    error = "アップロードに失敗しました: ${e.message}"
                 )
             }
         }
@@ -226,7 +230,28 @@ class ZeroTouchViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e(TAG, "Re-transcribe failed: session=$sessionId language=$language", e)
                 _uiState.value = _uiState.value.copy(
-                    error = "Re-transcribe failed: ${e.message}"
+                    error = "再文字起こしに失敗しました: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun retryTranscribeSession(context: Context, sessionId: String) {
+        viewModelScope.launch {
+            try {
+                markCardAsTranscribing(sessionId)
+                val asrProvider = AmbientPreferences.getAsrProvider(context)
+                api.transcribe(
+                    sessionId = sessionId,
+                    autoChain = false,
+                    provider = asrProvider
+                )
+                Log.d(TAG, "Retry transcribe triggered: session=$sessionId provider=$asrProvider")
+                refreshSessions(context)
+            } catch (e: Exception) {
+                Log.e(TAG, "Retry transcribe failed: session=$sessionId", e)
+                _uiState.value = _uiState.value.copy(
+                    error = "文字起こしの再試行に失敗しました: ${e.message}"
                 )
             }
         }
@@ -273,13 +298,13 @@ class ZeroTouchViewModel : ViewModel() {
         return try {
             val detail = api.getSession(summary.id)
             val text = detail.transcription?.trim().orEmpty()
-            val status = detail.status
+            val status = resolveOptimisticStatus(summary.id, detail.status)
             val (displayStatus, isProcessing) = mapStatus(status)
             val displayText = when {
                 text.isNotEmpty() -> text
-                status in listOf("transcribed", "completed") -> "No speech detected"
-                status == "failed" -> "Processing failed"
-                else -> "Processing..."
+                status in listOf("transcribed", "completed") -> "音声が検出されませんでした"
+                status == "failed" -> "処理に失敗しました"
+                else -> "データ取得中..."
             }
             val sourceTimestamp = detail.recorded_at ?: detail.created_at
             val createdAtEpoch = parseEpochMillis(sourceTimestamp)
@@ -311,9 +336,9 @@ class ZeroTouchViewModel : ViewModel() {
                 createdAt = summary.created_at,
                 createdAtEpochMs = 0L,
                 status = summary.status,
-                displayStatus = "Error",
+                displayStatus = "エラー",
                 isProcessing = false,
-                text = "Failed to load",
+                text = "読み込みに失敗しました",
                 displayTitle = "--:--",
                 durationSeconds = 0,
                 displayDate = "",
@@ -392,7 +417,7 @@ class ZeroTouchViewModel : ViewModel() {
         val status = topic.topic_status
         val title = (topic.final_title ?: topic.live_title)?.trim()
             ?.takeIf { it.isNotEmpty() }
-            ?: "Untitled topic"
+            ?: "無題のトピック"
         val summary = (topic.final_summary ?: topic.live_summary)?.trim().orEmpty()
         val updatedAt = topic.last_utterance_at ?: topic.updated_at ?: topic.end_at ?: topic.start_at
         val updatedAtEpochMs = parseEpochMillis(updatedAt)
@@ -406,20 +431,26 @@ class ZeroTouchViewModel : ViewModel() {
             utteranceCount = topic.utterance_count ?: utteranceCards.size,
             updatedAtEpochMs = updatedAtEpochMs,
             displayDate = displayDate,
-            utterances = utteranceCards
+            utterances = utteranceCards,
+            llmProvider = topic.llm_provider,
+            llmModel = topic.llm_model
         )
     }
 
     private fun buildTranscriptCardFromTopicUtterance(utterance: TopicUtteranceSummary): TranscriptCard {
-        val status = utterance.status
+        val status = resolveOptimisticStatus(utterance.id, utterance.status)
         val (displayStatus, isProcessing) = mapStatus(status)
         val sourceTimestamp = utterance.recorded_at ?: utterance.created_at
+        val metadata = utterance.transcription_metadata ?: emptyMap()
+        val asrProvider = metadata["provider"] as? String
+        val asrModel = metadata["model"] as? String
+        val asrLanguage = metadata["language"] as? String
         val text = utterance.transcription?.trim().orEmpty()
         val displayText = when {
             text.isNotEmpty() -> text
-            status in listOf("transcribed", "completed") -> "No speech detected"
-            status == "failed" -> "Processing failed"
-            else -> "Processing..."
+            status in listOf("transcribed", "completed") -> "音声が検出されませんでした"
+            status == "failed" -> "処理に失敗しました"
+            else -> "データ取得中..."
         }
 
         return TranscriptCard(
@@ -433,44 +464,85 @@ class ZeroTouchViewModel : ViewModel() {
             displayTitle = buildTitle(sourceTimestamp),
             durationSeconds = utterance.duration_seconds ?: 0,
             displayDate = buildDisplayDate(sourceTimestamp),
-            asrProvider = null,
-            asrModel = null,
-            asrLanguage = null
+            asrProvider = asrProvider,
+            asrModel = asrModel,
+            asrLanguage = asrLanguage
         )
     }
 
     private fun mapStatus(status: String): Pair<String, Boolean> {
         val displayStatus = when (status) {
-            "uploaded" -> "Queued"
-            "transcribing" -> "Transcribing"
-            "transcribed" -> "Transcribed"
-            "completed" -> "Completed"
-            "failed" -> "Failed"
-            "generating" -> "Generating"
-            "active" -> "Live"
-            "cooling" -> "Cooling"
-            "finalized" -> "Finalized"
-            else -> status
+            "uploaded" -> "キュー待ち"
+            "transcribing" -> "文字起こし中"
+            "transcribed" -> "文字起こし済み"
+            "completed" -> "完了"
+            "failed" -> "失敗"
+            "generating" -> "分析中"
+            "active" -> "ライブ"
+            "cooling" -> "整理中"
+            "finalized" -> "完了"
+            else -> "不明"
         }
         val isProcessing = status in listOf("uploaded", "transcribing", "generating")
         return displayStatus to isProcessing
     }
 
+    private fun resolveOptimisticStatus(id: String, status: String): String {
+        val startedAt = optimisticTranscribing[id] ?: return status
+        val ageMs = System.currentTimeMillis() - startedAt
+        if (status in listOf("transcribed", "completed")) {
+            optimisticTranscribing.remove(id)
+            return status
+        }
+        if (ageMs > OPTIMISTIC_TIMEOUT_MS) {
+            optimisticTranscribing.remove(id)
+            return status
+        }
+        return if (status == "failed") "transcribing" else status
+    }
+
     private fun markCardAsTranscribing(sessionId: String) {
         val state = _uiState.value
+        optimisticTranscribing[sessionId] = System.currentTimeMillis()
+        val updatedSessions = state.sessions.map { session ->
+            if (session.id != sessionId) {
+                session
+            } else {
+                session.copy(status = "transcribing", error_message = null)
+            }
+        }
         val updatedCards = state.feedCards.map { card ->
             if (card.id != sessionId) {
                 card
             } else {
                 card.copy(
                     status = "transcribing",
-                    displayStatus = "Transcribing",
+                    displayStatus = "データ取得中",
                     isProcessing = true,
-                    text = "Processing..."
+                    text = "データ取得中..."
                 )
             }
         }
-        _uiState.value = state.copy(feedCards = updatedCards)
+        val updatedTopics = state.topicCards.map { topic ->
+            val updatedUtterances = topic.utterances.map { card ->
+                if (card.id != sessionId) {
+                    card
+                } else {
+                    card.copy(
+                        status = "transcribing",
+                        displayStatus = "データ取得中",
+                        isProcessing = true,
+                        text = "データ取得中..."
+                    )
+                }
+            }
+            topic.copy(utterances = updatedUtterances)
+        }
+        _uiState.value = state.copy(
+            sessions = updatedSessions,
+            feedCards = updatedCards,
+            topicCards = updatedTopics
+        )
     }
 
     private fun filterDismissed(cards: List<TranscriptCard>): List<TranscriptCard> {
@@ -519,8 +591,8 @@ class ZeroTouchViewModel : ViewModel() {
             val localDate = parsed.atZoneSameInstant(ZoneId.systemDefault()).toLocalDate()
             val today = LocalDate.now()
             when (localDate) {
-                today -> "Today"
-                today.minusDays(1) -> "Yesterday"
+                today -> "今日"
+                today.minusDays(1) -> "昨日"
                 else -> localDate.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN))
             }
         } catch (_: Exception) {

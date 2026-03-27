@@ -1,29 +1,21 @@
 package com.example.zero_touch.ui
 
-import android.Manifest
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +24,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -43,13 +36,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.FilterList
-import androidx.compose.material.icons.outlined.Mic
-import androidx.compose.material.icons.outlined.MicNone
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Topic
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -58,31 +47,30 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import com.example.zero_touch.audio.ambient.AmbientPreferences
-import com.example.zero_touch.audio.ambient.AmbientRecordingService
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import kotlinx.coroutines.delay
+import com.example.zero_touch.api.SessionSummary
+import com.example.zero_touch.audio.ambient.AmbientRecordingEntry
 import com.example.zero_touch.audio.ambient.AmbientStatus
 import com.example.zero_touch.ui.components.AmbientStatusBar
 import com.example.zero_touch.ui.components.AnimatedProcessingDots
@@ -91,17 +79,23 @@ import com.example.zero_touch.ui.components.ShimmerCardList
 import com.example.zero_touch.ui.components.TranscriptCardView
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtCardRowDivider
+import com.example.zero_touch.ui.theme.ZtError
 import com.example.zero_touch.ui.theme.ZtFilterBorder
 import com.example.zero_touch.ui.theme.ZtFilterSelected
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
 import com.example.zero_touch.ui.theme.ZtOutline
 import com.example.zero_touch.ui.theme.ZtPrimary
 import com.example.zero_touch.ui.theme.ZtTopicBorder
+import com.example.zero_touch.ui.theme.ZtRecording
 import com.example.zero_touch.ui.theme.ZtTopicSurface
+import com.example.zero_touch.ui.theme.ZtWarning
+import androidx.compose.runtime.snapshotFlow
+import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 @Composable
@@ -109,94 +103,44 @@ fun VoiceMemoScreen(
     modifier: Modifier = Modifier,
     uiState: ZeroTouchUiState,
     showFavoritesOnly: Boolean,
+    ambientEnabled: Boolean,
     onDeleteCard: (String) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onSelectCard: (String) -> Unit,
     onDismissDetail: () -> Unit,
     onLoadMore: () -> Unit,
     onRetranscribeEnglish: (String) -> Unit,
-    onAmbientStopped: () -> Unit
+    onRetryTranscribe: (String) -> Unit
 ) {
-    val context = LocalContext.current
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    // --- Permission & ambient state ---
-    var hasRecordPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-        )
-    }
-    var ambientEnabled by remember { mutableStateOf(AmbientPreferences.isAmbientEnabled(context)) }
     val ambientState by AmbientStatus.state.collectAsState()
-    var hasNotificationPermission by remember {
-        mutableStateOf(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-                    PackageManager.PERMISSION_GRANTED
-            } else {
-                true
-            }
-        )
-    }
-
-    val requestPermissionLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            hasRecordPermission = granted
-        }
-    val requestNotificationLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            hasNotificationPermission = granted
-            if (!granted) {
-                ambientEnabled = false
-                AmbientPreferences.setAmbientEnabled(context, false)
-            } else if (ambientEnabled) {
-                startAmbientService(context)
-            }
-        }
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) { /* no-op */ }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    LaunchedEffect(ambientEnabled, hasRecordPermission, hasNotificationPermission) {
-        if (!ambientEnabled) return@LaunchedEffect
-        val notificationsOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotificationPermission
-        if (!hasRecordPermission || !notificationsOk) {
-            ambientEnabled = false
-            AmbientPreferences.setAmbientEnabled(context, false)
-            stopAmbientService(context)
-            return@LaunchedEffect
-        }
-        startAmbientService(context)
-    }
 
     // --- Filter state ---
-    var activeFilter by remember { mutableStateOf("All") }
-    val filterOptions = listOf("All", "Today", "Live", "Finalized")
+    var activeFilter by remember { mutableStateOf("すべて") }
+    val filterOptions = listOf("すべて", "今日", "ライブ", "完了")
 
     // --- Data preparation ---
     val topicCards = uiState.topicCards
     val favoriteIds = uiState.favoriteIds
-    val topicChildren = topicCards.flatMap { it.utterances }
+    val realTopicChildren = topicCards.flatMap { it.utterances }
+    val topicChildIds = realTopicChildren.map { it.id }.toSet()
+    val pendingTopicCards = buildPendingTopicCards(
+        recordings = ambientState.recordings,
+        sessions = uiState.sessions,
+        topicChildIds = topicChildIds
+    )
+    val mergedTopicCards = (topicCards + pendingTopicCards)
+        .sortedByDescending { it.updatedAtEpochMs }
     val visibleTopicCards = if (showFavoritesOnly) {
         emptyList()
     } else {
         when (activeFilter) {
-            "Today" -> topicCards.filter { it.displayDate == "Today" }
-            "Live" -> topicCards.filter { it.status == "active" }
-            "Finalized" -> topicCards.filter { it.status == "finalized" }
-            else -> topicCards
+            "今日" -> mergedTopicCards.filter { it.displayDate == "今日" }
+            "ライブ" -> topicCards.filter { it.status == "active" }
+            "完了" -> topicCards.filter { it.status == "finalized" }
+            else -> mergedTopicCards
         }
     }
-
-    // --- Expand/collapse state per topic ---
-    val expandedTopics = remember { mutableStateMapOf<String, Boolean>() }
 
     val listState = rememberLazyListState()
 
@@ -216,8 +160,9 @@ fun VoiceMemoScreen(
     }
 
     // --- Bottom sheet ---
+    val mergedTopicChildren = mergedTopicCards.flatMap { it.utterances }
     val selectedCard = uiState.selectedCardId?.let { id ->
-        topicChildren.distinctBy { it.id }.find { it.id == id }
+        mergedTopicChildren.distinctBy { it.id }.find { it.id == id }
     }
     if (selectedCard != null) {
         CardDetailSheet(
@@ -229,167 +174,185 @@ fun VoiceMemoScreen(
             onCopy = {
                 clipboardManager.setText(AnnotatedString(selectedCard.text))
             },
-            onRetranscribeEnglish = { onRetranscribeEnglish(selectedCard.id) }
+            onRetranscribeEnglish = { onRetranscribeEnglish(selectedCard.id) },
+            onRetryTranscribe = { onRetryTranscribe(selectedCard.id) }
         )
     }
 
+    var selectedTopicId by remember { mutableStateOf<String?>(null) }
+    val selectedTopic = selectedTopicId?.let { id ->
+        mergedTopicCards.find { it.id == id }
+    }
+
     // --- Main UI ---
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 16.dp)
     ) {
-        Spacer(Modifier.height(4.dp))
+        Column(modifier = Modifier.fillMaxSize()) {
+            Spacer(Modifier.height(4.dp))
 
-        // Compact header: ambient toggle (right-aligned)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Greeting + date
-            Column {
-                Text(
-                    text = formatTodayJa(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ZtCaption
-                )
-            }
-            AmbientToggleChip(
-                enabled = ambientEnabled,
-                onToggle = { enabled ->
-                    if (enabled) {
-                        if (!hasRecordPermission) {
-                            requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            return@AmbientToggleChip
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission) {
-                            requestNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            return@AmbientToggleChip
-                        }
-                        AmbientPreferences.setAmbientEnabled(context, true)
-                        ambientEnabled = true
-                        startAmbientService(context)
-                    } else {
-                        AmbientPreferences.setAmbientEnabled(context, false)
-                        ambientEnabled = false
-                        stopAmbientService(context)
-                        onAmbientStopped()
-                    }
-                }
+            // Ambient status bar
+            AmbientStatusBar(
+                ambientState = ambientState,
+                isEnabled = ambientEnabled
             )
-        }
 
-        Spacer(Modifier.height(6.dp))
-
-        // Ambient status bar
-        AmbientStatusBar(
-            ambientState = ambientState,
-            isEnabled = ambientEnabled
-        )
-
-        // Permission prompt
-        if (!hasRecordPermission) {
-            Spacer(Modifier.height(6.dp))
-            PermissionBanner(
-                onGrant = { requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
-            )
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // Search bar + filter icon
-        SearchBar()
-
-        Spacer(Modifier.height(8.dp))
-
-        // Filter chips (horizontal scroll)
-        if (!showFavoritesOnly) {
-            FilterChipRow(
-                options = filterOptions,
-                activeFilter = activeFilter,
-                onFilterSelected = { activeFilter = it },
-                topicCount = topicCards.size
-            )
             Spacer(Modifier.height(8.dp))
-        }
 
-        // Feed list
-        when {
-            uiState.isLoading && visibleTopicCards.isEmpty() -> {
-                ShimmerCardList(count = 4)
+            // Scrollable content: search, filters, and feed
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(bottom = 12.dp)
+            ) {
+            // Search bar (scrolls away)
+            item(key = "search_bar") {
+                SearchBar()
             }
-            else -> {
-                LazyColumn(
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(bottom = 12.dp)
-                ) {
-                    if (visibleTopicCards.isEmpty()) {
-                        item(key = "empty_state") {
-                            EmptyStateView(showFavoritesOnly = showFavoritesOnly)
-                        }
-                    } else {
-                        val groupedTopics = visibleTopicCards.groupBy { it.displayDate.ifEmpty { "Unknown" } }
-                        groupedTopics.forEach { (dateLabel, topics) ->
-                            item(key = "header_$dateLabel") {
-                                DateHeader(dateLabel, topics.size)
-                            }
-                            items(topics, key = { it.id }) { topic ->
-                                val isExpanded = expandedTopics[topic.id] ?: true
-                                TopicGroupCard(
-                                    topic = topic,
-                                    favoriteIds = favoriteIds,
-                                    isExpanded = isExpanded,
-                                    onToggleExpand = {
-                                        expandedTopics[topic.id] = !isExpanded
-                                    },
-                                    onSelectCard = onSelectCard,
-                                    onToggleFavorite = onToggleFavorite
-                                )
-                            }
+
+            // Filter chips (scrolls away)
+            if (!showFavoritesOnly) {
+                item(key = "filter_chips") {
+                    FilterChipRow(
+                        options = filterOptions,
+                        activeFilter = activeFilter,
+                        onFilterSelected = { activeFilter = it },
+                        topicCount = topicCards.size
+                    )
+                }
+            }
+
+            // Feed content
+            val isRecording = ambientState.isRecording
+
+            // Placeholder topic for live recording state
+            val liveRecordingTopic = if (isRecording) {
+                TopicFeedCard(
+                    id = "live_recording",
+                    status = "recording",
+                    title = "",
+                    summary = "",
+                    utteranceCount = 1,
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                    displayDate = "今日",
+                    utterances = listOf(
+                        TranscriptCard(
+                            id = "live_recording_card",
+                            createdAt = "",
+                            createdAtEpochMs = System.currentTimeMillis(),
+                            status = "recording",
+                            displayStatus = "録音中",
+                            isProcessing = true,
+                            text = "",
+                            displayTitle = "--:--",
+                            durationSeconds = 0,
+                            displayDate = "今日"
+                        )
+                    )
+                )
+            } else null
+
+            if (uiState.isLoading && visibleTopicCards.isEmpty() && !isRecording) {
+                item(key = "shimmer") {
+                    ShimmerCardList(count = 4)
+                }
+            } else if (visibleTopicCards.isEmpty() && !isRecording) {
+                item(key = "empty_state") {
+                    EmptyStateView(showFavoritesOnly = showFavoritesOnly)
+                }
+            } else {
+                val groupedTopics = visibleTopicCards.groupBy { it.displayDate.ifEmpty { "不明" } }
+                val hasTodayGroup = groupedTopics.containsKey("今日")
+
+                // If recording but no "Today" group exists, create one with the live topic
+                if (isRecording && !hasTodayGroup && liveRecordingTopic != null) {
+                    item(key = "header_Today") {
+                        DateHeader("今日", 1)
+                    }
+                    item(key = "live_recording") {
+                        TopicGroupCard(
+                            topic = liveRecordingTopic,
+                            favoriteIds = favoriteIds,
+                            onOpenTopic = { selectedTopicId = it.id },
+                            onSelectCard = {},
+                            onToggleFavorite = {}
+                        )
+                    }
+                }
+
+                groupedTopics.forEach { (dateLabel, topics) ->
+                    item(key = "header_$dateLabel") {
+                        DateHeader(dateLabel, topics.size + if (dateLabel == "今日" && isRecording) 1 else 0)
+                    }
+                    // Insert live recording topic at the top of "Today" group
+                    if (dateLabel == "今日" && isRecording && liveRecordingTopic != null) {
+                        item(key = "live_recording") {
+                            TopicGroupCard(
+                                topic = liveRecordingTopic,
+                                favoriteIds = favoriteIds,
+                                onOpenTopic = { selectedTopicId = it.id },
+                                onSelectCard = {},
+                                onToggleFavorite = {}
+                            )
                         }
                     }
-
-                    if (uiState.isLoadingMore) {
-                        item(key = "loading_more") {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Text(
-                                    text = "Loading...",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = ZtCaption
-                                )
-                            }
-                        }
+                    items(topics, key = { it.id }) { topic ->
+                        TopicGroupCard(
+                            topic = topic,
+                            favoriteIds = favoriteIds,
+                            onOpenTopic = { selectedTopicId = it.id },
+                            onSelectCard = onSelectCard,
+                            onToggleFavorite = onToggleFavorite
+                        )
                     }
                 }
             }
+
+            if (uiState.isLoadingMore) {
+                item(key = "loading_more") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "読み込み中...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ZtCaption
+                        )
+                    }
+                }
+            }
+            }
+        }
+
+        if (selectedTopic != null) {
+            TopicDetailDrawer(
+                topic = selectedTopic,
+                onClose = { selectedTopicId = null }
+            )
         }
     }
 }
 
-// --- Topic Group Card (collapsible, with entry animation) ---
+// --- Topic Group Card (always expanded, tap for detail drawer) ---
 
 @Composable
 private fun TopicGroupCard(
     topic: TopicFeedCard,
     favoriteIds: Set<String>,
-    isExpanded: Boolean,
-    onToggleExpand: () -> Unit,
+    onOpenTopic: (TopicFeedCard) -> Unit,
     onSelectCard: (String) -> Unit,
     onToggleFavorite: (String) -> Unit
 ) {
-    val chevronRotation by animateFloatAsState(
-        targetValue = if (isExpanded) 0f else -90f,
-        animationSpec = spring(stiffness = Spring.StiffnessMedium),
-        label = "chevron"
-    )
+    val isLiveTopic = topic.status == "recording"
+    val isFailedTopic = topic.status == "failed"
+    val highlightAlpha = remember(topic.id) { androidx.compose.animation.core.Animatable(0f) }
+    var lastStatus by remember(topic.id) { mutableStateOf(topic.status) }
 
     // Topic-level entry animation
     val topicScale = remember { androidx.compose.animation.core.Animatable(0.95f) }
@@ -403,6 +366,38 @@ private fun TopicGroupCard(
             stiffness = Spring.StiffnessLow
         ))
     }
+    LaunchedEffect(topic.status) {
+        if (lastStatus != topic.status) {
+            if (topic.status == "finalized" && lastStatus != "finalized") {
+                highlightAlpha.snapTo(0.35f)
+                highlightAlpha.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = 2800, easing = FastOutSlowInEasing)
+                )
+            }
+            lastStatus = topic.status
+        }
+    }
+
+    // Shimmer for skeleton placeholders in live topic
+    val shimmerTransition = rememberInfiniteTransition(label = "topic_shimmer")
+    val shimmerAlpha by shimmerTransition.animateFloat(
+        initialValue = 0.10f,
+        targetValue = 0.28f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shimmer_a"
+    )
+
+    val topicBg = when {
+        isLiveTopic -> ZtWarning.copy(alpha = 0.06f)
+        isFailedTopic -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        else -> ZtTopicSurface
+    }
+    val topicContentAlpha = if (isFailedTopic) 0.7f else 1f
+    val highlightColor = Color(0xFFFFF2BF)
 
     Surface(
         modifier = Modifier
@@ -410,95 +405,110 @@ private fun TopicGroupCard(
             .graphicsLayer {
                 scaleX = topicScale.value
                 scaleY = topicScale.value
-                alpha = topicAlpha.value
+                alpha = topicAlpha.value * topicContentAlpha
             },
         shape = RoundedCornerShape(10.dp),
-        color = ZtTopicSurface,
+        color = topicBg,
         shadowElevation = 0.5.dp
     ) {
-        Column(
-            modifier = Modifier.animateContentSize(
-                animationSpec = spring(stiffness = Spring.StiffnessMedium)
-            )
-        ) {
-            // Topic header
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = ZtTopicSurface,
-                onClick = onToggleExpand
-            ) {
-                Row(
+        Box {
+            if (highlightAlpha.value > 0f) {
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .matchParentSize()
+                        .background(highlightColor.copy(alpha = highlightAlpha.value))
+                )
+            }
+            Column(
+                modifier = Modifier.animateContentSize(
+                    animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                )
+            ) {
+                // Topic header
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = topicBg,
+                    onClick = { onOpenTopic(topic) }
                 ) {
-                    Icon(
-                        Icons.Filled.KeyboardArrowDown,
-                        contentDescription = if (isExpanded) "Collapse" else "Expand",
+                    Row(
                         modifier = Modifier
-                            .size(18.dp)
-                            .rotate(chevronRotation),
-                        tint = ZtOnSurfaceVariant
-                    )
-                    Icon(
-                        Icons.Outlined.Topic,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = ZtCaption
-                    )
-                    Text(
-                        text = topic.title,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = "${topic.utteranceCount}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ZtOnSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                        if (isLiveTopic) {
+                            // Skeleton title placeholder
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(14.dp)
+                                    .background(
+                                        ZtWarning.copy(alpha = shimmerAlpha),
+                                        RoundedCornerShape(3.dp)
+                                    )
+                            )
+                        } else {
+                            Text(
+                                text = topic.title,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = "${topic.utteranceCount}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ZtOnSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Summary area
+                when {
+                    // Live recording — skeleton summary
+                    isLiveTopic -> {
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
+                                .padding(bottom = 8.dp)
+                                .fillMaxWidth(0.55f)
+                                .height(10.dp)
+                                .background(
+                                    ZtWarning.copy(alpha = shimmerAlpha * 0.7f),
+                                    RoundedCornerShape(3.dp)
+                                )
                         )
                     }
-                    TopicStatusBadge(topic.status)
+                    // Cooling = just stopped talking, topic being finalized
+                    (topic.status == "cooling" || topic.status == "processing") && topic.summary.isBlank() -> {
+                        TopicAnalyzingLabel(
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                                .padding(bottom = 8.dp)
+                        )
+                    }
+                    topic.summary.isNotBlank() -> {
+                        Text(
+                            text = topic.summary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ZtCaption,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                                .padding(bottom = 8.dp)
+                        )
+                    }
                 }
-            }
 
-            // Summary or stage-3 "analyzing" indicator
-            when {
-                // Cooling = just stopped talking, topic being finalized
-                topic.status == "cooling" && topic.summary.isBlank() -> {
-                    TopicAnalyzingLabel(
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                            .padding(bottom = 8.dp)
-                    )
-                }
-                topic.summary.isNotBlank() -> {
-                    Text(
-                        text = topic.summary,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ZtCaption,
-                        maxLines = if (isExpanded) 3 else 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                            .padding(bottom = if (isExpanded) 4.dp else 8.dp)
-                    )
-                }
-            }
-
-            // Expanded: child cards
-            AnimatedVisibility(
-                visible = isExpanded,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
+                // Expanded: child cards
                 Column {
                     HorizontalDivider(
                         color = ZtCardRowDivider,
@@ -526,16 +536,227 @@ private fun TopicGroupCard(
 }
 
 @Composable
-private fun TopicStatusBadge(status: String) {
-    val label = when (status) {
-        "active" -> "Live"
-        "cooling" -> "Cooling"
-        "finalized" -> "Done"
-        else -> status
+private fun TopicDetailDrawer(
+    topic: TopicFeedCard,
+    onClose: () -> Unit
+) {
+    val configuration = LocalConfiguration.current
+    val drawerWidth = (configuration.screenWidthDp * 0.82f).dp
+    val scrollState = rememberScrollState()
+    val scrimInteraction = remember { MutableInteractionSource() }
+    var visible by remember { mutableStateOf(true) }
+
+    LaunchedEffect(visible) {
+        if (!visible) {
+            delay(180)
+            onClose()
+        }
     }
+
+    Dialog(
+        onDismissRequest = { visible = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                    .clickable(
+                        interactionSource = scrimInteraction,
+                        indication = null
+                    ) { visible = false }
+            )
+
+            AnimatedVisibility(
+                visible = visible,
+                enter = slideInHorizontally(
+                    initialOffsetX = { it },
+                    animationSpec = tween(220, easing = FastOutSlowInEasing)
+                ),
+                exit = slideOutHorizontally(
+                    targetOffsetX = { it },
+                    animationSpec = tween(180, easing = FastOutSlowInEasing)
+                ),
+                modifier = Modifier.align(Alignment.CenterEnd)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(drawerWidth)
+                        .background(Color.White)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollState)
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "トピック詳細",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Icon(
+                                Icons.Outlined.Close,
+                                contentDescription = "閉じる",
+                                tint = ZtOnSurfaceVariant,
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) { visible = false }
+                            )
+                        }
+
+                        DetailSection(title = "タイトル") {
+                            Text(
+                                text = topic.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        DetailSection(title = "説明") {
+                            Text(
+                                text = if (topic.summary.isBlank()) "説明はまだありません" else topic.summary,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = ZtOnSurfaceVariant,
+                                lineHeight = 20.sp
+                            )
+                        }
+
+                        DetailSection(title = "メタデータ") {
+                            DetailRow(label = "トピックID", value = topic.id)
+                            DetailRow(label = "ステータス", value = topicStatusLabel(topic.status))
+                            DetailRow(label = "発話数", value = topic.utteranceCount.toString())
+                            DetailRow(label = "更新日時", value = formatEpochDateTime(topic.updatedAtEpochMs))
+                            DetailRow(label = "解析日時", value = formatEpochDateTime(topic.updatedAtEpochMs))
+                            DetailRow(
+                                label = "LLM",
+                                value = listOfNotNull(topic.llmProvider, topic.llmModel)
+                                    .takeIf { it.isNotEmpty() }
+                                    ?.joinToString(" / ")
+                                    ?: "不明"
+                            )
+                        }
+
+                        DetailSection(title = "カード") {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                topic.utterances.forEach { card ->
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = card.displayTitle,
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    color = ZtOnSurfaceVariant
+                                                )
+                                                Text(
+                                                    text = card.displayStatus,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (card.status == "failed") ZtError else ZtWarning
+                                                )
+                                            }
+                                            Text(
+                                                text = card.text,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            DetailRow(
+                                                label = "長さ",
+                                                value = if (card.durationSeconds > 0) "${card.durationSeconds}秒" else "-"
+                                            )
+                                            DetailRow(
+                                                label = "録音日時",
+                                                value = formatEpochDateTime(card.createdAtEpochMs)
+                                            )
+                                            DetailRow(
+                                                label = "ステータス",
+                                                value = card.displayStatus
+                                            )
+                                            DetailRow(
+                                                label = "ASR",
+                                                value = listOfNotNull(card.asrProvider, card.asrModel, card.asrLanguage)
+                                                    .takeIf { it.isNotEmpty() }
+                                                    ?.joinToString(" / ")
+                                                    ?: "不明"
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailSection(
+    title: String,
+    content: @Composable () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            color = ZtCaption
+        )
+        content()
+    }
+}
+
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = ZtCaption,
+            modifier = Modifier.width(110.dp)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun TopicStatusBadge(status: String) {
+    val label = topicStatusLabel(status)
     val color = when (status) {
+        "recording" -> ZtRecording
         "active" -> ZtPrimary
         "cooling" -> MaterialTheme.colorScheme.tertiary
+        "processing" -> MaterialTheme.colorScheme.tertiary
+        "failed" -> ZtError
         "finalized" -> ZtCaption
         else -> ZtCaption
     }
@@ -550,6 +771,99 @@ private fun TopicStatusBadge(status: String) {
             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
         )
     }
+}
+
+private fun buildPendingTopicCards(
+    recordings: List<AmbientRecordingEntry>,
+    sessions: List<SessionSummary>,
+    topicChildIds: Set<String>
+): List<TopicFeedCard> {
+    val pendingCards = mutableListOf<TopicFeedCard>()
+    if (recordings.isEmpty() && sessions.isEmpty()) return emptyList()
+
+    val sessionById = sessions.associateBy { it.id }
+    val recordingSessionIds = recordings.mapNotNull { it.sessionId }.toSet()
+
+    fun addPendingCard(
+        sessionId: String?,
+        createdAtEpochMs: Long,
+        durationSeconds: Int,
+        status: String
+    ) {
+        if (sessionId != null && topicChildIds.contains(sessionId)) return
+
+        val displayStatus = when (status) {
+            "pending" -> "データ取得中"
+            "uploaded" -> "データ取得中"
+            "transcribing" -> "データ取得中"
+            "generating" -> "データ取得中"
+            "failed" -> "失敗"
+            else -> "データ取得中"
+        }
+        val isProcessing = status != "failed"
+        val displayText = if (status == "failed") "処理に失敗しました" else "データ取得中..."
+        val cardId = sessionId ?: "pending_${createdAtEpochMs}"
+        val displayTitle = formatEpochTime(createdAtEpochMs)
+        val displayDate = formatEpochDate(createdAtEpochMs)
+        val visualStatus = when (status) {
+            "failed" -> "failed"
+            "uploaded", "transcribing", "generating" -> status
+            else -> "transcribing"
+        }
+
+        val card = TranscriptCard(
+            id = cardId,
+            createdAt = "",
+            createdAtEpochMs = createdAtEpochMs,
+            status = visualStatus,
+            displayStatus = displayStatus,
+            isProcessing = isProcessing,
+            text = displayText,
+            displayTitle = displayTitle,
+            durationSeconds = durationSeconds,
+            displayDate = displayDate
+        )
+
+        val topicId = "pending_topic_${cardId}"
+        val topicStatus = if (status == "failed") "failed" else "processing"
+        val title = if (status == "failed") "処理に失敗しました" else "データ取得中"
+
+        pendingCards.add(
+            TopicFeedCard(
+                id = topicId,
+                status = topicStatus,
+                title = title,
+                summary = "",
+                utteranceCount = 1,
+                updatedAtEpochMs = createdAtEpochMs,
+                displayDate = displayDate,
+                utterances = listOf(card)
+            )
+        )
+    }
+
+    recordings.forEach { entry ->
+        val sessionId = entry.sessionId
+        val summary = sessionId?.let { sessionById[it] }
+        val status = summary?.status ?: if (sessionId == null) "pending" else "uploaded"
+        val epochFromSummary = parseIsoEpochMillis(summary?.recorded_at ?: summary?.created_at)
+        val createdAtEpoch = epochFromSummary ?: entry.createdAt
+        val durationSeconds = summary?.duration_seconds ?: (entry.durationMs / 1000L).toInt()
+        addPendingCard(sessionId, createdAtEpoch, durationSeconds, status)
+    }
+
+    sessions.forEach { summary ->
+        if (summary.id in topicChildIds) return@forEach
+        if (summary.id in recordingSessionIds) return@forEach
+        val status = summary.status
+        if (status !in setOf("uploaded", "transcribing", "generating", "transcribed", "failed")) return@forEach
+        val createdAtEpoch = parseIsoEpochMillis(summary.recorded_at ?: summary.created_at)
+        val epoch = createdAtEpoch ?: return@forEach
+        val durationSeconds = summary.duration_seconds ?: 0
+        addPendingCard(summary.id, epoch, durationSeconds, status)
+    }
+
+    return pendingCards
 }
 
 /**
@@ -574,7 +888,7 @@ private fun TopicAnalyzingLabel(modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
-            text = "Analyzing conversation",
+            text = "データ取得中",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.tertiary
         )
@@ -601,7 +915,7 @@ private fun FilterChipRow(
                 onClick = { onFilterSelected(option) },
                 label = {
                     Text(
-                        text = if (option == "All") "All ($topicCount)" else option,
+                        text = if (option == "すべて") "すべて ($topicCount)" else option,
                         style = MaterialTheme.typography.labelMedium
                     )
                 },
@@ -628,39 +942,6 @@ private fun FilterChipRow(
 // --- Sub-composables ---
 
 @Composable
-private fun AmbientToggleChip(
-    enabled: Boolean,
-    onToggle: (Boolean) -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = if (enabled) MaterialTheme.colorScheme.primaryContainer
-               else MaterialTheme.colorScheme.surfaceVariant,
-        onClick = { onToggle(!enabled) }
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = if (enabled) Icons.Outlined.Mic else Icons.Outlined.MicNone,
-                contentDescription = "Ambient",
-                modifier = Modifier.size(14.dp),
-                tint = if (enabled) MaterialTheme.colorScheme.primary
-                       else ZtOnSurfaceVariant
-            )
-            Text(
-                text = if (enabled) "Listening" else "Off",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (enabled) MaterialTheme.colorScheme.primary
-                        else ZtOnSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
 private fun SearchBar() {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -674,19 +955,19 @@ private fun SearchBar() {
         ) {
             Icon(
                 Icons.Outlined.Search,
-                contentDescription = "Search",
+                contentDescription = "検索",
                 tint = ZtCaption,
                 modifier = Modifier.size(16.dp)
             )
             Text(
-                text = "Search transcripts...",
+                text = "文字起こしを検索...",
                 style = MaterialTheme.typography.bodyMedium,
                 color = ZtCaption,
                 modifier = Modifier.weight(1f)
             )
             Icon(
                 Icons.Outlined.FilterList,
-                contentDescription = "Filter",
+                contentDescription = "フィルター",
                 tint = ZtCaption,
                 modifier = Modifier.size(16.dp)
             )
@@ -694,40 +975,6 @@ private fun SearchBar() {
     }
 }
 
-@Composable
-private fun PermissionBanner(onGrant: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.primaryContainer,
-        onClick = onGrant
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Outlined.Mic,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
-            )
-            Column {
-                Text(
-                    text = "Microphone access required",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = "Tap to grant permission",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun DateHeader(label: String, count: Int) {
@@ -762,15 +1009,15 @@ private fun EmptyStateView(showFavoritesOnly: Boolean) {
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
-                text = if (showFavoritesOnly) "No saved items" else "No transcripts yet",
+                text = if (showFavoritesOnly) "保存した項目はありません" else "まだ文字起こしがありません",
                 style = MaterialTheme.typography.titleMedium,
                 color = ZtOnSurfaceVariant
             )
             Text(
                 text = if (showFavoritesOnly) {
-                    "Bookmark transcripts to find them here"
+                    "ブックマークするとここに表示されます"
                 } else {
-                    "Turn on ambient listening to capture conversations"
+                    "アンビエントをオンにして会話を記録してください"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = ZtCaption
@@ -781,21 +1028,47 @@ private fun EmptyStateView(showFavoritesOnly: Boolean) {
 
 // --- Utility functions ---
 
-private fun startAmbientService(context: Context) {
-    val intent = Intent(context, AmbientRecordingService::class.java).apply {
-        action = AmbientRecordingService.ACTION_START
+private fun parseIsoEpochMillis(timestamp: String?): Long? {
+    if (timestamp.isNullOrBlank()) return null
+    return try {
+        OffsetDateTime.parse(timestamp.trim()).toInstant().toEpochMilli()
+    } catch (_: Exception) {
+        null
     }
-    ContextCompat.startForegroundService(context, intent)
 }
 
-private fun stopAmbientService(context: Context) {
-    val intent = Intent(context, AmbientRecordingService::class.java).apply {
-        action = AmbientRecordingService.ACTION_STOP
-    }
-    ContextCompat.startForegroundService(context, intent)
+private fun formatEpochTime(epochMs: Long): String {
+    return Instant.ofEpochMilli(epochMs)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("HH:mm"))
 }
 
-private fun formatTodayJa(): String {
-    val formatter = DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN)
-    return LocalDate.now().format(formatter)
+private fun formatEpochDateTime(epochMs: Long): String {
+    return Instant.ofEpochMilli(epochMs)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("M/d HH:mm", Locale.JAPAN))
+}
+
+private fun formatEpochDate(epochMs: Long): String {
+    val localDate = Instant.ofEpochMilli(epochMs)
+        .atZone(ZoneId.systemDefault())
+        .toLocalDate()
+    val today = LocalDate.now()
+    return when (localDate) {
+        today -> "今日"
+        today.minusDays(1) -> "昨日"
+        else -> localDate.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN))
+    }
+}
+
+private fun topicStatusLabel(status: String): String {
+    return when (status) {
+        "recording" -> "録音"
+        "active" -> "ライブ"
+        "cooling" -> "整理中"
+        "processing" -> "分析中"
+        "failed" -> "失敗"
+        "finalized" -> "完了"
+        else -> "不明"
+    }
 }

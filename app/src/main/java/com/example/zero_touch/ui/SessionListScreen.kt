@@ -29,7 +29,7 @@ fun SessionListScreen(
 ) {
     Column(modifier = modifier.padding(16.dp)) {
         Text(
-            text = "Sessions",
+            text = "セッション",
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(bottom = 12.dp)
         )
@@ -47,7 +47,7 @@ fun SessionListScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "No sessions yet.\nRecord and upload to get started.",
+                    text = "セッションはまだありません。\n録音してアップロードしてください。",
                     style = MaterialTheme.typography.bodyLarge
                 )
             }
@@ -92,7 +92,7 @@ fun SessionCard(
             }
             if (session.duration_seconds != null && session.duration_seconds > 0) {
                 Text(
-                    text = "${session.duration_seconds}s",
+                    text = "${session.duration_seconds}秒",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -110,6 +110,16 @@ fun SessionCard(
 
 @Composable
 fun StatusBadge(status: String, modifier: Modifier = Modifier) {
+    val displayStatus = when (status) {
+        "uploaded" -> "キュー待ち"
+        "transcribing" -> "文字起こし中"
+        "transcribed" -> "文字起こし済み"
+        "completed" -> "完了"
+        "failed" -> "失敗"
+        "generating" -> "分析中"
+        "recording" -> "録音中"
+        else -> "不明"
+    }
     val color = when (status) {
         "completed" -> MaterialTheme.colorScheme.primary
         "failed" -> MaterialTheme.colorScheme.error
@@ -117,7 +127,7 @@ fun StatusBadge(status: String, modifier: Modifier = Modifier) {
         else -> MaterialTheme.colorScheme.secondary
     }
     Text(
-        text = status,
+        text = displayStatus,
         style = MaterialTheme.typography.labelSmall,
         color = color,
         modifier = modifier

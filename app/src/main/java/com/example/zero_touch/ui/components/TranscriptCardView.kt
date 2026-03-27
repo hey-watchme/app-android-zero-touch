@@ -28,10 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -75,6 +72,7 @@ fun TranscriptCardView(
     modifier: Modifier = Modifier,
     compact: Boolean = false
 ) {
+    val isFailed = card.status == "failed"
     // --- Entry animation: scale + fade bounce-in ---
     val scaleAnim = remember { Animatable(0.92f) }
     val alphaAnim = remember { Animatable(0f) }
@@ -98,13 +96,13 @@ fun TranscriptCardView(
             .graphicsLayer {
                 this.scaleX = scaleAnim.value
                 this.scaleY = scaleAnim.value
-                this.alpha = alphaAnim.value
+                this.alpha = alphaAnim.value * if (isFailed) 0.65f else 1f
             }
     ) {
         if (compact) {
-            CompactCardRow(card, isFavorite, onClick, onToggleFavorite)
+            CompactCardRow(card, isFavorite, onClick, onToggleFavorite, isFailed = isFailed)
         } else {
-            FullCardView(card, isFavorite, onClick, onToggleFavorite)
+            FullCardView(card, isFavorite, onClick, onToggleFavorite, isFailed = isFailed)
         }
     }
 }
@@ -118,12 +116,14 @@ private fun CompactCardRow(
     card: TranscriptCard,
     isFavorite: Boolean,
     onClick: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    isFailed: Boolean
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(6.dp),
-        color = MaterialTheme.colorScheme.surface,
+        color = if (isFailed) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+        else MaterialTheme.colorScheme.surface,
         onClick = onClick
     ) {
         Row(
@@ -173,30 +173,14 @@ private fun CompactCardRow(
                 }
             }
 
-            // Trailing: duration + bookmark (top-aligned)
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                if (card.durationSeconds > 0) {
-                    Text(
-                        text = formatCompactDuration(card.durationSeconds),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = ZtCaption,
-                        modifier = Modifier.padding(top = 1.dp)
-                    )
-                }
-                IconButton(
-                    onClick = onToggleFavorite,
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                        contentDescription = "Bookmark",
-                        tint = if (isFavorite) ZtPrimary else ZtCaption,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
+            // Trailing: duration
+            if (card.durationSeconds > 0) {
+                Text(
+                    text = formatCompactDuration(card.durationSeconds),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtCaption,
+                    modifier = Modifier.padding(top = 1.dp)
+                )
             }
         }
     }
@@ -211,12 +195,14 @@ private fun FullCardView(
     card: TranscriptCard,
     isFavorite: Boolean,
     onClick: () -> Unit,
-    onToggleFavorite: () -> Unit
+    onToggleFavorite: () -> Unit,
+    isFailed: Boolean
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surface,
+        color = if (isFailed) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+        else MaterialTheme.colorScheme.surface,
         shadowElevation = 0.5.dp,
         onClick = onClick
     ) {
@@ -243,17 +229,6 @@ private fun FullCardView(
                     if (card.durationSeconds > 0) {
                         DurationChip(card.durationSeconds)
                     }
-                }
-                IconButton(
-                    onClick = onToggleFavorite,
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                        contentDescription = "Bookmark",
-                        tint = if (isFavorite) ZtPrimary else ZtCaption,
-                        modifier = Modifier.size(16.dp)
-                    )
                 }
             }
 
@@ -310,7 +285,7 @@ private fun RecordingPulseLabel() {
                 .background(ZtRecording.copy(alpha = alpha), CircleShape)
         )
         Text(
-            text = "Listening...",
+            text = "録音中...",
             style = MaterialTheme.typography.bodySmall,
             fontStyle = FontStyle.Italic,
             color = ZtRecording.copy(alpha = alpha)
@@ -443,6 +418,6 @@ fun AnimatedProcessingDots() {
 }
 
 private fun formatCompactDuration(seconds: Int): String = when {
-    seconds >= 60 -> "${seconds / 60}m${seconds % 60}s"
-    else -> "${seconds}s"
+    seconds >= 60 -> "${seconds / 60}分${seconds % 60}秒"
+    else -> "${seconds}秒"
 }

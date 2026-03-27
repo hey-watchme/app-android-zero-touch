@@ -82,8 +82,8 @@ fun AmbientStatusBar(
                 )
                 Text(
                     text = when {
-                        isRecording -> "Recording ${formatDuration(ambientState.recordingElapsedMs)}"
-                        else -> "Listening..."
+                        isRecording -> "録音中 ${formatDuration(ambientState.recordingElapsedMs)}"
+                        else -> "待機中..."
                     },
                     style = MaterialTheme.typography.labelLarge,
                     color = if (isRecording) ZtRecording else ZtOnSurfaceVariant
@@ -91,7 +91,7 @@ fun AmbientStatusBar(
                 Spacer(Modifier.weight(1f))
                 if (!isRecording && ambientState.speech) {
                     Text(
-                        text = "Voice",
+                        text = "音声",
                         style = MaterialTheme.typography.labelSmall,
                         color = ZtSuccess
                     )
@@ -162,12 +162,12 @@ private fun DualLevelEqualizer(
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         EqualizerStrip(
-            label = "SND",
+            label = "環境",
             level = ambientLevel,
             color = ZtOnSurfaceVariant
         )
         EqualizerStrip(
-            label = "VOC",
+            label = "音声",
             level = voiceLevel,
             color = if (speechDetected) ZtSuccess else ZtOutline
         )
@@ -186,11 +186,19 @@ private fun EqualizerStrip(
         label = "${label}_level"
     )
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+    val maxBarHeight = 10.dp // 2.dp base + 8.dp max
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = ZtCaption
+        )
         Row(
+            modifier = Modifier.height(maxBarHeight),
             horizontalArrangement = Arrangement.spacedBy(1.5.dp),
             verticalAlignment = Alignment.Bottom
         ) {
@@ -206,11 +214,6 @@ private fun EqualizerStrip(
                 )
             }
         }
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = ZtCaption
-        )
     }
 }
 
