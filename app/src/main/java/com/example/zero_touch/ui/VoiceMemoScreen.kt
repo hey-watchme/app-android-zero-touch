@@ -355,6 +355,7 @@ private fun TopicGroupCard(
 ) {
     val isLiveTopic = topic.status == "recording"
     val isFailedTopic = topic.status == "failed"
+    val isUnintelligibleTopic = topic.isUnintelligible
     val highlightAlpha = remember(topic.id) { androidx.compose.animation.core.Animatable(0f) }
     var lastStatus by remember(topic.id) { mutableStateOf(topic.status) }
 
@@ -398,9 +399,14 @@ private fun TopicGroupCard(
     val topicBg = when {
         isLiveTopic -> ZtWarning.copy(alpha = 0.06f)
         isFailedTopic -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        isUnintelligibleTopic -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f)
         else -> ZtTopicSurface
     }
-    val topicContentAlpha = if (isFailedTopic) 0.7f else 1f
+    val topicContentAlpha = when {
+        isFailedTopic -> 0.7f
+        isUnintelligibleTopic -> 0.78f
+        else -> 1f
+    }
     val highlightColor = Color(0xFFFFF2BF)
 
     Surface(
@@ -456,7 +462,7 @@ private fun TopicGroupCard(
                             Text(
                                 text = topic.title,
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = if (isUnintelligibleTopic) ZtOnSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
@@ -503,8 +509,8 @@ private fun TopicGroupCard(
                         Text(
                             text = topic.summary,
                             style = MaterialTheme.typography.bodySmall,
-                            color = ZtCaption,
-                            maxLines = 3,
+                            color = if (isUnintelligibleTopic) ZtOnSurfaceVariant else ZtCaption,
+                            maxLines = if (isUnintelligibleTopic) 1 else 3,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(horizontal = 12.dp)
                                 .padding(bottom = 8.dp)
@@ -604,14 +610,22 @@ private fun TopicDetailDrawer(
                                 Text(
                                     text = card.displayStatus,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (card.status == "failed") ZtError else ZtWarning
+                                    color = when {
+                                        card.status == "failed" -> ZtError
+                                        card.isUnintelligible -> ZtOnSurfaceVariant
+                                        else -> ZtWarning
+                                    }
                                 )
                             }
-                            SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
+                            if (!card.isUnintelligible) {
+                                SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
+                            }
                             Text(
                                 text = card.text,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = if (card.isUnintelligible) ZtOnSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                maxLines = if (card.isUnintelligible) 1 else Int.MAX_VALUE,
+                                overflow = if (card.isUnintelligible) TextOverflow.Ellipsis else TextOverflow.Clip
                             )
                             DetailRow(
                                 label = "長さ",
@@ -730,13 +744,14 @@ private fun buildPendingTopicCards(
         val card = existingCard ?: run {
             val displayStatus = when (status) {
                 "pending", "uploaded", "transcribing", "generating" -> "データ取得中"
-                "transcribed", "completed" -> "文字起こし済み"
+                "transcribed", "completed" -> "判別不可"
                 "failed" -> "失敗"
                 else -> "データ取得中"
             }
             val isProcessing = status in setOf("pending", "uploaded", "transcribing", "generating")
+            val isUnintelligible = status in setOf("transcribed", "completed")
             val displayText = when (status) {
-                "transcribed", "completed" -> "音声が検出されませんでした"
+                "transcribed", "completed" -> UNINTELLIGIBLE_CARD_TEXT
                 "failed" -> "処理に失敗しました"
                 else -> "データ取得中..."
             }
@@ -757,7 +772,8 @@ private fun buildPendingTopicCards(
                 text = displayText,
                 displayTitle = fallbackDisplayTitle,
                 durationSeconds = durationSeconds,
-                displayDate = fallbackDisplayDate
+                displayDate = fallbackDisplayDate,
+                isUnintelligible = isUnintelligible
             )
         }
 
@@ -770,14 +786,15 @@ private fun buildPendingTopicCards(
         val title = when {
             card.status == "failed" -> "処理に失敗しました"
             card.isProcessing -> "データ取得中"
-            card.text.isNotBlank() && card.text != "音声が検出されませんでした" ->
+            card.isUnintelligible -> UNINTELLIGIBLE_TOPIC_TITLE
+            card.text.isNotBlank() ->
                 card.text.take(24)
             else -> "カード"
         }
         val summary = when {
             card.isProcessing -> ""
-            card.text.isNotBlank() &&
-                card.text !in setOf("音声が検出されませんでした", "処理に失敗しました") ->
+            card.isUnintelligible -> UNINTELLIGIBLE_TOPIC_SUMMARY
+            card.text.isNotBlank() && card.text != "処理に失敗しました" ->
                 card.text.take(120)
             else -> ""
         }
@@ -791,7 +808,8 @@ private fun buildPendingTopicCards(
                 utteranceCount = 1,
                 updatedAtEpochMs = card.createdAtEpochMs.takeIf { it > 0 } ?: createdAtEpochMs,
                 displayDate = card.displayDate.ifBlank { fallbackDisplayDate },
-                utterances = listOf(card)
+                utterances = listOf(card),
+                isUnintelligible = card.isUnintelligible
             )
         )
     }

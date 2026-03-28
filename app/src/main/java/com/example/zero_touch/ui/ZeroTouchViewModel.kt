@@ -23,6 +23,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
+const val UNINTELLIGIBLE_CARD_TEXT = "音声は検出されましたが、内容を判別できませんでした"
+const val UNINTELLIGIBLE_TOPIC_TITLE = "判別できない音声"
+const val UNINTELLIGIBLE_TOPIC_SUMMARY = "会話音声は検出されましたが、文字起こしできませんでした"
+
 data class TranscriptCard(
     val id: String,
     val createdAt: String,
@@ -38,7 +42,8 @@ data class TranscriptCard(
     val asrModel: String? = null,
     val asrLanguage: String? = null,
     val speakerCount: Int = 0,
-    val speakerLabels: List<String> = emptyList()
+    val speakerLabels: List<String> = emptyList(),
+    val isUnintelligible: Boolean = false
 )
 
 data class TopicFeedCard(
@@ -51,7 +56,8 @@ data class TopicFeedCard(
     val displayDate: String,
     val utterances: List<TranscriptCard> = emptyList(),
     val llmProvider: String? = null,
-    val llmModel: String? = null
+    val llmModel: String? = null,
+    val isUnintelligible: Boolean = false
 )
 
 private data class TopicPageResult(
@@ -385,10 +391,12 @@ class ZeroTouchViewModel : ViewModel() {
             val detail = api.getSession(summary.id)
             val text = detail.transcription?.trim().orEmpty()
             val status = resolveOptimisticStatus(summary.id, detail.status)
-            val (displayStatus, isProcessing) = mapStatus(status)
+            val isUnintelligible = text.isEmpty() && status in listOf("transcribed", "completed")
+            val (baseDisplayStatus, isProcessing) = mapStatus(status)
+            val displayStatus = if (isUnintelligible) "判別不可" else baseDisplayStatus
             val displayText = when {
                 text.isNotEmpty() -> text
-                status in listOf("transcribed", "completed") -> "音声が検出されませんでした"
+                isUnintelligible -> UNINTELLIGIBLE_CARD_TEXT
                 status == "failed" -> "処理に失敗しました"
                 else -> "データ取得中..."
             }
@@ -418,7 +426,8 @@ class ZeroTouchViewModel : ViewModel() {
                 asrModel = asrModel,
                 asrLanguage = asrLanguage,
                 speakerCount = speakerCount,
-                speakerLabels = speakerLabels
+                speakerLabels = speakerLabels,
+                isUnintelligible = isUnintelligible
             )
         } catch (e: Exception) {
             TranscriptCard(
@@ -436,7 +445,8 @@ class ZeroTouchViewModel : ViewModel() {
                 asrModel = null,
                 asrLanguage = null,
                 speakerCount = 0,
-                speakerLabels = emptyList()
+                speakerLabels = emptyList(),
+                isUnintelligible = false
             )
         }
     }
@@ -516,12 +526,21 @@ class ZeroTouchViewModel : ViewModel() {
             .filterNot { card -> dismissedIds.contains(card.id) }
 
         if (utteranceCards.isEmpty()) return null
+        val isUnintelligibleTopic = utteranceCards.all { it.isUnintelligible }
 
         val status = topic.topic_status
-        val title = (topic.final_title ?: topic.live_title)?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: "無題のトピック"
-        val summary = (topic.final_summary ?: topic.live_summary)?.trim().orEmpty()
+        val title = if (isUnintelligibleTopic) {
+            UNINTELLIGIBLE_TOPIC_TITLE
+        } else {
+            (topic.final_title ?: topic.live_title)?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: "無題のトピック"
+        }
+        val summary = if (isUnintelligibleTopic) {
+            UNINTELLIGIBLE_TOPIC_SUMMARY
+        } else {
+            (topic.final_summary ?: topic.live_summary)?.trim().orEmpty()
+        }
         val updatedAt = topic.last_utterance_at ?: topic.updated_at ?: topic.end_at ?: topic.start_at
         val updatedAtEpochMs = parseEpochMillis(updatedAt)
         val displayDate = buildDisplayDate(updatedAt)
@@ -536,13 +555,17 @@ class ZeroTouchViewModel : ViewModel() {
             displayDate = displayDate,
             utterances = utteranceCards,
             llmProvider = topic.llm_provider,
-            llmModel = topic.llm_model
+            llmModel = topic.llm_model,
+            isUnintelligible = isUnintelligibleTopic
         )
     }
 
     private fun buildTranscriptCardFromTopicUtterance(utterance: TopicUtteranceSummary): TranscriptCard {
         val status = resolveOptimisticStatus(utterance.id, utterance.status)
-        val (displayStatus, isProcessing) = mapStatus(status)
+        val text = utterance.transcription?.trim().orEmpty()
+        val isUnintelligible = text.isEmpty() && status in listOf("transcribed", "completed")
+        val (baseDisplayStatus, isProcessing) = mapStatus(status)
+        val displayStatus = if (isUnintelligible) "判別不可" else baseDisplayStatus
         val sourceTimestamp = utterance.recorded_at ?: utterance.created_at
         val metadata = utterance.transcription_metadata ?: emptyMap()
         val asrProvider = metadata["provider"] as? String
@@ -550,10 +573,9 @@ class ZeroTouchViewModel : ViewModel() {
         val asrLanguage = metadata["language"] as? String
         val speakerCount = extractSpeakerCount(metadata)
         val speakerLabels = extractSpeakerLabels(metadata, asrProvider)
-        val text = utterance.transcription?.trim().orEmpty()
         val displayText = when {
             text.isNotEmpty() -> text
-            status in listOf("transcribed", "completed") -> "音声が検出されませんでした"
+            isUnintelligible -> UNINTELLIGIBLE_CARD_TEXT
             status == "failed" -> "処理に失敗しました"
             else -> "データ取得中..."
         }
@@ -573,7 +595,8 @@ class ZeroTouchViewModel : ViewModel() {
             asrModel = asrModel,
             asrLanguage = asrLanguage,
             speakerCount = speakerCount,
-            speakerLabels = speakerLabels
+            speakerLabels = speakerLabels,
+            isUnintelligible = isUnintelligible
         )
     }
 

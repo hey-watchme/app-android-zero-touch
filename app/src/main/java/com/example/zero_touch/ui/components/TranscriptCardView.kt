@@ -70,6 +70,7 @@ fun TranscriptCardView(
     compact: Boolean = false
 ) {
     val isFailed = card.status == "failed"
+    val isUnintelligible = card.isUnintelligible
     // --- Entry animation: scale + fade bounce-in ---
     val scaleAnim = remember { Animatable(0.92f) }
     val alphaAnim = remember { Animatable(0f) }
@@ -93,7 +94,11 @@ fun TranscriptCardView(
             .graphicsLayer {
                 this.scaleX = scaleAnim.value
                 this.scaleY = scaleAnim.value
-                this.alpha = alphaAnim.value * if (isFailed) 0.65f else 1f
+                this.alpha = alphaAnim.value * when {
+                    isFailed -> 0.65f
+                    isUnintelligible -> 0.8f
+                    else -> 1f
+                }
             }
     ) {
         if (compact) {
@@ -119,8 +124,11 @@ private fun CompactCardRow(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(6.dp),
-        color = if (isFailed) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
-        else MaterialTheme.colorScheme.surface,
+        color = when {
+            card.isUnintelligible -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.46f)
+            isFailed -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+            else -> MaterialTheme.colorScheme.surface
+        },
         onClick = onClick
     ) {
         Row(
@@ -159,7 +167,6 @@ private fun CompactCardRow(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
                 when {
                     // Stage 1: Recording / just created — pulsing "new" indicator
                     card.status == "recording" || card.status == "pending" -> {
@@ -169,8 +176,18 @@ private fun CompactCardRow(
                     card.isProcessing -> {
                         TranscribingLabel(card.displayStatus)
                     }
+                    card.isUnintelligible -> {
+                        Text(
+                            text = card.text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ZtOnSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     // Stage 3: Content ready — show 1-3 lines
                     else -> {
+                        SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
                         Text(
                             text = card.text,
                             style = MaterialTheme.typography.bodyMedium,
@@ -200,8 +217,11 @@ private fun FullCardView(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
-        color = if (isFailed) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
-        else MaterialTheme.colorScheme.surface,
+        color = when {
+            card.isUnintelligible -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f)
+            isFailed -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+            else -> MaterialTheme.colorScheme.surface
+        },
         shadowElevation = 0.5.dp,
         onClick = onClick
     ) {
@@ -228,7 +248,9 @@ private fun FullCardView(
                     if (card.durationSeconds > 0) {
                         DurationChip(card.durationSeconds)
                     }
-                    SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
+                    if (!card.isUnintelligible) {
+                        SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
+                    }
                 }
             }
 
@@ -240,6 +262,15 @@ private fun FullCardView(
                 card.isProcessing -> {
                     TranscribingLabel(card.displayStatus)
                     ProcessingContent()
+                }
+                card.isUnintelligible -> {
+                    Text(
+                        text = card.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ZtOnSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
                 else -> {
                     Text(

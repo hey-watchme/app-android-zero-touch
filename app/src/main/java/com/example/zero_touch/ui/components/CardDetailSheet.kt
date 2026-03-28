@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
 import com.example.zero_touch.ui.TranscriptCard
+import com.example.zero_touch.ui.UNINTELLIGIBLE_TOPIC_SUMMARY
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtCardRowDivider
 import com.example.zero_touch.ui.theme.ZtError
@@ -85,7 +86,9 @@ fun CardDetailSheet(
                 StatusPill(card.displayStatus, card.status)
             }
 
-            SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
+            if (!card.isUnintelligible) {
+                SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
+            }
 
             // Metadata row: date + duration + ASR info
             Row(
@@ -120,7 +123,7 @@ fun CardDetailSheet(
                     card.asrProvider,
                     card.asrModel,
                     card.asrLanguage,
-                    card.speakerLabels
+                    if (card.isUnintelligible) emptyList() else card.speakerLabels
                 )
                 if (asrLabel.isNotBlank()) {
                     Row(
@@ -152,13 +155,28 @@ fun CardDetailSheet(
                     color = ZtCaption
                 )
             } else {
-                SelectionContainer {
-                    Text(
-                        text = card.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        lineHeight = MaterialTheme.typography.bodyLarge.lineHeight
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (card.isUnintelligible) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                        ) {
+                            Text(
+                                text = UNINTELLIGIBLE_TOPIC_SUMMARY,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ZtOnSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+                    SelectionContainer {
+                        Text(
+                            text = card.text,
+                            style = if (card.isUnintelligible) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
+                            color = if (card.isUnintelligible) ZtOnSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                            lineHeight = if (card.isUnintelligible) MaterialTheme.typography.bodyMedium.lineHeight else MaterialTheme.typography.bodyLarge.lineHeight
+                        )
+                    }
                 }
             }
 
@@ -221,7 +239,11 @@ fun CardDetailSheet(
 @Composable
 private fun StatusPill(displayStatus: String, status: String) {
     val (bgColor, textColor) = when (status) {
-        "transcribed", "completed" -> Pair(ZtSuccess.copy(alpha = 0.1f), ZtSuccess)
+        "transcribed", "completed" -> if (displayStatus == "判別不可") {
+            Pair(MaterialTheme.colorScheme.surfaceVariant, ZtOnSurfaceVariant)
+        } else {
+            Pair(ZtSuccess.copy(alpha = 0.1f), ZtSuccess)
+        }
         "failed" -> Pair(ZtError.copy(alpha = 0.1f), ZtError)
         else -> Pair(ZtWarning.copy(alpha = 0.1f), ZtWarning)
     }
