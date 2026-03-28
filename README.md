@@ -152,6 +152,9 @@ Android App (Card-first Display)
 - Batch Transcription は `contentUrls` が必要なので、ZeroTouch では S3 presigned URL を使う
 - `contentUrls` は外部からアクセス可能である必要があるため、失敗する場合は Azure Blob + SAS へ切替える
 - diarization は `properties.diarization.enabled=true` で有効化（`maxSpeakers` は環境変数で調整）
+- Azure Batch Transcription は **Standard (S0)** の Speech リソースが必要（Free/Trial だと `Only "Standard" subscriptions...` で失敗）
+- 既定の REST API バージョンは `AZURE_SPEECH_API_VERSION=2025-10-15`（必要なら変更可能）
+- diarization / polling / TTL / presigned URL 有効期限は `.env` で調整する
 - GitHub Actions で EC2 に `.env` を作る際も `AZURE_SPEECH_KEY`, `AZURE_SERVICE_REGION` を注入する
 
 ### Cohere 導入メモ（2026-03-28）
