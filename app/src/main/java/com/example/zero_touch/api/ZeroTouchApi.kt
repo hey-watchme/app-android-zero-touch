@@ -204,6 +204,24 @@ class ZeroTouchApi(
         gson.fromJson(body, SessionDetail::class.java)
     }
 
+    suspend fun deleteSession(sessionId: String): Map<String, Any> = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/sessions/$sessionId"
+        Log.d(TAG, "DELETE $url")
+        val request = Request.Builder()
+            .url(url)
+            .delete()
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "DELETE $url failed: ${response.code} ${response.message} body=$body")
+            throw Exception("Delete session failed: ${response.code} $body")
+        }
+        val type = object : TypeToken<Map<String, Any>>() {}.type
+        gson.fromJson(body, type)
+    }
+
     suspend fun listSessions(
         deviceId: String? = null,
         limit: Int = 20,

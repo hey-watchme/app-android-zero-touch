@@ -66,7 +66,13 @@ fun SettingsSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var asrProvider by remember { mutableStateOf(AmbientPreferences.getAsrProvider(context)) }
+    var asrProvider by remember {
+        mutableStateOf(
+            AmbientPreferences.getAsrProvider(context)
+                .takeUnless { it == "cohere" }
+                ?: "speechmatics"
+        )
+    }
     var llmProvider by remember { mutableStateOf(AmbientPreferences.getLlmProvider(context)) }
     var llmModel by remember { mutableStateOf(AmbientPreferences.getLlmModel(context)) }
     var vadEngine by remember { mutableStateOf(AmbientPreferences.getVadEngine(context)) }
@@ -81,6 +87,9 @@ fun SettingsSheet(
 
     // Sync settings from server
     androidx.compose.runtime.LaunchedEffect(deviceId) {
+        if (AmbientPreferences.getAsrProvider(context) == "cohere") {
+            AmbientPreferences.setAsrProvider(context, "speechmatics")
+        }
         try {
             val remote = api.getDeviceSettings(deviceId)
             val remoteProvider = remote.llm_provider?.trim().orEmpty()
@@ -191,7 +200,6 @@ fun SettingsSheet(
             SectionHeader(icon = Icons.Outlined.Language, title = "文字起こし")
             val providerSubtitle = when (asrProvider) {
                 "deepgram" -> "Deepgram nova-3 — 高速・整形あり"
-                "cohere" -> "Cohere Transcribe — 話者分離なし"
                 else -> "Speechmatics batch — 話者分離・エンティティ"
             }
             SettingsRow(
@@ -217,14 +225,18 @@ fun SettingsSheet(
                     )
                     SettingsChip(
                         label = "Cohere",
-                        selected = asrProvider == "cohere",
-                        onClick = {
-                            asrProvider = "cohere"
-                            AmbientPreferences.setAsrProvider(context, "cohere")
-                        }
+                        selected = false,
+                        enabled = false,
+                        onClick = {}
                     )
                 }
             }
+            Text(
+                text = "Cohere は保留中です。現在の ambient 録音形式は m4a のため、そのままでは利用できません。",
+                style = MaterialTheme.typography.bodySmall,
+                color = ZtCaption,
+                modifier = Modifier.padding(top = 6.dp)
+            )
 
             SettingsDivider()
 
@@ -482,11 +494,13 @@ private fun ChipGroup(content: @Composable () -> Unit) {
 private fun SettingsChip(
     label: String,
     selected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     FilterChip(
         selected = selected,
         onClick = onClick,
+        enabled = enabled,
         label = {
             Text(
                 text = label,
@@ -500,7 +514,7 @@ private fun SettingsChip(
             labelColor = ZtOnSurfaceVariant
         ),
         border = FilterChipDefaults.filterChipBorder(
-            enabled = true,
+            enabled = enabled,
             selected = selected,
             borderColor = ZtFilterBorder,
             selectedBorderColor = ZtPrimary.copy(alpha = 0.3f),

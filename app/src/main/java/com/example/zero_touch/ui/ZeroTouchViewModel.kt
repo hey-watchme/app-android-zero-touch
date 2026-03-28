@@ -297,16 +297,33 @@ class ZeroTouchViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(error = null)
     }
 
-    fun dismissCard(id: String) {
-        dismissedIds.add(id)
+    fun deleteCard(context: Context, id: String) {
+        favoriteIds.remove(id)
+        removeCardFromUi(id)
+        viewModelScope.launch {
+            try {
+                api.deleteSession(id)
+                refreshSessions(context)
+            } catch (e: Exception) {
+                Log.e(TAG, "Delete failed: session=$id", e)
+                _uiState.value = _uiState.value.copy(
+                    error = "カードの削除に失敗しました: ${e.message}"
+                )
+                refreshSessions(context)
+            }
+        }
+    }
+
+    private fun removeCardFromUi(id: String) {
         val current = _uiState.value
         val updatedTopics = current.topicCards.map { topic ->
             topic.copy(utterances = topic.utterances.filterNot { it.id == id })
-        }
+        }.filter { topic -> topic.utterances.isNotEmpty() }
         _uiState.value = current.copy(
-            feedCards = filterDismissed(current.feedCards),
+            feedCards = current.feedCards.filterNot { it.id == id },
             topicCards = updatedTopics,
             dismissedIds = dismissedIds.toSet(),
+            favoriteIds = favoriteIds.toSet(),
             selectedCardId = if (current.selectedCardId == id) null else current.selectedCardId
         )
     }

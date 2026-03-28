@@ -144,6 +144,45 @@ def _get_topic_llm_service():
         return None
 
 
+def _resolve_session_timestamp(row: Dict[str, Any]) -> str:
+    return (
+        row.get("recorded_at")
+        or row.get("created_at")
+        or datetime.now().isoformat()
+    )
+
+
+def _cleanup_topic_after_session_delete(topic_id: Optional[str]):
+    if not topic_id:
+        return {"topic_deleted": False, "topic_updated": False}
+
+    remaining = (
+        supabase.table(TABLE)
+        .select("id, recorded_at, created_at")
+        .eq("topic_id", topic_id)
+        .order("created_at", desc=False)
+        .execute()
+        .data
+        or []
+    )
+
+    if not remaining:
+        supabase.table(TOPIC_TABLE).delete().eq("id", topic_id).execute()
+        return {"topic_deleted": True, "topic_updated": False}
+
+    start_at = _resolve_session_timestamp(remaining[0])
+    end_at = _resolve_session_timestamp(remaining[-1])
+    payload = {
+        "utterance_count": len(remaining),
+        "start_at": start_at,
+        "end_at": end_at,
+        "last_utterance_at": end_at,
+        "updated_at": datetime.now().isoformat(),
+    }
+    supabase.table(TOPIC_TABLE).update(payload).eq("id", topic_id).execute()
+    return {"topic_deleted": False, "topic_updated": True}
+
+
 # --- Upload ---
 
 @app.post("/api/upload")
@@ -493,6 +532,41 @@ def get_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
 
     return result.data
+
+
+@app.delete("/api/sessions/{session_id}")
+def delete_session(session_id: str):
+    """Delete a session card and clean up related storage/topic state."""
+    result = (
+        supabase.table(TABLE)
+        .select("id, topic_id, s3_audio_path")
+        .eq("id", session_id)
+        .single()
+        .execute()
+    )
+
+    row = result.data
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    topic_id = row.get("topic_id")
+    s3_audio_path = row.get("s3_audio_path")
+
+    if s3_audio_path:
+        try:
+            s3_client.delete_object(Bucket=S3_BUCKET, Key=s3_audio_path)
+        except Exception as exc:
+            print(f"[ZeroTouch] Failed to delete S3 audio: session={session_id} key={s3_audio_path} error={exc}")
+
+    supabase.table(TABLE).delete().eq("id", session_id).execute()
+    topic_cleanup = _cleanup_topic_after_session_delete(topic_id)
+
+    return {
+        "status": "deleted",
+        "session_id": session_id,
+        "topic_id": topic_id,
+        **topic_cleanup,
+    }
 
 
 @app.get("/api/sessions")
