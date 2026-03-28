@@ -1,12 +1,13 @@
 package com.example.zero_touch.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,32 +17,40 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
-import kotlinx.coroutines.delay
+import com.example.zero_touch.ui.theme.ZtCaption
+import com.example.zero_touch.ui.theme.ZtScrim
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun SideDetailDrawer(
@@ -50,83 +59,126 @@ fun SideDetailDrawer(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val configuration = LocalConfiguration.current
-    val drawerWidth = (configuration.screenWidthDp * 0.82f).dp
+    val drawerWidthDp = (configuration.screenWidthDp * 0.82f).dp
+    val density = LocalDensity.current
+    val drawerWidthPx = with(density) { drawerWidthDp.toPx() }
     val scrollState = rememberScrollState()
     val scrimInteraction = remember { MutableInteractionSource() }
-    var visible by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(visible) {
-        if (!visible) {
-            delay(180)
+    val offsetX = remember { Animatable(drawerWidthPx) }
+    val scrimAlpha = remember { Animatable(0f) }
+    val isDismissing = remember { mutableStateOf(false) }
+
+    // Enter
+    LaunchedEffect(Unit) {
+        launch {
+            offsetX.animateTo(
+                0f,
+                animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow)
+            )
+        }
+        launch {
+            scrimAlpha.animateTo(
+                0.32f,
+                animationSpec = tween(280, easing = FastOutSlowInEasing)
+            )
+        }
+    }
+
+    // Exit
+    LaunchedEffect(isDismissing.value) {
+        if (isDismissing.value) {
+            launch { scrimAlpha.animateTo(0f, tween(200, easing = FastOutSlowInEasing)) }
+            offsetX.animateTo(drawerWidthPx, tween(240, easing = FastOutSlowInEasing))
             onClose()
         }
     }
 
     Dialog(
-        onDismissRequest = { visible = false },
+        onDismissRequest = { isDismissing.value = true },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
+            // Scrim
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                    .graphicsLayer { alpha = scrimAlpha.value / 0.32f }
+                    .background(ZtScrim.copy(alpha = 0.32f))
                     .clickable(
                         interactionSource = scrimInteraction,
                         indication = null
-                    ) { visible = false }
+                    ) { isDismissing.value = true }
             )
 
-            AnimatedVisibility(
-                visible = visible,
-                enter = slideInHorizontally(
-                    initialOffsetX = { it },
-                    animationSpec = tween(220, easing = FastOutSlowInEasing)
-                ),
-                exit = slideOutHorizontally(
-                    targetOffsetX = { it },
-                    animationSpec = tween(180, easing = FastOutSlowInEasing)
-                ),
-                modifier = Modifier.align(Alignment.CenterEnd)
+            // Drawer
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(drawerWidthDp)
+                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                    .clip(RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                scope.launch {
+                                    if (offsetX.value > drawerWidthPx * 0.3f) {
+                                        isDismissing.value = true
+                                    } else {
+                                        offsetX.animateTo(
+                                            0f,
+                                            spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium)
+                                        )
+                                    }
+                                }
+                            }
+                        ) { _, dragAmount ->
+                            if (dragAmount > 0) {
+                                val newOffset = (offsetX.value + dragAmount).coerceIn(0f, drawerWidthPx)
+                                scope.launch {
+                                    offsetX.snapTo(newOffset)
+                                    scrimAlpha.snapTo(0.32f * (1f - newOffset / drawerWidthPx))
+                                }
+                            }
+                        }
+                    }
             ) {
-                Box(
+                Column(
                     modifier = Modifier
-                        .fillMaxHeight()
-                        .width(drawerWidth)
-                        .background(Color.White)
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(scrollState)
-                            .padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        IconButton(
+                            onClick = { isDismissing.value = true },
+                            modifier = Modifier.size(32.dp)
                         ) {
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
                             Icon(
                                 Icons.Outlined.Close,
-                                contentDescription = "閉じる",
-                                tint = ZtOnSurfaceVariant,
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) { visible = false }
+                                contentDescription = "Close",
+                                tint = ZtCaption,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-
-                        content()
                     }
+
+                    content()
                 }
             }
         }

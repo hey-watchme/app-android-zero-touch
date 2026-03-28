@@ -16,7 +16,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,11 +36,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.zero_touch.audio.ambient.AmbientUiState
-import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
-import com.example.zero_touch.ui.theme.ZtOutline
 import com.example.zero_touch.ui.theme.ZtRecording
-import com.example.zero_touch.ui.theme.ZtSuccess
 import com.example.zero_touch.ui.theme.ZtSurfaceVariant
 import kotlin.math.max
 
@@ -61,7 +57,7 @@ fun AmbientStatusBar(
     ) {
         val isRecording = ambientState.isRecording
         val bgColor by animateColorAsState(
-            targetValue = if (isRecording) ZtRecording.copy(alpha = 0.05f) else ZtSurfaceVariant,
+            targetValue = if (isRecording) ZtRecording.copy(alpha = 0.04f) else ZtSurfaceVariant,
             label = "ambient_bg"
         )
 
@@ -76,30 +72,22 @@ fun AmbientStatusBar(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 PulsingDot(
-                    color = if (isRecording) ZtRecording else ZtSuccess,
+                    color = if (isRecording) ZtRecording else ZtOnSurfaceVariant,
                     isActive = isRecording,
-                    size = 7
+                    size = 6
                 )
                 Text(
                     text = when {
-                        isRecording -> "録音中 ${formatDuration(ambientState.recordingElapsedMs)}"
-                        else -> "待機中..."
+                        isRecording -> "Recording ${formatDuration(ambientState.recordingElapsedMs)}"
+                        else -> "Listening"
                     },
                     style = MaterialTheme.typography.labelLarge,
                     color = if (isRecording) ZtRecording else ZtOnSurfaceVariant
                 )
                 Spacer(Modifier.weight(1f))
-                if (!isRecording && ambientState.speech) {
-                    Text(
-                        text = "音声",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = ZtSuccess
-                    )
-                }
-                DualLevelEqualizer(
-                    ambientLevel = ambientState.ambientLevel,
-                    voiceLevel = ambientState.voiceLevel,
-                    speechDetected = ambientState.speech
+                LevelEqualizer(
+                    level = max(ambientState.ambientLevel, ambientState.voiceLevel),
+                    isActive = ambientState.speech || isRecording
                 )
             }
         }
@@ -112,11 +100,11 @@ fun AmbientStatusBar(
 @Composable
 fun AmbientDot(isEnabled: Boolean, isRecording: Boolean) {
     if (!isEnabled) return
-    val color = if (isRecording) ZtRecording else ZtSuccess
+    val color = if (isRecording) ZtRecording else ZtOnSurfaceVariant
     val infiniteTransition = rememberInfiniteTransition(label = "dot_pulse")
     val alpha by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = if (isRecording) 0.3f else 0.6f,
+        targetValue = if (isRecording) 0.3f else 0.5f,
         animationSpec = infiniteRepeatable(
             animation = tween(if (isRecording) 600 else 2000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -125,7 +113,7 @@ fun AmbientDot(isEnabled: Boolean, isRecording: Boolean) {
     )
     Box(
         modifier = Modifier
-            .size(7.dp)
+            .size(6.dp)
             .background(color.copy(alpha = alpha), CircleShape)
     )
 }
@@ -134,7 +122,7 @@ fun AmbientDot(isEnabled: Boolean, isRecording: Boolean) {
 private fun PulsingDot(
     color: Color,
     isActive: Boolean,
-    size: Int = 7
+    size: Int = 6
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val animatedAlpha by infiniteTransition.animateFloat(
@@ -146,7 +134,7 @@ private fun PulsingDot(
         ),
         label = "alpha"
     )
-    val alpha = if (isActive) animatedAlpha else 1f
+    val alpha = if (isActive) animatedAlpha else 0.7f
     Box(
         modifier = Modifier
             .size(size.dp)
@@ -154,65 +142,40 @@ private fun PulsingDot(
     )
 }
 
+/**
+ * Single-color level equalizer — merges ambient + voice into one visual.
+ */
 @Composable
-private fun DualLevelEqualizer(
-    ambientLevel: Float,
-    voiceLevel: Float,
-    speechDetected: Boolean
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        EqualizerStrip(
-            label = "環境",
-            level = ambientLevel,
-            color = ZtOnSurfaceVariant
-        )
-        EqualizerStrip(
-            label = "音声",
-            level = voiceLevel,
-            color = if (speechDetected) ZtSuccess else ZtOutline
-        )
-    }
-}
-
-@Composable
-private fun EqualizerStrip(
-    label: String,
+private fun LevelEqualizer(
     level: Float,
-    color: Color
+    isActive: Boolean
 ) {
+    val barColor = ZtOnSurfaceVariant
     val animatedLevel by animateFloatAsState(
         targetValue = level.coerceIn(0f, 1f),
-        animationSpec = tween(durationMillis = 180),
-        label = "${label}_level"
+        animationSpec = tween(durationMillis = 150),
+        label = "eq_level"
     )
 
-    val maxBarHeight = 10.dp // 2.dp base + 8.dp max
-
     Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+        modifier = Modifier.height(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(1.5.dp),
+        verticalAlignment = Alignment.Bottom
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = ZtCaption
-        )
-        Row(
-            modifier = Modifier.height(maxBarHeight),
-            horizontalArrangement = Arrangement.spacedBy(1.5.dp),
-            verticalAlignment = Alignment.Bottom
-        ) {
-            EQ_PATTERN.forEach { weight ->
-                val barHeight = 2.dp + (8f * animatedLevel * weight).dp
-                val alpha = (0.22f + (animatedLevel * 0.78f * weight)).coerceIn(0.18f, 1f)
-                Box(
-                    modifier = Modifier
-                        .width(2.5.dp)
-                        .height(barHeight)
-                        .clip(RoundedCornerShape(1.dp))
-                        .background(color.copy(alpha = alpha))
-                )
+        EQ_PATTERN.forEach { weight ->
+            val barHeight = 2.dp + (10f * animatedLevel * weight).dp
+            val alpha = if (isActive) {
+                (0.25f + (animatedLevel * 0.75f * weight)).coerceIn(0.2f, 0.8f)
+            } else {
+                0.15f
             }
+            Box(
+                modifier = Modifier
+                    .width(2.dp)
+                    .height(barHeight)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(barColor.copy(alpha = alpha))
+            )
         }
     }
 }

@@ -53,7 +53,6 @@ import com.example.zero_touch.ui.theme.ZtFilterBorder
 import com.example.zero_touch.ui.theme.ZtFilterSelected
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
 import com.example.zero_touch.ui.theme.ZtOutline
-import com.example.zero_touch.ui.theme.ZtPrimary
 import com.example.zero_touch.ui.theme.ZtSuccess
 import kotlinx.coroutines.launch
 
@@ -108,7 +107,7 @@ fun SettingsSheet(
     }
 
     SideDetailDrawer(
-        title = "設定",
+        title = "Settings",
         onClose = onDismiss
     ) {
         Column(
@@ -518,7 +517,7 @@ private fun SettingsChip(
         },
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = ZtFilterSelected,
-            selectedLabelColor = ZtPrimary,
+            selectedLabelColor = MaterialTheme.colorScheme.onSurface,
             containerColor = MaterialTheme.colorScheme.surface,
             labelColor = ZtOnSurfaceVariant
         ),
@@ -526,7 +525,7 @@ private fun SettingsChip(
             enabled = enabled,
             selected = selected,
             borderColor = ZtFilterBorder,
-            selectedBorderColor = ZtPrimary.copy(alpha = 0.3f),
+            selectedBorderColor = ZtOnSurfaceVariant.copy(alpha = 0.4f),
             borderWidth = 0.5.dp,
             selectedBorderWidth = 0.5.dp
         ),

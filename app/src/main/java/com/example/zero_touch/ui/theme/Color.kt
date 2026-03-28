@@ -52,20 +52,23 @@ val ZtCardRowDivider = Color(0xFFF0EFEE)
 val ZtBadge = Color(0xFFEF4444)
 
 // Avatar placeholder
-val ZtAvatarBg = Color(0xFFE0E7FF)
-val ZtAvatarText = Color(0xFF4338CA)
+val ZtAvatarBg = Color(0xFFF0EFEE)
+val ZtAvatarText = Color(0xFF57534E)
 
 // Filter chip
-val ZtFilterSelected = Color(0xFFEEF2FF)
-val ZtFilterBorder = Color(0xFFE2E8F0)
+val ZtFilterSelected = Color(0xFFF5F5F4)
+val ZtFilterBorder = Color(0xFFE7E5E4)
 
 // Subtle tints for interactive feedback
 val ZtPressedOverlay = Color(0x0A000000)
 
-// Importance level colors
-val ZtImportanceLv0 = Color(0xFFD6D3D1)  // noise - muted gray
-val ZtImportanceLv1 = Color(0xFFA8A29E)  // daily - warm gray
-val ZtImportanceLv2 = Color(0xFF60A5FA)  // routine - soft blue
-val ZtImportanceLv3 = Color(0xFF34D399)  // shareable - green
-val ZtImportanceLv4 = Color(0xFFFBBF24)  // decision - amber
-val ZtImportanceLv5 = Color(0xFFF472B6)  // master - pink
+// Scrim for drawers / overlays
+val ZtScrim = Color(0xFF000000)
+
+// Importance level — single neutral scale (opacity-based)
+val ZtImportanceLv0 = Color(0xFFD6D3D1)
+val ZtImportanceLv1 = Color(0xFFA8A29E)
+val ZtImportanceLv2 = Color(0xFF78716C)
+val ZtImportanceLv3 = Color(0xFF57534E)
+val ZtImportanceLv4 = Color(0xFF44403C)
+val ZtImportanceLv5 = Color(0xFF292524)

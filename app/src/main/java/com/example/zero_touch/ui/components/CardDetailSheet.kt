@@ -1,8 +1,6 @@
 package com.example.zero_touch.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,8 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -39,15 +35,12 @@ import com.example.zero_touch.ui.TranscriptCard
 import com.example.zero_touch.ui.UNINTELLIGIBLE_TOPIC_SUMMARY
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtCardRowDivider
-import com.example.zero_touch.ui.theme.ZtError
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
-import com.example.zero_touch.ui.theme.ZtOutline
 import com.example.zero_touch.ui.theme.ZtPrimary
-import com.example.zero_touch.ui.theme.ZtSuccess
-import com.example.zero_touch.ui.theme.ZtWarning
+import com.example.zero_touch.ui.theme.ZtRecording
 
 /**
- * Detail drawer showing full transcript detail with enhanced metadata display.
+ * Detail drawer showing full transcript detail.
  */
 @Composable
 fun CardDetailSheet(
@@ -63,17 +56,16 @@ fun CardDetailSheet(
     val context = LocalContext.current
 
     SideDetailDrawer(
-        title = "カード詳細",
+        title = "Detail",
         onClose = onDismiss
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 32.dp)
-                .padding(horizontal = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header: title + status badge inline
+            // Header: title + status
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -91,10 +83,10 @@ fun CardDetailSheet(
                 SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
             }
 
-            // Metadata row: date + duration + ASR info
+            // Metadata
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -104,7 +96,7 @@ fun CardDetailSheet(
                 )
                 if (card.durationSeconds > 0) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -128,7 +120,7 @@ fun CardDetailSheet(
                 )
                 if (asrLabel.isNotBlank()) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -148,10 +140,10 @@ fun CardDetailSheet(
 
             HorizontalDivider(color = ZtCardRowDivider, thickness = 0.5.dp)
 
-            // Transcription content (selectable)
+            // Transcription content
             if (card.isProcessing) {
                 Text(
-                    text = "文字起こし中...",
+                    text = "Transcribing...",
                     style = MaterialTheme.typography.bodyLarge,
                     color = ZtCaption
                 )
@@ -160,13 +152,13 @@ fun CardDetailSheet(
                     if (card.isUnintelligible) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                         ) {
                             Text(
                                 text = UNINTELLIGIBLE_TOPIC_SUMMARY,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ZtOnSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                             )
                         }
                     }
@@ -188,38 +180,37 @@ fun CardDetailSheet(
             Spacer(Modifier.height(4.dp))
             HorizontalDivider(color = ZtCardRowDivider, thickness = 0.5.dp)
 
-            // Action buttons row
+            // Action buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 SheetActionButton(
                     icon = Icons.Outlined.ContentCopy,
-                    label = "コピー",
+                    label = "Copy",
                     onClick = onCopy,
                     modifier = Modifier.weight(1f)
                 )
                 SheetActionButton(
                     icon = if (isFavorite) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                    label = if (isFavorite) "保存済み" else "保存",
+                    label = if (isFavorite) "Saved" else "Save",
                     onClick = onToggleFavorite,
                     modifier = Modifier.weight(1f),
                     tint = if (isFavorite) ZtPrimary else null
                 )
                 SheetActionButton(
                     icon = Icons.Outlined.Delete,
-                    label = "削除",
+                    label = "Delete",
                     onClick = {
                         onDelete()
                         onDismiss()
                     },
-                    modifier = Modifier.weight(1f),
-                    tint = ZtError
+                    modifier = Modifier.weight(1f)
                 )
                 if (!card.isProcessing && onRetranscribeEnglish != null) {
                     SheetActionButton(
                         icon = Icons.Outlined.Refresh,
-                        label = "英語",
+                        label = "EN",
                         onClick = onRetranscribeEnglish,
                         modifier = Modifier.weight(1f)
                     )
@@ -227,10 +218,10 @@ fun CardDetailSheet(
                 if (card.status == "failed" && onRetryTranscribe != null) {
                     SheetActionButton(
                         icon = Icons.Outlined.Refresh,
-                        label = "再試行",
+                        label = "Retry",
                         onClick = {
                             onRetryTranscribe()
-                            Toast.makeText(context, "再試行を開始しました", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Retrying...", Toast.LENGTH_SHORT).show()
                             onDismiss()
                         },
                         modifier = Modifier.weight(1f)
@@ -248,7 +239,7 @@ private fun shouldShowSpeakerSplit(card: TranscriptCard): Boolean {
 
 @Composable
 private fun SpeakerSegmentDetailList(segments: List<SpeakerSegment>) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         segments.forEach { segment ->
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
@@ -269,13 +260,18 @@ private fun SpeakerSegmentDetailList(segments: List<SpeakerSegment>) {
 @Composable
 private fun StatusPill(displayStatus: String, status: String) {
     val (bgColor, textColor) = when (status) {
-        "transcribed", "completed" -> if (displayStatus == "判別不可") {
-            Pair(MaterialTheme.colorScheme.surfaceVariant, ZtOnSurfaceVariant)
-        } else {
-            Pair(ZtSuccess.copy(alpha = 0.1f), ZtSuccess)
-        }
-        "failed" -> Pair(ZtError.copy(alpha = 0.1f), ZtError)
-        else -> Pair(ZtWarning.copy(alpha = 0.1f), ZtWarning)
+        "transcribed", "completed" -> Pair(
+            MaterialTheme.colorScheme.surfaceVariant,
+            ZtOnSurfaceVariant
+        )
+        "failed" -> Pair(
+            ZtRecording.copy(alpha = 0.08f),
+            ZtRecording
+        )
+        else -> Pair(
+            MaterialTheme.colorScheme.surfaceVariant,
+            ZtCaption
+        )
     }
     Surface(
         shape = RoundedCornerShape(4.dp),
@@ -285,7 +281,7 @@ private fun StatusPill(displayStatus: String, status: String) {
             text = displayStatus,
             style = MaterialTheme.typography.labelSmall,
             color = textColor,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
         )
     }
 }
@@ -302,13 +298,13 @@ private fun SheetActionButton(
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
         onClick = onClick
     ) {
         Column(
             modifier = Modifier.padding(vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(3.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Icon(
                 icon,
@@ -330,14 +326,14 @@ private fun formatDetailDuration(seconds: Int): String {
         seconds >= 3600 -> {
             val h = seconds / 3600
             val m = (seconds % 3600) / 60
-            "${h}時間 ${m}分"
+            "${h}h ${m}m"
         }
         seconds >= 60 -> {
             val m = seconds / 60
             val s = seconds % 60
-            "${m}分${s}秒"
+            "${m}m ${s}s"
         }
-        else -> "${seconds}秒"
+        else -> "${seconds}s"
     }
 }
 

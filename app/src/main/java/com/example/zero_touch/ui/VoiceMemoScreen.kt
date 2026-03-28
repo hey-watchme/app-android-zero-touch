@@ -10,12 +10,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +20,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -55,7 +50,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -79,22 +73,11 @@ import com.example.zero_touch.ui.components.SpeakerIdentityBadge
 import com.example.zero_touch.ui.components.TranscriptCardView
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtCardRowDivider
-import com.example.zero_touch.ui.theme.ZtError
 import com.example.zero_touch.ui.theme.ZtFilterBorder
 import com.example.zero_touch.ui.theme.ZtFilterSelected
-import com.example.zero_touch.ui.theme.ZtImportanceLv0
-import com.example.zero_touch.ui.theme.ZtImportanceLv1
-import com.example.zero_touch.ui.theme.ZtImportanceLv2
-import com.example.zero_touch.ui.theme.ZtImportanceLv3
-import com.example.zero_touch.ui.theme.ZtImportanceLv4
-import com.example.zero_touch.ui.theme.ZtImportanceLv5
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
-import com.example.zero_touch.ui.theme.ZtOutline
-import com.example.zero_touch.ui.theme.ZtPrimary
-import com.example.zero_touch.ui.theme.ZtTopicBorder
 import com.example.zero_touch.ui.theme.ZtRecording
 import com.example.zero_touch.ui.theme.ZtTopicSurface
-import com.example.zero_touch.ui.theme.ZtWarning
 import androidx.compose.runtime.snapshotFlow
 import java.time.Instant
 import java.time.LocalDate
@@ -374,39 +357,18 @@ private fun TopicGroupCard(
     val isLiveTopic = topic.status == "recording"
     val isFailedTopic = topic.status == "failed"
     val isUnintelligibleTopic = topic.isUnintelligible
-    val highlightAlpha = remember(topic.id) { androidx.compose.animation.core.Animatable(0f) }
-    var lastStatus by remember(topic.id) { mutableStateOf(topic.status) }
 
     // Topic-level entry animation
-    val topicScale = remember { androidx.compose.animation.core.Animatable(0.95f) }
     val topicAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
     LaunchedEffect(topic.id) {
         topicAlpha.animateTo(1f, animationSpec = tween(250, easing = FastOutSlowInEasing))
-    }
-    LaunchedEffect(topic.id) {
-        topicScale.animateTo(1f, animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ))
-    }
-    LaunchedEffect(topic.status) {
-        if (lastStatus != topic.status) {
-            if (topic.status == "finalized" && lastStatus != "finalized") {
-                highlightAlpha.snapTo(0.35f)
-                highlightAlpha.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(durationMillis = 2800, easing = FastOutSlowInEasing)
-                )
-            }
-            lastStatus = topic.status
-        }
     }
 
     // Shimmer for skeleton placeholders in live topic
     val shimmerTransition = rememberInfiniteTransition(label = "topic_shimmer")
     val shimmerAlpha by shimmerTransition.animateFloat(
-        initialValue = 0.10f,
-        targetValue = 0.28f,
+        initialValue = 0.08f,
+        targetValue = 0.20f,
         animationSpec = infiniteRepeatable(
             animation = tween(1000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -414,39 +376,23 @@ private fun TopicGroupCard(
         label = "shimmer_a"
     )
 
-    val topicBg = when {
-        isLiveTopic -> ZtWarning.copy(alpha = 0.06f)
-        isFailedTopic -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-        isUnintelligibleTopic -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f)
-        else -> ZtTopicSurface
-    }
     val topicContentAlpha = when {
-        isFailedTopic -> 0.7f
-        isUnintelligibleTopic -> 0.78f
+        isFailedTopic -> 0.5f
+        isUnintelligibleTopic -> 0.6f
         else -> 1f
     }
-    val highlightColor = Color(0xFFFFF2BF)
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
-                scaleX = topicScale.value
-                scaleY = topicScale.value
                 alpha = topicAlpha.value * topicContentAlpha
             },
-        shape = RoundedCornerShape(10.dp),
-        color = topicBg,
+        shape = RoundedCornerShape(8.dp),
+        color = ZtTopicSurface,
         shadowElevation = 0.5.dp
     ) {
         Box {
-            if (highlightAlpha.value > 0f) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(highlightColor.copy(alpha = highlightAlpha.value))
-                )
-            }
             Column(
                 modifier = Modifier.animateContentSize(
                     animationSpec = spring(stiffness = Spring.StiffnessMedium)
@@ -455,7 +401,7 @@ private fun TopicGroupCard(
                 // Topic header
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = topicBg,
+                    color = ZtTopicSurface,
                     onClick = { onOpenTopic(topic) }
                 ) {
                     Row(
@@ -466,21 +412,20 @@ private fun TopicGroupCard(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (isLiveTopic) {
-                            // Skeleton title placeholder
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(14.dp)
                                     .background(
-                                        ZtWarning.copy(alpha = shimmerAlpha),
+                                        ZtCaption.copy(alpha = shimmerAlpha),
                                         RoundedCornerShape(3.dp)
                                     )
                             )
                         } else {
                             Text(
                                 text = topic.title,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = if (isUnintelligibleTopic) ZtOnSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
+                                color = if (isUnintelligibleTopic) ZtCaption else MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
@@ -489,23 +434,16 @@ private fun TopicGroupCard(
                         if (topic.importanceLevel != null) {
                             ImportanceLevelBadge(level = topic.importanceLevel)
                         }
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant
-                        ) {
-                            Text(
-                                text = "${topic.utteranceCount}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = ZtOnSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                            )
-                        }
+                        Text(
+                            text = "${topic.utteranceCount}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZtCaption
+                        )
                     }
                 }
 
                 // Summary area
                 when {
-                    // Live recording — skeleton summary
                     isLiveTopic -> {
                         Box(
                             modifier = Modifier
@@ -514,15 +452,15 @@ private fun TopicGroupCard(
                                 .fillMaxWidth(0.55f)
                                 .height(10.dp)
                                 .background(
-                                    ZtWarning.copy(alpha = shimmerAlpha * 0.7f),
+                                    ZtCaption.copy(alpha = shimmerAlpha * 0.6f),
                                     RoundedCornerShape(3.dp)
                                 )
                         )
                     }
-                    // Cooling = just stopped talking, topic being finalized
                     (topic.status == "cooling" || topic.status == "processing") && topic.summary.isBlank() -> {
                         TopicAnalyzingLabel(
-                            modifier = Modifier.padding(horizontal = 12.dp)
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
                                 .padding(bottom = 8.dp)
                         )
                     }
@@ -530,10 +468,11 @@ private fun TopicGroupCard(
                         Text(
                             text = topic.summary,
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (isUnintelligibleTopic) ZtOnSurfaceVariant else ZtCaption,
+                            color = ZtCaption,
                             maxLines = if (isUnintelligibleTopic) 1 else 3,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 12.dp)
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
                                 .padding(bottom = 8.dp)
                         )
                     }
@@ -568,32 +507,13 @@ private fun TopicGroupCard(
 
 @Composable
 private fun ImportanceLevelBadge(level: Int) {
-    val color = importanceLevelColor(level)
-    val label = "Lv.$level"
-    Surface(
-        shape = RoundedCornerShape(4.dp),
-        color = color.copy(alpha = 0.15f)
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-            color = color,
-            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-        )
-    }
+    Text(
+        text = "Lv.$level",
+        style = MaterialTheme.typography.labelSmall,
+        color = ZtCaption
+    )
 }
 
-private fun importanceLevelColor(level: Int): Color {
-    return when (level) {
-        0 -> ZtImportanceLv0
-        1 -> ZtImportanceLv1
-        2 -> ZtImportanceLv2
-        3 -> ZtImportanceLv3
-        4 -> ZtImportanceLv4
-        5 -> ZtImportanceLv5
-        else -> ZtImportanceLv1
-    }
-}
 
 @Composable
 private fun TopicDetailDrawer(
@@ -601,10 +521,10 @@ private fun TopicDetailDrawer(
     onClose: () -> Unit
 ) {
     SideDetailDrawer(
-        title = "トピック詳細",
+        title = "Topic Detail",
         onClose = onClose
     ) {
-        DetailSection(title = "タイトル") {
+        DetailSection(title = "Title") {
             Text(
                 text = topic.title,
                 style = MaterialTheme.typography.titleMedium,
@@ -612,46 +532,46 @@ private fun TopicDetailDrawer(
             )
         }
 
-        DetailSection(title = "説明") {
+        DetailSection(title = "Summary") {
             Text(
-                text = if (topic.summary.isBlank()) "説明はまだありません" else topic.summary,
+                text = if (topic.summary.isBlank()) "No summary yet" else topic.summary,
                 style = MaterialTheme.typography.bodyMedium,
                 color = ZtOnSurfaceVariant,
                 lineHeight = 20.sp
             )
         }
 
-        DetailSection(title = "メタデータ") {
-            DetailRow(label = "トピックID", value = topic.id)
-            DetailRow(label = "ステータス", value = topicStatusLabel(topic.status))
+        DetailSection(title = "Metadata") {
+            DetailRow(label = "ID", value = topic.id)
+            DetailRow(label = "Status", value = topicStatusLabel(topic.status))
             DetailRow(
-                label = "重要度",
-                value = if (topic.importanceLevel != null) "Lv.${topic.importanceLevel}" else "未評価"
+                label = "Importance",
+                value = if (topic.importanceLevel != null) "Lv.${topic.importanceLevel}" else "-"
             )
             if (!topic.importanceReason.isNullOrBlank()) {
-                DetailRow(label = "判定理由", value = topic.importanceReason)
+                DetailRow(label = "Reason", value = topic.importanceReason)
             }
-            DetailRow(label = "発話数", value = topic.utteranceCount.toString())
-            DetailRow(label = "更新日時", value = formatEpochDateTime(topic.updatedAtEpochMs))
+            DetailRow(label = "Cards", value = topic.utteranceCount.toString())
+            DetailRow(label = "Updated", value = formatEpochDateTime(topic.updatedAtEpochMs))
             DetailRow(
                 label = "LLM",
                 value = listOfNotNull(topic.llmProvider, topic.llmModel)
                     .takeIf { it.isNotEmpty() }
                     ?.joinToString(" / ")
-                    ?: "不明"
+                    ?: "-"
             )
         }
 
-        DetailSection(title = "カード") {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        DetailSection(title = "Cards") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 topic.utterances.forEach { card ->
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
                         Column(
                             modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -666,11 +586,7 @@ private fun TopicDetailDrawer(
                                 Text(
                                     text = card.displayStatus,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = when {
-                                        card.status == "failed" -> ZtError
-                                        card.isUnintelligible -> ZtOnSurfaceVariant
-                                        else -> ZtWarning
-                                    }
+                                    color = ZtCaption
                                 )
                             }
                             if (!card.isUnintelligible) {
@@ -679,28 +595,24 @@ private fun TopicDetailDrawer(
                             Text(
                                 text = card.text,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = if (card.isUnintelligible) ZtOnSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                color = if (card.isUnintelligible) ZtCaption else MaterialTheme.colorScheme.onSurface,
                                 maxLines = if (card.isUnintelligible) 1 else Int.MAX_VALUE,
                                 overflow = if (card.isUnintelligible) TextOverflow.Ellipsis else TextOverflow.Clip
                             )
                             DetailRow(
-                                label = "長さ",
-                                value = if (card.durationSeconds > 0) "${card.durationSeconds}秒" else "-"
+                                label = "Duration",
+                                value = if (card.durationSeconds > 0) "${card.durationSeconds}s" else "-"
                             )
                             DetailRow(
-                                label = "録音日時",
+                                label = "Recorded",
                                 value = formatEpochDateTime(card.createdAtEpochMs)
-                            )
-                            DetailRow(
-                                label = "ステータス",
-                                value = card.displayStatus
                             )
                             DetailRow(
                                 label = "ASR",
                                 value = listOfNotNull(card.asrProvider, card.asrModel, card.asrLanguage)
                                     .takeIf { it.isNotEmpty() }
                                     ?.joinToString(" / ")
-                                    ?: "不明"
+                                    ?: "-"
                             )
                         }
                     }
@@ -752,22 +664,18 @@ private fun TopicStatusBadge(status: String) {
     val label = topicStatusLabel(status)
     val color = when (status) {
         "recording" -> ZtRecording
-        "active" -> ZtPrimary
-        "cooling" -> MaterialTheme.colorScheme.tertiary
-        "processing" -> MaterialTheme.colorScheme.tertiary
-        "failed" -> ZtError
-        "finalized" -> ZtCaption
+        "failed" -> ZtRecording
         else -> ZtCaption
     }
     Surface(
-        shape = RoundedCornerShape(3.dp),
-        color = color.copy(alpha = 0.1f)
+        shape = RoundedCornerShape(4.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = color,
-            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
         )
     }
 }
@@ -917,9 +825,9 @@ private fun TopicAnalyzingLabel(modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
-            text = "データ取得中",
+            text = "Processing",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.tertiary
+            color = ZtCaption
         )
         AnimatedProcessingDots()
     }
@@ -947,18 +855,18 @@ private fun ImportanceFilterRow(
             FilterChip(
                 selected = isAllSelected,
                 onClick = onSelectAll,
-                label = { Text(text = "すべて", style = MaterialTheme.typography.labelMedium) },
+                label = { Text(text = "All", style = MaterialTheme.typography.labelMedium) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = ZtFilterSelected,
-                    selectedLabelColor = ZtPrimary,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    selectedLabelColor = MaterialTheme.colorScheme.onSurface,
+                    containerColor = MaterialTheme.colorScheme.surface,
                     labelColor = ZtCaption
                 ),
                 border = FilterChipDefaults.filterChipBorder(
                     enabled = true,
                     selected = isAllSelected,
                     borderColor = ZtFilterBorder,
-                    selectedBorderColor = ZtPrimary.copy(alpha = 0.3f),
+                    selectedBorderColor = ZtOnSurfaceVariant.copy(alpha = 0.4f),
                     borderWidth = 0.5.dp,
                     selectedBorderWidth = 0.5.dp
                 ),
@@ -974,15 +882,15 @@ private fun ImportanceFilterRow(
                 label = { Text(text = "Lv.$level", style = MaterialTheme.typography.labelMedium) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = ZtFilterSelected,
-                    selectedLabelColor = ZtPrimary,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                    labelColor = if (isSelected) ZtOnSurfaceVariant else ZtCaption
+                    selectedLabelColor = MaterialTheme.colorScheme.onSurface,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    labelColor = ZtCaption
                 ),
                 border = FilterChipDefaults.filterChipBorder(
                     enabled = true,
                     selected = isSelected,
                     borderColor = ZtFilterBorder,
-                    selectedBorderColor = ZtPrimary.copy(alpha = 0.3f),
+                    selectedBorderColor = ZtOnSurfaceVariant.copy(alpha = 0.4f),
                     borderWidth = 0.5.dp,
                     selectedBorderWidth = 0.5.dp
                 ),
@@ -1082,12 +990,12 @@ private fun formatEpochDate(epochMs: Long): String {
 
 private fun topicStatusLabel(status: String): String {
     return when (status) {
-        "recording" -> "録音"
-        "active" -> "ライブ"
-        "cooling" -> "整理中"
-        "processing" -> "分析中"
-        "failed" -> "失敗"
-        "finalized" -> "完了"
-        else -> "不明"
+        "recording" -> "Recording"
+        "active" -> "Live"
+        "cooling" -> "Finalizing"
+        "processing" -> "Processing"
+        "failed" -> "Failed"
+        "finalized" -> "Done"
+        else -> status
     }
 }

@@ -44,13 +44,8 @@ import androidx.compose.ui.unit.dp
 import com.example.zero_touch.ui.SpeakerSegment
 import com.example.zero_touch.ui.TranscriptCard
 import com.example.zero_touch.ui.theme.ZtCaption
-import com.example.zero_touch.ui.theme.ZtCardRowDivider
-import com.example.zero_touch.ui.theme.ZtError
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
-import com.example.zero_touch.ui.theme.ZtPrimary
 import com.example.zero_touch.ui.theme.ZtRecording
-import com.example.zero_touch.ui.theme.ZtSuccess
-import com.example.zero_touch.ui.theme.ZtWarning
 
 /**
  * Notion-style transcript card with entry animation.
@@ -72,19 +67,19 @@ fun TranscriptCardView(
 ) {
     val isFailed = card.status == "failed"
     val isUnintelligible = card.isUnintelligible
-    // --- Entry animation: scale + fade bounce-in ---
-    val scaleAnim = remember { Animatable(0.92f) }
+
+    // Entry animation
+    val scaleAnim = remember { Animatable(0.96f) }
     val alphaAnim = remember { Animatable(0f) }
 
     LaunchedEffect(card.id) {
-        // Stagger: scale springs in, alpha fades in
-        alphaAnim.animateTo(1f, animationSpec = tween(220, easing = FastOutSlowInEasing))
+        alphaAnim.animateTo(1f, animationSpec = tween(200, easing = FastOutSlowInEasing))
     }
     LaunchedEffect(card.id) {
         scaleAnim.animateTo(
             1f,
             animationSpec = spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
+                dampingRatio = Spring.DampingRatioLowBouncy,
                 stiffness = Spring.StiffnessMedium
             )
         )
@@ -96,8 +91,8 @@ fun TranscriptCardView(
                 this.scaleX = scaleAnim.value
                 this.scaleY = scaleAnim.value
                 this.alpha = alphaAnim.value * when {
-                    isFailed -> 0.65f
-                    isUnintelligible -> 0.8f
+                    isFailed -> 0.5f
+                    isUnintelligible -> 0.6f
                     else -> 1f
                 }
             }
@@ -125,27 +120,19 @@ private fun CompactCardRow(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(6.dp),
-        color = when {
-            card.isUnintelligible -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.46f)
-            isFailed -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
-            else -> MaterialTheme.colorScheme.surface
-        },
+        color = MaterialTheme.colorScheme.surface,
         onClick = onClick
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 7.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Status dot (top-aligned with first text line)
-            Box(modifier = Modifier.padding(top = 5.dp)) {
-                StatusDot(card.status, size = 5)
-            }
-
+            // Time column
             Column(
-                modifier = Modifier.width(52.dp),
+                modifier = Modifier.width(48.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
@@ -163,17 +150,15 @@ private fun CompactCardRow(
                 }
             }
 
-            // Content area (fill, variable height)
+            // Content area
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 when {
-                    // Stage 1: Recording / just created — pulsing "new" indicator
                     card.status == "recording" || card.status == "pending" -> {
                         RecordingPulseLabel()
                     }
-                    // Stage 2: Processing — transcribing animation
                     card.isProcessing -> {
                         TranscribingLabel(card.displayStatus)
                     }
@@ -181,14 +166,12 @@ private fun CompactCardRow(
                         Text(
                             text = card.text,
                             style = MaterialTheme.typography.bodySmall,
-                            color = ZtOnSurfaceVariant,
+                            color = ZtCaption,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    // Stage 3: Content ready — show 1-3 lines
                     else -> {
-                        SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
                         if (shouldShowSpeakerSplit(card)) {
                             SpeakerSegmentList(
                                 segments = card.speakerSegments,
@@ -225,12 +208,8 @@ private fun FullCardView(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = when {
-            card.isUnintelligible -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f)
-            isFailed -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
-            else -> MaterialTheme.colorScheme.surface
-        },
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surface,
         shadowElevation = 0.5.dp,
         onClick = onClick
     ) {
@@ -238,32 +217,30 @@ private fun FullCardView(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Header row
+            // Header row: time + duration + speaker
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    StatusDot(card.status)
+                Text(
+                    text = card.displayTitle,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = ZtOnSurfaceVariant
+                )
+                if (card.durationSeconds > 0) {
                     Text(
-                        text = card.displayTitle,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
+                        text = formatCompactDuration(card.durationSeconds),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtCaption
                     )
-                    if (card.durationSeconds > 0) {
-                        DurationChip(card.durationSeconds)
-                    }
-                    if (!card.isUnintelligible) {
-                        SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
-                    }
+                }
+                if (!card.isUnintelligible) {
+                    SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
                 }
             }
 
-            // Content area — 3-stage
+            // Content area
             when {
                 card.status == "recording" || card.status == "pending" -> {
                     RecordingPulseLabel()
@@ -276,7 +253,7 @@ private fun FullCardView(
                     Text(
                         text = card.text,
                         style = MaterialTheme.typography.bodySmall,
-                        color = ZtOnSurfaceVariant,
+                        color = ZtCaption,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -292,7 +269,7 @@ private fun FullCardView(
                         Text(
                             text = card.text,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = ZtOnSurfaceVariant,
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -317,18 +294,28 @@ private fun SpeakerSegmentList(
     val visible = segments.take(maxItems)
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         visible.forEach { segment ->
-            Text(
-                text = "${segment.speakerLabel}: ${segment.text}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = maxLines,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = segment.speakerLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtCaption
+                )
+                Text(
+                    text = segment.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = maxLines,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
         val remaining = segments.size - visible.size
         if (remaining > 0) {
             Text(
-                text = "+$remaining",
+                text = "+$remaining more",
                 style = MaterialTheme.typography.labelSmall,
                 color = ZtCaption
             )
@@ -340,10 +327,6 @@ private fun SpeakerSegmentList(
 // 3-stage visual indicators
 // ---------------------------------------------------------------
 
-/**
- * Stage 1: Voice detected / recording in progress.
- * Pulsing colored label that signals "something is happening right now."
- */
 @Composable
 private fun RecordingPulseLabel() {
     val infiniteTransition = rememberInfiniteTransition(label = "rec_pulse")
@@ -366,22 +349,18 @@ private fun RecordingPulseLabel() {
                 .background(ZtRecording.copy(alpha = alpha), CircleShape)
         )
         Text(
-            text = "録音中...",
+            text = "Recording...",
             style = MaterialTheme.typography.bodySmall,
             color = ZtRecording.copy(alpha = alpha)
         )
     }
 }
 
-/**
- * Stage 2: Transcribing / generating.
- * Shows status text with animated dots + subtle pulse.
- */
 @Composable
 private fun TranscribingLabel(displayStatus: String) {
     val infiniteTransition = rememberInfiniteTransition(label = "transcribe")
     val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.5f,
+        initialValue = 0.4f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(1000, easing = FastOutSlowInEasing),
@@ -396,46 +375,10 @@ private fun TranscribingLabel(displayStatus: String) {
     ) {
         Text(
             text = displayStatus,
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-            color = ZtWarning
+            style = MaterialTheme.typography.bodySmall,
+            color = ZtOnSurfaceVariant
         )
         AnimatedProcessingDots()
-    }
-}
-
-// ---------------------------------------------------------------
-// Shared sub-components
-// ---------------------------------------------------------------
-
-@Composable
-fun StatusDot(status: String, size: Int = 6) {
-    val color = when (status) {
-        "transcribed", "completed" -> ZtSuccess
-        "failed" -> ZtError
-        "uploaded", "transcribing", "generating" -> ZtWarning
-        "recording" -> ZtRecording
-        "pending" -> ZtCaption
-        else -> ZtCaption
-    }
-    Box(
-        modifier = Modifier
-            .size(size.dp)
-            .background(color, CircleShape)
-    )
-}
-
-@Composable
-private fun DurationChip(seconds: Int) {
-    Surface(
-        shape = RoundedCornerShape(4.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant
-    ) {
-        Text(
-            text = formatCompactDuration(seconds),
-            style = MaterialTheme.typography.labelSmall,
-            color = ZtOnSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-        )
     }
 }
 
@@ -470,6 +413,27 @@ private fun ShimmerLine(widthFraction: Float) {
     )
 }
 
+// ---------------------------------------------------------------
+// Shared sub-components
+// ---------------------------------------------------------------
+
+@Composable
+fun StatusDot(status: String, size: Int = 6) {
+    val color = when (status) {
+        "transcribed", "completed" -> ZtOnSurfaceVariant
+        "failed" -> ZtRecording
+        "uploaded", "transcribing", "generating" -> ZtCaption
+        "recording" -> ZtRecording
+        "pending" -> ZtCaption
+        else -> ZtCaption
+    }
+    Box(
+        modifier = Modifier
+            .size(size.dp)
+            .background(color, CircleShape)
+    )
+}
+
 @Composable
 fun AnimatedProcessingDots() {
     val infiniteTransition = rememberInfiniteTransition(label = "dots")
@@ -489,7 +453,7 @@ fun AnimatedProcessingDots() {
                 modifier = Modifier
                     .size(3.dp)
                     .background(
-                        if (index <= dotCount) ZtWarning else ZtCaption.copy(alpha = 0.3f),
+                        if (index <= dotCount) ZtOnSurfaceVariant else ZtCaption.copy(alpha = 0.3f),
                         CircleShape
                     )
             )
@@ -498,6 +462,6 @@ fun AnimatedProcessingDots() {
 }
 
 private fun formatCompactDuration(seconds: Int): String = when {
-    seconds >= 60 -> "${seconds / 60}分${seconds % 60}秒"
-    else -> "${seconds}秒"
+    seconds >= 60 -> "${seconds / 60}m ${seconds % 60}s"
+    else -> "${seconds}s"
 }
