@@ -106,6 +106,8 @@ jobs:
         SPEECHMATICS_API_KEY: ${{ secrets.SPEECHMATICS_API_KEY }}
         DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
         COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+        AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+        AZURE_SERVICE_REGION: ${{ secrets.AZURE_SERVICE_REGION }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         LLM_DEFAULT_PROVIDER: ${{ secrets.LLM_DEFAULT_PROVIDER }}
@@ -122,6 +124,8 @@ jobs:
           echo "SPEECHMATICS_API_KEY=${SPEECHMATICS_API_KEY}" >> .env
           echo "DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}" >> .env
           echo "COHERE_API_KEY=${COHERE_API_KEY}" >> .env
+          echo "AZURE_SPEECH_KEY=${AZURE_SPEECH_KEY}" >> .env
+          echo "AZURE_SERVICE_REGION=${AZURE_SERVICE_REGION}" >> .env
           echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> .env
           echo "GEMINI_API_KEY=${GEMINI_API_KEY}" >> .env
           echo "LLM_DEFAULT_PROVIDER=${LLM_DEFAULT_PROVIDER}" >> .env

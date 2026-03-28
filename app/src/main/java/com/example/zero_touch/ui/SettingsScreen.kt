@@ -200,6 +200,7 @@ fun SettingsSheet(
             SectionHeader(icon = Icons.Outlined.Language, title = "文字起こし")
             val providerSubtitle = when (asrProvider) {
                 "deepgram" -> "Deepgram nova-3 — 高速・整形あり"
+                "azure" -> "Azure Speech Service — 既存キー流用"
                 else -> "Speechmatics batch — 話者分離・エンティティ"
             }
             SettingsRow(
@@ -221,6 +222,14 @@ fun SettingsSheet(
                         onClick = {
                             asrProvider = "deepgram"
                             AmbientPreferences.setAsrProvider(context, "deepgram")
+                        }
+                    )
+                    SettingsChip(
+                        label = "Azure",
+                        selected = asrProvider == "azure",
+                        onClick = {
+                            asrProvider = "azure"
+                            AmbientPreferences.setAsrProvider(context, "azure")
                         }
                     )
                     SettingsChip(
