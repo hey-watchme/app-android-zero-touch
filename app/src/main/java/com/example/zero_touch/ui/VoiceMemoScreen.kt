@@ -36,8 +36,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.FilterList
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -70,6 +68,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import kotlinx.coroutines.delay
 import com.example.zero_touch.api.SessionSummary
 import com.example.zero_touch.audio.ambient.AmbientRecordingEntry
+import com.example.zero_touch.audio.ambient.AmbientPreferences
 import com.example.zero_touch.audio.ambient.AmbientStatus
 import com.example.zero_touch.ui.components.AmbientStatusBar
 import com.example.zero_touch.ui.components.AnimatedProcessingDots
@@ -104,6 +103,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,10 +123,13 @@ fun VoiceMemoScreen(
 ) {
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
     val ambientState by AmbientStatus.state.collectAsState()
+    val context = LocalContext.current
 
     // --- Filter state ---
-    var activeFilter by remember { mutableStateOf("すべて") }
-    val filterOptions = listOf("すべて", "Lv.3+", "Lv.4+", "Lv.5")
+    val allLevels = remember { (0..5).toSet() }
+    var enabledLevels by remember {
+        mutableStateOf(AmbientPreferences.getImportanceLevels(context).ifEmpty { allLevels })
+    }
 
     // --- Data preparation ---
     val topicCards = uiState.topicCards
@@ -144,11 +147,9 @@ fun VoiceMemoScreen(
     val visibleTopicCards = if (showFavoritesOnly) {
         emptyList()
     } else {
-        when (activeFilter) {
-            "Lv.3+" -> mergedTopicCards.filter { (it.importanceLevel ?: -1) >= 3 }
-            "Lv.4+" -> mergedTopicCards.filter { (it.importanceLevel ?: -1) >= 4 }
-            "Lv.5" -> mergedTopicCards.filter { (it.importanceLevel ?: -1) >= 5 }
-            else -> mergedTopicCards
+        mergedTopicCards.filter { topic ->
+            val level = topic.importanceLevel ?: 0
+            level in enabledLevels
         }
     }
 
@@ -225,12 +226,22 @@ fun VoiceMemoScreen(
             ) {
             // Search and filters (scroll away together)
             item(key = "search_filters") {
-                SearchAndFilterRow(
+                ImportanceFilterRow(
                     showFavoritesOnly = showFavoritesOnly,
-                    filterOptions = filterOptions,
-                    activeFilter = activeFilter,
-                    onFilterSelected = { activeFilter = it },
-                    topicCount = topicCards.size
+                    enabledLevels = enabledLevels,
+                    onToggleLevel = { level ->
+                        val next = if (level in enabledLevels) {
+                            enabledLevels - level
+                        } else {
+                            enabledLevels + level
+                        }
+                        enabledLevels = if (next.isEmpty()) emptySet() else next
+                        AmbientPreferences.setImportanceLevels(context, enabledLevels)
+                    },
+                    onSelectAll = {
+                        enabledLevels = allLevels
+                        AmbientPreferences.setImportanceLevels(context, enabledLevels)
+                    }
                 )
             }
 
@@ -917,62 +928,55 @@ private fun TopicAnalyzingLabel(modifier: Modifier = Modifier) {
 // --- Filter Chip Row ---
 
 @Composable
-private fun SearchAndFilterRow(
+private fun ImportanceFilterRow(
     showFavoritesOnly: Boolean,
-    filterOptions: List<String>,
-    activeFilter: String,
-    onFilterSelected: (String) -> Unit,
-    topicCount: Int
+    enabledLevels: Set<Int>,
+    onToggleLevel: (Int) -> Unit,
+    onSelectAll: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        SearchBar(
-            modifier = Modifier.weight(if (showFavoritesOnly) 1f else 0.48f)
-        )
+    if (showFavoritesOnly) return
 
-        if (!showFavoritesOnly) {
-            FilterChipRow(
-                modifier = Modifier.weight(0.52f),
-                options = filterOptions,
-                activeFilter = activeFilter,
-                onFilterSelected = onFilterSelected,
-                topicCount = topicCount
-            )
-        }
-    }
-}
+    val allLevels = remember { (0..5).toList() }
+    val isAllSelected = enabledLevels.size == allLevels.size
 
-@Composable
-private fun FilterChipRow(
-    modifier: Modifier = Modifier,
-    options: List<String>,
-    activeFilter: String,
-    onFilterSelected: (String) -> Unit,
-    topicCount: Int
-) {
     LazyRow(
-        modifier = modifier,
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        items(options) { option ->
-            val isSelected = option == activeFilter
+        item(key = "filter_all") {
             FilterChip(
-                selected = isSelected,
-                onClick = { onFilterSelected(option) },
-                label = {
-                    Text(
-                        text = if (option == "すべて") "すべて ($topicCount)" else option,
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                },
+                selected = isAllSelected,
+                onClick = onSelectAll,
+                label = { Text(text = "すべて", style = MaterialTheme.typography.labelMedium) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = ZtFilterSelected,
                     selectedLabelColor = ZtPrimary,
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    labelColor = ZtOnSurfaceVariant
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    labelColor = ZtCaption
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = isAllSelected,
+                    borderColor = ZtFilterBorder,
+                    selectedBorderColor = ZtPrimary.copy(alpha = 0.3f),
+                    borderWidth = 0.5.dp,
+                    selectedBorderWidth = 0.5.dp
+                ),
+                shape = RoundedCornerShape(6.dp)
+            )
+        }
+
+        items(allLevels) { level ->
+            val isSelected = level in enabledLevels
+            FilterChip(
+                selected = isSelected,
+                onClick = { onToggleLevel(level) },
+                label = { Text(text = "Lv.$level", style = MaterialTheme.typography.labelMedium) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = ZtFilterSelected,
+                    selectedLabelColor = ZtPrimary,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    labelColor = if (isSelected) ZtOnSurfaceVariant else ZtCaption
                 ),
                 border = FilterChipDefaults.filterChipBorder(
                     enabled = true,
@@ -989,36 +993,6 @@ private fun FilterChipRow(
 }
 
 // --- Sub-composables ---
-
-@Composable
-private fun SearchBar(modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Outlined.Search,
-                contentDescription = "検索",
-                tint = ZtCaption,
-                modifier = Modifier.size(16.dp)
-            )
-            Text(
-                text = "文字起こしを検索...",
-                style = MaterialTheme.typography.bodyMedium,
-                color = ZtCaption,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
 
 
 @Composable

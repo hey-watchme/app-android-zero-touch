@@ -11,11 +11,13 @@ object AmbientPreferences {
     private const val KEY_VAD_ENGINE = "vad_engine"
     private const val KEY_LLM_PROVIDER = "llm_provider"
     private const val KEY_LLM_MODEL = "llm_model"
+    private const val KEY_IMPORTANCE_LEVELS = "importance_levels"
     private const val DEFAULT_ASR_PROVIDER = "speechmatics"
     private const val DEFAULT_LLM_PROVIDER = "openai"
     private const val DEFAULT_LLM_MODEL = "gpt-4.1-nano"
     private const val DEFAULT_AMBIENT_AUDIO_SOURCE = "mic"
     private const val DEFAULT_VAD_ENGINE = "threshold"
+    private const val DEFAULT_IMPORTANCE_LEVELS = "0,1,2,3,4,5"
     const val VAD_ENGINE_THRESHOLD = "threshold"
     const val VAD_ENGINE_SILERO = "silero"
     const val VAD_ENGINE_WEBRTC = "webrtc"
@@ -89,5 +91,20 @@ object AmbientPreferences {
     fun setLlmModel(context: Context, model: String) {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_LLM_MODEL, model).apply()
+    }
+
+    fun getImportanceLevels(context: Context): Set<Int> {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val raw = prefs.getString(KEY_IMPORTANCE_LEVELS, DEFAULT_IMPORTANCE_LEVELS) ?: DEFAULT_IMPORTANCE_LEVELS
+        return raw.split(",")
+            .mapNotNull { it.trim().toIntOrNull() }
+            .filter { it in 0..5 }
+            .toSet()
+    }
+
+    fun setImportanceLevels(context: Context, levels: Set<Int>) {
+        val safe = levels.filter { it in 0..5 }.sorted().joinToString(",")
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_IMPORTANCE_LEVELS, safe).apply()
     }
 }
