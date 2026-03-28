@@ -64,9 +64,11 @@ data class ZeroTouchUiState(
     val topicCards: List<TopicFeedCard> = emptyList(),
     val isUploading: Boolean = false,
     val isLoading: Boolean = false,
+    val isRefreshing: Boolean = false,
     val isLoadingMore: Boolean = false,
     val hasMore: Boolean = true,
     val error: String? = null,
+    val message: String? = null,
     val dismissedIds: Set<String> = emptySet(),
     val favoriteIds: Set<String> = emptySet(),
     val selectedCardId: String? = null
@@ -140,6 +142,7 @@ class ZeroTouchViewModel : ViewModel() {
     fun refreshSessions(context: Context) {
         if (isRefreshing) return
         isRefreshing = true
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
         viewModelScope.launch {
             try {
                 val existingSessions = _uiState.value.sessions
@@ -164,12 +167,17 @@ class ZeroTouchViewModel : ViewModel() {
                     sessions = mergedSessions,
                     feedCards = filteredCards,
                     topicCards = mergedTopicCards,
+                    isRefreshing = false,
                     hasMore = hasMoreSessions || hasMoreTopics,
                     dismissedIds = dismissedIds.toSet(),
                     favoriteIds = favoriteIds.toSet()
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "refreshSessions failed", e)
+                _uiState.value = _uiState.value.copy(
+                    isRefreshing = false,
+                    error = "更新に失敗しました: ${e.message}"
+                )
             } finally {
                 isRefreshing = false
             }
@@ -297,17 +305,30 @@ class ZeroTouchViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(error = null)
     }
 
+    fun clearMessage() {
+        _uiState.value = _uiState.value.copy(message = null)
+    }
+
     fun deleteCard(context: Context, id: String) {
+        dismissedIds.add(id)
         favoriteIds.remove(id)
         removeCardFromUi(id)
         viewModelScope.launch {
             try {
                 api.deleteSession(id)
+                _uiState.value = _uiState.value.copy(
+                    message = "カードを削除しました",
+                    dismissedIds = dismissedIds.toSet(),
+                    favoriteIds = favoriteIds.toSet()
+                )
                 refreshSessions(context)
             } catch (e: Exception) {
                 Log.e(TAG, "Delete failed: session=$id", e)
+                dismissedIds.remove(id)
                 _uiState.value = _uiState.value.copy(
-                    error = "カードの削除に失敗しました: ${e.message}"
+                    error = "カードの削除に失敗しました: ${e.message}",
+                    dismissedIds = dismissedIds.toSet(),
+                    favoriteIds = favoriteIds.toSet()
                 )
                 refreshSessions(context)
             }
@@ -320,6 +341,7 @@ class ZeroTouchViewModel : ViewModel() {
             topic.copy(utterances = topic.utterances.filterNot { it.id == id })
         }.filter { topic -> topic.utterances.isNotEmpty() }
         _uiState.value = current.copy(
+            sessions = current.sessions.filterNot { it.id == id },
             feedCards = current.feedCards.filterNot { it.id == id },
             topicCards = updatedTopics,
             dismissedIds = dismissedIds.toSet(),

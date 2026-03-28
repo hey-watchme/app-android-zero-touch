@@ -19,6 +19,8 @@ import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,6 +50,7 @@ import java.util.Locale
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimelineScreen(
     modifier: Modifier = Modifier,
@@ -56,6 +59,7 @@ fun TimelineScreen(
     onToggleFavorite: (String) -> Unit,
     onSelectCard: (String) -> Unit,
     onDismissDetail: () -> Unit,
+    onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onRetranscribeEnglish: (String) -> Unit,
     onRetryTranscribe: (String) -> Unit
@@ -122,55 +126,61 @@ fun TimelineScreen(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    PullToRefreshBox(
+        isRefreshing = uiState.isRefreshing,
+        onRefresh = onRefresh,
+        modifier = modifier.fillMaxSize()
     ) {
-        TimelineHeader(
-            selectedDate = selectedDate,
-            onPrevious = { selectedDate = selectedDate.minusDays(1) },
-            onNext = {
-                if (selectedDate.isBefore(today)) {
-                    selectedDate = selectedDate.plusDays(1)
-                }
-            },
-            canGoNext = selectedDate.isBefore(today),
-            cardCount = cardsForDay.size,
-            isAmbientOn = ambientState.isRecording || ambientState.speech
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TimelineHeader(
+                selectedDate = selectedDate,
+                onPrevious = { selectedDate = selectedDate.minusDays(1) },
+                onNext = {
+                    if (selectedDate.isBefore(today)) {
+                        selectedDate = selectedDate.plusDays(1)
+                    }
+                },
+                canGoNext = selectedDate.isBefore(today),
+                cardCount = cardsForDay.size,
+                isAmbientOn = ambientState.isRecording || ambientState.speech
+            )
 
-        if (cardsForDay.isEmpty() && !uiState.isLoading && !uiState.isLoadingMore) {
-            EmptyTimelineState(selectedDate = selectedDate)
-        } else {
-            LazyColumn(
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(bottom = 12.dp)
-            ) {
-                items(cardsForDay, key = { it.id }) { card ->
-                    TranscriptCardView(
-                        card = card,
-                        isFavorite = favoriteIds.contains(card.id),
-                        onClick = { onSelectCard(card.id) },
-                        onToggleFavorite = { onToggleFavorite(card.id) }
-                    )
-                }
+            if (cardsForDay.isEmpty() && !uiState.isLoading && !uiState.isLoadingMore) {
+                EmptyTimelineState(selectedDate = selectedDate)
+            } else {
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(bottom = 12.dp)
+                ) {
+                    items(cardsForDay, key = { it.id }) { card ->
+                        TranscriptCardView(
+                            card = card,
+                            isFavorite = favoriteIds.contains(card.id),
+                            onClick = { onSelectCard(card.id) },
+                            onToggleFavorite = { onToggleFavorite(card.id) }
+                        )
+                    }
 
-                if (uiState.isLoadingMore) {
-                    item(key = "loading_more") {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = "読み込み中...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = ZtCaption
-                            )
+                    if (uiState.isLoadingMore) {
+                        item(key = "loading_more") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "読み込み中...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ZtCaption
+                                )
+                            }
                         }
                     }
                 }

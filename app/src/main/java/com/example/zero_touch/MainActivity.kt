@@ -179,6 +179,13 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         }
     }
 
+    LaunchedEffect(uiState.message) {
+        uiState.message?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearMessage()
+        }
+    }
+
     if (showSettings) {
         SettingsSheet(
             deviceId = DeviceIdProvider.getDeviceId(context),
@@ -280,6 +287,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
                                 onSelectCard = { id -> viewModel.selectCard(id) },
                                 onDismissDetail = { viewModel.clearSelection() },
+                                onRefresh = { viewModel.refreshSessions(context) },
                                 onLoadMore = { viewModel.loadMoreSessions(context) },
                                 onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
                                 onRetryTranscribe = { id -> viewModel.retryTranscribeSession(context, id) }
@@ -291,6 +299,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
                                 onSelectCard = { id -> viewModel.selectCard(id) },
                                 onDismissDetail = { viewModel.clearSelection() },
+                                onRefresh = { viewModel.refreshSessions(context) },
                                 onLoadMore = { viewModel.loadMoreSessions(context) },
                                 onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
                                 onRetryTranscribe = { id -> viewModel.retryTranscribeSession(context, id) }
@@ -304,6 +313,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
                                 onSelectCard = { id -> viewModel.selectCard(id) },
                                 onDismissDetail = { viewModel.clearSelection() },
+                                onRefresh = { viewModel.refreshSessions(context) },
                                 onLoadMore = { viewModel.loadMoreSessions(context) },
                                 onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
                                 onRetryTranscribe = { id -> viewModel.retryTranscribeSession(context, id) }

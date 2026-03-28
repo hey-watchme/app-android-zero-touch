@@ -44,6 +44,8 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -97,6 +99,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.flow.distinctUntilChanged
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceMemoScreen(
     modifier: Modifier = Modifier,
@@ -107,6 +110,7 @@ fun VoiceMemoScreen(
     onToggleFavorite: (String) -> Unit,
     onSelectCard: (String) -> Unit,
     onDismissDetail: () -> Unit,
+    onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onRetranscribeEnglish: (String) -> Unit,
     onRetryTranscribe: (String) -> Unit
@@ -191,6 +195,11 @@ fun VoiceMemoScreen(
             .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 16.dp)
     ) {
+        PullToRefreshBox(
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = onRefresh,
+            modifier = Modifier.fillMaxSize()
+        ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Spacer(Modifier.height(4.dp))
 
@@ -322,6 +331,7 @@ fun VoiceMemoScreen(
                 }
             }
             }
+        }
         }
 
         if (selectedTopic != null) {
