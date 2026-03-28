@@ -537,17 +537,25 @@ def get_session(session_id: str):
 @app.delete("/api/sessions/{session_id}")
 def delete_session(session_id: str):
     """Delete a session card and clean up related storage/topic state."""
-    result = (
+    rows = (
         supabase.table(TABLE)
         .select("id, topic_id, s3_audio_path")
         .eq("id", session_id)
-        .single()
+        .limit(1)
         .execute()
+        .data
+        or []
     )
 
-    row = result.data
+    row = rows[0] if rows else None
     if not row:
-        raise HTTPException(status_code=404, detail="Session not found")
+        return {
+            "status": "deleted",
+            "session_id": session_id,
+            "already_deleted": True,
+            "topic_deleted": False,
+            "topic_updated": False,
+        }
 
     topic_id = row.get("topic_id")
     s3_audio_path = row.get("s3_audio_path")
