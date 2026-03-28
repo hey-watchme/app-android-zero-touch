@@ -141,10 +141,12 @@ class ZeroTouchViewModel : ViewModel() {
         }
     }
 
-    fun refreshSessions(context: Context) {
+    fun refreshSessions(context: Context, showIndicator: Boolean = true) {
         if (isRefreshing) return
         isRefreshing = true
-        _uiState.value = _uiState.value.copy(isRefreshing = true)
+        if (showIndicator) {
+            _uiState.value = _uiState.value.copy(isRefreshing = true)
+        }
         viewModelScope.launch {
             try {
                 val deviceId = DeviceIdProvider.getDeviceId(context)
@@ -180,7 +182,7 @@ class ZeroTouchViewModel : ViewModel() {
                 Log.e(TAG, "refreshSessions failed", e)
                 _uiState.value = _uiState.value.copy(
                     isRefreshing = false,
-                    error = "更新に失敗しました: ${e.message}"
+                    error = if (showIndicator) "更新に失敗しました: ${e.message}" else _uiState.value.error
                 )
             } finally {
                 isRefreshing = false

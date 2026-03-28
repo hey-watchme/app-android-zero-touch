@@ -156,7 +156,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         viewModel.loadSessions(context)
         while (true) {
             delay(5000)
-            viewModel.refreshSessions(context)
+            viewModel.refreshSessions(context, showIndicator = false)
         }
     }
 
