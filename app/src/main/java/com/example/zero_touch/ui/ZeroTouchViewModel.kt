@@ -11,6 +11,7 @@ import com.example.zero_touch.api.TopicSummary
 import com.example.zero_touch.api.TopicUtteranceSummary
 import com.example.zero_touch.api.ZeroTouchApi
 import com.example.zero_touch.audio.ambient.AmbientPreferences
+import com.example.zero_touch.audio.ambient.AmbientStatus
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -312,6 +313,11 @@ class ZeroTouchViewModel : ViewModel() {
     fun deleteCard(context: Context, id: String) {
         dismissedIds.add(id)
         favoriteIds.remove(id)
+        val retainedRecordings = AmbientStatus.state.value.recordings.filterNot { it.sessionId == id }
+        AmbientStatus.update(
+            recordings = retainedRecordings,
+            lastEvent = "Card deleted"
+        )
         removeCardFromUi(id)
         viewModelScope.launch {
             try {
