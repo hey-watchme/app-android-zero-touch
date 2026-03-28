@@ -83,6 +83,12 @@ import com.example.zero_touch.ui.theme.ZtCardRowDivider
 import com.example.zero_touch.ui.theme.ZtError
 import com.example.zero_touch.ui.theme.ZtFilterBorder
 import com.example.zero_touch.ui.theme.ZtFilterSelected
+import com.example.zero_touch.ui.theme.ZtImportanceLv0
+import com.example.zero_touch.ui.theme.ZtImportanceLv1
+import com.example.zero_touch.ui.theme.ZtImportanceLv2
+import com.example.zero_touch.ui.theme.ZtImportanceLv3
+import com.example.zero_touch.ui.theme.ZtImportanceLv4
+import com.example.zero_touch.ui.theme.ZtImportanceLv5
 import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
 import com.example.zero_touch.ui.theme.ZtOutline
 import com.example.zero_touch.ui.theme.ZtPrimary
@@ -120,7 +126,7 @@ fun VoiceMemoScreen(
 
     // --- Filter state ---
     var activeFilter by remember { mutableStateOf("すべて") }
-    val filterOptions = listOf("すべて", "今日", "ライブ", "完了")
+    val filterOptions = listOf("すべて", "Lv.3+", "Lv.4+", "Lv.5")
 
     // --- Data preparation ---
     val topicCards = uiState.topicCards
@@ -139,9 +145,9 @@ fun VoiceMemoScreen(
         emptyList()
     } else {
         when (activeFilter) {
-            "今日" -> mergedTopicCards.filter { it.displayDate == "今日" }
-            "ライブ" -> topicCards.filter { it.status == "active" }
-            "完了" -> topicCards.filter { it.status == "finalized" }
+            "Lv.3+" -> mergedTopicCards.filter { (it.importanceLevel ?: -1) >= 3 }
+            "Lv.4+" -> mergedTopicCards.filter { (it.importanceLevel ?: -1) >= 4 }
+            "Lv.5" -> mergedTopicCards.filter { (it.importanceLevel ?: -1) >= 5 }
             else -> mergedTopicCards
         }
     }
@@ -468,6 +474,9 @@ private fun TopicGroupCard(
                                 modifier = Modifier.weight(1f)
                             )
                         }
+                        if (topic.importanceLevel != null) {
+                            ImportanceLevelBadge(level = topic.importanceLevel)
+                        }
                         Surface(
                             shape = RoundedCornerShape(4.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant
@@ -546,6 +555,35 @@ private fun TopicGroupCard(
 }
 
 @Composable
+private fun ImportanceLevelBadge(level: Int) {
+    val color = importanceLevelColor(level)
+    val label = "Lv.$level"
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = color.copy(alpha = 0.15f)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = color,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+        )
+    }
+}
+
+private fun importanceLevelColor(level: Int): Color {
+    return when (level) {
+        0 -> ZtImportanceLv0
+        1 -> ZtImportanceLv1
+        2 -> ZtImportanceLv2
+        3 -> ZtImportanceLv3
+        4 -> ZtImportanceLv4
+        5 -> ZtImportanceLv5
+        else -> ZtImportanceLv1
+    }
+}
+
+@Composable
 private fun TopicDetailDrawer(
     topic: TopicFeedCard,
     onClose: () -> Unit
@@ -574,9 +612,15 @@ private fun TopicDetailDrawer(
         DetailSection(title = "メタデータ") {
             DetailRow(label = "トピックID", value = topic.id)
             DetailRow(label = "ステータス", value = topicStatusLabel(topic.status))
+            DetailRow(
+                label = "重要度",
+                value = if (topic.importanceLevel != null) "Lv.${topic.importanceLevel}" else "未評価"
+            )
+            if (!topic.importanceReason.isNullOrBlank()) {
+                DetailRow(label = "判定理由", value = topic.importanceReason)
+            }
             DetailRow(label = "発話数", value = topic.utteranceCount.toString())
             DetailRow(label = "更新日時", value = formatEpochDateTime(topic.updatedAtEpochMs))
-            DetailRow(label = "解析日時", value = formatEpochDateTime(topic.updatedAtEpochMs))
             DetailRow(
                 label = "LLM",
                 value = listOfNotNull(topic.llmProvider, topic.llmModel)

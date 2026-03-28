@@ -57,7 +57,9 @@ data class TopicFeedCard(
     val utterances: List<TranscriptCard> = emptyList(),
     val llmProvider: String? = null,
     val llmModel: String? = null,
-    val isUnintelligible: Boolean = false
+    val isUnintelligible: Boolean = false,
+    val importanceLevel: Int? = null,
+    val importanceReason: String? = null
 )
 
 private data class TopicPageResult(
@@ -556,7 +558,9 @@ class ZeroTouchViewModel : ViewModel() {
             utterances = utteranceCards,
             llmProvider = topic.llm_provider,
             llmModel = topic.llm_model,
-            isUnintelligible = isUnintelligibleTopic
+            isUnintelligible = isUnintelligibleTopic,
+            importanceLevel = topic.importance_level,
+            importanceReason = topic.importance_reason
         )
     }
 

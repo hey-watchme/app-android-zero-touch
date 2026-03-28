@@ -75,6 +75,8 @@ data class TopicSummary(
     val final_title: String? = null,
     val final_summary: String? = null,
     val utterance_count: Int? = null,
+    val importance_level: Int? = null,
+    val importance_reason: String? = null,
     val llm_provider: String? = null,
     val llm_model: String? = null,
     val start_at: String? = null,

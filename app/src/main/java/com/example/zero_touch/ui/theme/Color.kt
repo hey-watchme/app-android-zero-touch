@@ -61,3 +61,11 @@ val ZtFilterBorder = Color(0xFFE2E8F0)
 
 // Subtle tints for interactive feedback
 val ZtPressedOverlay = Color(0x0A000000)
+
+// Importance level colors
+val ZtImportanceLv0 = Color(0xFFD6D3D1)  // noise - muted gray
+val ZtImportanceLv1 = Color(0xFFA8A29E)  // daily - warm gray
+val ZtImportanceLv2 = Color(0xFF60A5FA)  // routine - soft blue
+val ZtImportanceLv3 = Color(0xFF34D399)  // shareable - green
+val ZtImportanceLv4 = Color(0xFFFBBF24)  // decision - amber
+val ZtImportanceLv5 = Color(0xFFF472B6)  // master - pink
