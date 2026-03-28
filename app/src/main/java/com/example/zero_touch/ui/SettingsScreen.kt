@@ -191,6 +191,7 @@ fun SettingsSheet(
             SectionHeader(icon = Icons.Outlined.Language, title = "文字起こし")
             val providerSubtitle = when (asrProvider) {
                 "deepgram" -> "Deepgram nova-3 — 高速・整形あり"
+                "cohere" -> "Cohere Transcribe — 話者分離なし"
                 else -> "Speechmatics batch — 話者分離・エンティティ"
             }
             SettingsRow(
@@ -212,6 +213,14 @@ fun SettingsSheet(
                         onClick = {
                             asrProvider = "deepgram"
                             AmbientPreferences.setAsrProvider(context, "deepgram")
+                        }
+                    )
+                    SettingsChip(
+                        label = "Cohere",
+                        selected = asrProvider == "cohere",
+                        onClick = {
+                            asrProvider = "cohere"
+                            AmbientPreferences.setAsrProvider(context, "cohere")
                         }
                     )
                 }

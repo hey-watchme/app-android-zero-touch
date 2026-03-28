@@ -3,12 +3,14 @@ from typing import Optional, Tuple
 
 from services.asr_providers.speechmatics_provider import SpeechmaticsASRService
 from services.asr_providers.deepgram_provider import DeepgramASRService
+from services.asr_providers.cohere_provider import CohereASRService
 
 DEFAULT_PROVIDER = os.getenv("ASR_PROVIDER", "speechmatics").lower()
 DEFAULT_LANGUAGE = os.getenv("ASR_LANGUAGE", "ja").strip().lower()
 DEFAULT_MODELS = {
     "speechmatics": "batch",
     "deepgram": "nova-3",
+    "cohere": "cohere-transcribe-03-2026",
 }
 
 SUPPORTED_LANGUAGES = {
@@ -56,6 +58,13 @@ def get_asr_service(
     if selected_provider == "deepgram":
         return (
             DeepgramASRService(model=selected_model, language=selected_language),
+            selected_provider,
+            selected_model,
+            selected_language,
+        )
+    if selected_provider == "cohere":
+        return (
+            CohereASRService(model=selected_model, language=selected_language),
             selected_provider,
             selected_model,
             selected_language,
