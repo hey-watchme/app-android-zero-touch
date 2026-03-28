@@ -43,7 +43,13 @@ data class TranscriptCard(
     val asrLanguage: String? = null,
     val speakerCount: Int = 0,
     val speakerLabels: List<String> = emptyList(),
+    val speakerSegments: List<SpeakerSegment> = emptyList(),
     val isUnintelligible: Boolean = false
+)
+
+data class SpeakerSegment(
+    val speakerLabel: String,
+    val text: String
 )
 
 data class TopicFeedCard(
@@ -413,6 +419,7 @@ class ZeroTouchViewModel : ViewModel() {
             val asrLanguage = metadata["language"] as? String
             val speakerCount = extractSpeakerCount(metadata)
             val speakerLabels = extractSpeakerLabels(metadata, asrProvider)
+            val speakerSegments = extractSpeakerSegments(metadata, asrProvider)
             TranscriptCard(
                 id = summary.id,
                 createdAt = summary.created_at,
@@ -429,6 +436,7 @@ class ZeroTouchViewModel : ViewModel() {
                 asrLanguage = asrLanguage,
                 speakerCount = speakerCount,
                 speakerLabels = speakerLabels,
+                speakerSegments = speakerSegments,
                 isUnintelligible = isUnintelligible
             )
         } catch (e: Exception) {
@@ -448,6 +456,7 @@ class ZeroTouchViewModel : ViewModel() {
                 asrLanguage = null,
                 speakerCount = 0,
                 speakerLabels = emptyList(),
+                speakerSegments = emptyList(),
                 isUnintelligible = false
             )
         }
@@ -577,6 +586,7 @@ class ZeroTouchViewModel : ViewModel() {
         val asrLanguage = metadata["language"] as? String
         val speakerCount = extractSpeakerCount(metadata)
         val speakerLabels = extractSpeakerLabels(metadata, asrProvider)
+        val speakerSegments = extractSpeakerSegments(metadata, asrProvider)
         val displayText = when {
             text.isNotEmpty() -> text
             isUnintelligible -> UNINTELLIGIBLE_CARD_TEXT
@@ -600,6 +610,7 @@ class ZeroTouchViewModel : ViewModel() {
             asrLanguage = asrLanguage,
             speakerCount = speakerCount,
             speakerLabels = speakerLabels,
+            speakerSegments = speakerSegments,
             isUnintelligible = isUnintelligible
         )
     }
@@ -629,6 +640,73 @@ class ZeroTouchViewModel : ViewModel() {
 
         val speakerCount = extractSpeakerCount(metadata)
         return (1..speakerCount).map { "Speaker $it" }
+    }
+
+    private data class SpeakerSegmentCandidate(
+        val speakerLabel: String,
+        val text: String,
+        val start: Double?
+    )
+
+    private fun extractSpeakerSegments(
+        metadata: Map<String, Any>,
+        provider: String?
+    ): List<SpeakerSegment> {
+        val rawUtterances = metadata["utterances"] as? List<*> ?: return emptyList()
+        val candidates = rawUtterances.mapNotNull { item ->
+            val row = item as? Map<*, *> ?: return@mapNotNull null
+            val speaker = row["speaker"] ?: return@mapNotNull null
+            val speakerLabel = normalizeSpeakerLabel(speaker, provider) ?: return@mapNotNull null
+            val text = (row["text"] as? String)
+                ?: (row["transcript"] as? String)
+                ?: (row["utterance"] as? String)
+                ?: ""
+            val trimmed = text.trim()
+            if (trimmed.isBlank()) return@mapNotNull null
+            val start = when (val raw = row["start"]) {
+                is Number -> raw.toDouble()
+                is String -> raw.toDoubleOrNull()
+                else -> null
+            }
+            SpeakerSegmentCandidate(speakerLabel = speakerLabel, text = trimmed, start = start)
+        }
+
+        if (candidates.isEmpty()) return emptyList()
+        val ordered = if (candidates.any { it.start != null }) {
+            candidates.sortedBy { it.start ?: Double.MAX_VALUE }
+        } else {
+            candidates
+        }
+
+        val merged = mutableListOf<SpeakerSegment>()
+        var currentLabel: String? = null
+        var currentText = StringBuilder()
+
+        fun flush() {
+            val label = currentLabel ?: return
+            val text = currentText.toString().trim()
+            if (text.isNotBlank()) {
+                merged.add(SpeakerSegment(label, text))
+            }
+        }
+
+        ordered.forEach { item ->
+            if (currentLabel == null) {
+                currentLabel = item.speakerLabel
+                currentText.append(item.text)
+                return@forEach
+            }
+            if (item.speakerLabel == currentLabel) {
+                if (currentText.isNotEmpty()) currentText.append(" ")
+                currentText.append(item.text)
+            } else {
+                flush()
+                currentLabel = item.speakerLabel
+                currentText = StringBuilder(item.text)
+            }
+        }
+        flush()
+        return merged
     }
 
     private fun normalizeSpeakerLabel(raw: Any, provider: String?): String? {

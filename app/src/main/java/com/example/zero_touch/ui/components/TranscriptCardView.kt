@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.zero_touch.ui.SpeakerSegment
 import com.example.zero_touch.ui.TranscriptCard
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtCardRowDivider
@@ -188,13 +189,21 @@ private fun CompactCardRow(
                     // Stage 3: Content ready — show 1-3 lines
                     else -> {
                         SpeakerIdentityBadge(speakerLabels = card.speakerLabels)
-                        Text(
-                            text = card.text,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        if (shouldShowSpeakerSplit(card)) {
+                            SpeakerSegmentList(
+                                segments = card.speakerSegments,
+                                maxItems = 2,
+                                maxLines = 1
+                            )
+                        } else {
+                            Text(
+                                text = card.text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
@@ -273,15 +282,56 @@ private fun FullCardView(
                     )
                 }
                 else -> {
-                    Text(
-                        text = card.text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = ZtOnSurfaceVariant,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (shouldShowSpeakerSplit(card)) {
+                        SpeakerSegmentList(
+                            segments = card.speakerSegments,
+                            maxItems = 4,
+                            maxLines = 2
+                        )
+                    } else {
+                        Text(
+                            text = card.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = ZtOnSurfaceVariant,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
+        }
+    }
+}
+
+private fun shouldShowSpeakerSplit(card: TranscriptCard): Boolean {
+    val distinct = card.speakerSegments.map { it.speakerLabel }.distinct()
+    return distinct.size >= 2
+}
+
+@Composable
+private fun SpeakerSegmentList(
+    segments: List<SpeakerSegment>,
+    maxItems: Int,
+    maxLines: Int
+) {
+    val visible = segments.take(maxItems)
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        visible.forEach { segment ->
+            Text(
+                text = "${segment.speakerLabel}: ${segment.text}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = maxLines,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        val remaining = segments.size - visible.size
+        if (remaining > 0) {
+            Text(
+                text = "+$remaining",
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtCaption
+            )
         }
     }
 }

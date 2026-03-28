@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
+import com.example.zero_touch.ui.SpeakerSegment
 import com.example.zero_touch.ui.TranscriptCard
 import com.example.zero_touch.ui.UNINTELLIGIBLE_TOPIC_SUMMARY
 import com.example.zero_touch.ui.theme.ZtCaption
@@ -170,12 +171,16 @@ fun CardDetailSheet(
                         }
                     }
                     SelectionContainer {
-                        Text(
-                            text = card.text,
-                            style = if (card.isUnintelligible) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
-                            color = if (card.isUnintelligible) ZtOnSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                            lineHeight = if (card.isUnintelligible) MaterialTheme.typography.bodyMedium.lineHeight else MaterialTheme.typography.bodyLarge.lineHeight
-                        )
+                        if (shouldShowSpeakerSplit(card)) {
+                            SpeakerSegmentDetailList(card.speakerSegments)
+                        } else {
+                            Text(
+                                text = card.text,
+                                style = if (card.isUnintelligible) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
+                                color = if (card.isUnintelligible) ZtOnSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                lineHeight = if (card.isUnintelligible) MaterialTheme.typography.bodyMedium.lineHeight else MaterialTheme.typography.bodyLarge.lineHeight
+                            )
+                        }
                     }
                 }
             }
@@ -231,6 +236,31 @@ fun CardDetailSheet(
                         modifier = Modifier.weight(1f)
                     )
                 }
+            }
+        }
+    }
+}
+
+private fun shouldShowSpeakerSplit(card: TranscriptCard): Boolean {
+    val distinct = card.speakerSegments.map { it.speakerLabel }.distinct()
+    return distinct.size >= 2
+}
+
+@Composable
+private fun SpeakerSegmentDetailList(segments: List<SpeakerSegment>) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        segments.forEach { segment ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = segment.speakerLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtCaption
+                )
+                Text(
+                    text = segment.text,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
         }
     }

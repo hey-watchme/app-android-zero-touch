@@ -258,7 +258,8 @@ fun VoiceMemoScreen(
                             text = "",
                             displayTitle = "--:--",
                             durationSeconds = 0,
-                            displayDate = "今日"
+                            displayDate = "今日",
+                            speakerSegments = emptyList()
                         )
                     )
                 )
@@ -817,6 +818,7 @@ private fun buildPendingTopicCards(
                 displayTitle = fallbackDisplayTitle,
                 durationSeconds = durationSeconds,
                 displayDate = fallbackDisplayDate,
+                speakerSegments = emptyList(),
                 isUnintelligible = isUnintelligible
             )
         }
