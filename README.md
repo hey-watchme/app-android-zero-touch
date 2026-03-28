@@ -91,7 +91,7 @@ Android App (Card-first Display)
 - Ambient 録音は `AAC + MPEG-4 container` の `.m4a` で保存する
 - upload 時の `Content-Type` は `audio/mp4`
 - Speechmatics / Deepgram はこのまま受け付ける
-- Azure Speech Service も `m4a/mp4` を扱えるが、Linux では GStreamer 依存が必要
+- Azure Speech Service は Batch Transcription で `contentUrls` を使って処理する
 - Cohere は `m4a` 非対応で、`flac, mp3, mpeg, mpga, ogg, wav` のみ対応のため、現状は保留
 
 **Topic finalize ルール（現在値）**
@@ -147,9 +147,11 @@ Android App (Card-first Display)
 
 - ZeroTouch では WatchMe 側で既に使っている `AZURE_SPEECH_KEY` と `AZURE_SERVICE_REGION` をそのまま流用できる
 - GitHub Secrets は org secret として設定済みで、この public repo から利用できる前提で運用する
-- `provider=azure` を追加し、`language=ja|en` からデフォルト locale を `ja-JP` / `en-US` へ自動解決する
-- ambient 録音の `m4a` をそのまま扱うため、Linux コンテナでは GStreamer を同梱する
-- Azure は現状 `speaker diarization` を ZeroTouch では使っていないため、`speaker_count=0`, `utterances=[]` で扱う
+- `provider=azure` は **Batch Transcription REST** を使う（`/speechtotext/transcriptions:submit?api-version=2025-10-15`）
+- `language=ja|en` からデフォルト locale を `ja-JP` / `en-US` へ自動解決する
+- Batch Transcription は `contentUrls` が必要なので、ZeroTouch では S3 presigned URL を使う
+- `contentUrls` は外部からアクセス可能である必要があるため、失敗する場合は Azure Blob + SAS へ切替える
+- diarization は `properties.diarization.enabled=true` で有効化（`maxSpeakers` は環境変数で調整）
 - GitHub Actions で EC2 に `.env` を作る際も `AZURE_SPEECH_KEY`, `AZURE_SERVICE_REGION` を注入する
 
 ### Cohere 導入メモ（2026-03-28）

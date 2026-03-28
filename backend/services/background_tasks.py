@@ -117,18 +117,33 @@ def transcribe_background(
             'updated_at': datetime.now().isoformat()
         }).eq('id', session_id).execute()
 
-        # Download audio from S3
-        s3_response = s3_client.get_object(Bucket=s3_bucket, Key=s3_audio_path)
-        audio_content = s3_response['Body'].read()
-        audio_file = io.BytesIO(audio_content)
-
-        # Transcribe
-        transcription_result = asyncio.run(
-            asr_service.transcribe_audio(
-                audio_file=audio_file,
-                filename=s3_audio_path
+        # Azure batch transcription uses content URLs instead of uploaded bytes.
+        if hasattr(asr_service, "transcribe_audio_from_url"):
+            expires_seconds = int(os.getenv("AZURE_BATCH_S3_URL_EXPIRES_SECONDS", "3600"))
+            presigned_url = s3_client.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={"Bucket": s3_bucket, "Key": s3_audio_path},
+                ExpiresIn=max(300, min(expires_seconds, 86400)),
             )
-        )
+            transcription_result = asyncio.run(
+                asr_service.transcribe_audio_from_url(
+                    source_url=presigned_url,
+                    filename=s3_audio_path,
+                )
+            )
+        else:
+            # Download audio from S3
+            s3_response = s3_client.get_object(Bucket=s3_bucket, Key=s3_audio_path)
+            audio_content = s3_response['Body'].read()
+            audio_file = io.BytesIO(audio_content)
+
+            # Transcribe
+            transcription_result = asyncio.run(
+                asr_service.transcribe_audio(
+                    audio_file=audio_file,
+                    filename=s3_audio_path
+                )
+            )
 
         # Calculate duration from utterances
         duration_seconds = 0
