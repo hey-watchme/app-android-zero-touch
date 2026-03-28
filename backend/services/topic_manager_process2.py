@@ -16,6 +16,7 @@ from supabase import Client
 
 from services.llm_providers import LLMFactory, get_current_llm
 from services.prompts import build_topic_batch_group_prompt, build_topic_finalize_prompt
+from services.topic_scorer import score_topic
 
 
 SESSION_TABLE = "zerotouch_sessions"
@@ -540,6 +541,18 @@ def finalize_active_topic_for_device(
         payload=update_payload,
     )
 
+    # Phase 1: Score topic importance (non-blocking)
+    scoring_result: Optional[Dict[str, Any]] = None
+    try:
+        scoring_result = score_topic(
+            supabase=supabase,
+            topic_id=topic["id"],
+            llm_service=llm_service,
+        )
+        print(f"[Finalize] Topic scoring result: {scoring_result}")
+    except Exception as scoring_error:
+        print(f"[Finalize] Topic scoring failed (non-blocking): {scoring_error}")
+
     return {
         "device_id": device_id,
         "ready": True,
@@ -550,6 +563,7 @@ def finalize_active_topic_for_device(
         "used_llm": used_llm,
         "llm_provider": provider,
         "llm_model": model,
+        "importance_level": (scoring_result or {}).get("importance_level"),
     }
 
 

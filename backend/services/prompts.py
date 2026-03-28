@@ -177,6 +177,56 @@ Conversation utterances (ordered):
 """
 
 
+def build_topic_scoring_prompt(
+    final_title: str,
+    final_summary: str,
+    utterances: list[str],
+) -> str:
+    """
+    Build prompt for Phase 1 importance scoring (Lv.0-5).
+    Uses a lightweight LLM to classify topic importance.
+    """
+    transcript = "\n".join(
+        [f"- {line}" for line in utterances if (line or "").strip()]
+    )
+    return f"""You are scoring the importance of a finalized conversation topic from an ambient workplace recorder.
+
+Rate the topic from 0 to 5 based on its information value to the workplace.
+
+# Importance Levels
+
+- 0: Noise - misrecognition, inaudible fragments, meaningless audio artifacts
+- 1: Daily/emotional - greetings, weather talk, fatigue expressions ("good morning", "I'm tired")
+- 2: Routine operations - standard task completions ("register closed", "inventory checked")
+- 3: Shareable facts - information others should know ("Mr. XX is visiting next week", "the pipe might be leaking")
+- 4: Decisions - policy changes, action plans ("this menu item is sold out from today", "handle this complaint like this")
+- 5: Master knowledge - recipes, procedures, VIP preferences, emergency contacts
+
+# Rules
+
+- Score based ONLY on the conversation content provided
+- If the transcription is mostly garbled, empty, or nonsensical, score 0
+- Short greetings or single filler words are level 1
+- When in doubt between two levels, choose the lower one
+- Provide a brief reason for your scoring
+
+Output ONLY JSON:
+{{
+  "importance_level": 0,
+  "importance_reason": "short reason"
+}}
+
+# Topic
+
+Title: {final_title or "(none)"}
+Summary: {final_summary or "(none)"}
+
+# Utterances
+
+{transcript or "- (none)"}
+"""
+
+
 def build_topic_batch_group_prompt(sessions: list[dict]) -> str:
     lines: list[str] = []
     for session in sessions:
