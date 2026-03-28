@@ -152,6 +152,14 @@ def _resolve_session_timestamp(row: Dict[str, Any]) -> str:
     )
 
 
+def _parse_session_timestamp(row: Dict[str, Any]) -> datetime:
+    value = _resolve_session_timestamp(row)
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return datetime.now()
+
+
 def _cleanup_topic_after_session_delete(topic_id: Optional[str]):
     if not topic_id:
         return {"topic_deleted": False, "topic_updated": False}
@@ -160,11 +168,11 @@ def _cleanup_topic_after_session_delete(topic_id: Optional[str]):
         supabase.table(TABLE)
         .select("id, recorded_at, created_at")
         .eq("topic_id", topic_id)
-        .order("created_at", desc=False)
         .execute()
         .data
         or []
     )
+    remaining.sort(key=_parse_session_timestamp)
 
     if not remaining:
         supabase.table(TOPIC_TABLE).delete().eq("id", topic_id).execute()

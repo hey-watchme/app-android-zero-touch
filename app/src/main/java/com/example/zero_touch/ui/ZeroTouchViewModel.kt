@@ -12,6 +12,7 @@ import com.example.zero_touch.api.TopicUtteranceSummary
 import com.example.zero_touch.api.ZeroTouchApi
 import com.example.zero_touch.audio.ambient.AmbientPreferences
 import com.example.zero_touch.audio.ambient.AmbientStatus
+import kotlin.math.max
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -146,28 +147,30 @@ class ZeroTouchViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(isRefreshing = true)
         viewModelScope.launch {
             try {
-                val existingSessions = _uiState.value.sessions
                 val deviceId = DeviceIdProvider.getDeviceId(context)
-                val response = api.listSessions(deviceId = deviceId, limit = PAGE_SIZE, offset = 0)
+                val requestedSessionLimit = max(currentOffset, PAGE_SIZE)
+                val requestedTopicLimit = max(currentTopicOffset, PAGE_SIZE)
+                val response = api.listSessions(deviceId = deviceId, limit = requestedSessionLimit, offset = 0)
                 val fresh = response.sessions.sortedByDescending { it.created_at }
-                val newItems = fresh.count { freshItem -> existingSessions.none { it.id == freshItem.id } }
-                if (newItems > 0) currentOffset += newItems
-                val mergedSessions = mergeSessions(_uiState.value.sessions, fresh)
                 val freshCards = fresh.mapNotNull { summary -> buildTranscriptCard(summary) }
-                val mergedCards = mergeCards(_uiState.value.feedCards, freshCards, mergedSessions)
-                val filteredCards = filterDismissed(mergedCards)
-                val topicPage = loadTopicCards(deviceId = deviceId, offset = 0)
-                val newTopicItems = topicPage.cards.count { freshTopic ->
-                    _uiState.value.topicCards.none { it.id == freshTopic.id }
-                }
-                if (newTopicItems > 0) currentTopicOffset += newTopicItems
-                hasMoreTopics = topicPage.hasMore || hasMoreTopics
-                val mergedTopicCards = mergeTopicCards(_uiState.value.topicCards, topicPage.cards)
-                Log.d(TAG, "refreshSessions success: device=$deviceId newItems=$newItems")
+                val filteredCards = filterDismissed(freshCards)
+                val topicPage = loadTopicCards(
+                    deviceId = deviceId,
+                    offset = 0,
+                    limit = requestedTopicLimit
+                )
+                currentOffset = fresh.size
+                hasMoreSessions = response.count == requestedSessionLimit
+                currentTopicOffset = topicPage.rawCount
+                hasMoreTopics = topicPage.hasMore
+                Log.d(
+                    TAG,
+                    "refreshSessions success: device=$deviceId sessions=${fresh.size} topics=${topicPage.cards.size}"
+                )
                 _uiState.value = _uiState.value.copy(
-                    sessions = mergedSessions,
+                    sessions = fresh,
                     feedCards = filteredCards,
-                    topicCards = mergedTopicCards,
+                    topicCards = topicPage.cards,
                     isRefreshing = false,
                     hasMore = hasMoreSessions || hasMoreTopics,
                     dismissedIds = dismissedIds.toSet(),
@@ -438,7 +441,8 @@ class ZeroTouchViewModel : ViewModel() {
 
     private suspend fun loadTopicCards(
         deviceId: String,
-        offset: Int
+        offset: Int,
+        limit: Int = PAGE_SIZE
     ): TopicPageResult {
         return try {
             if (offset == 0) {
@@ -457,7 +461,7 @@ class ZeroTouchViewModel : ViewModel() {
 
             val response = api.listTopics(
                 deviceId = deviceId,
-                limit = PAGE_SIZE,
+                limit = limit,
                 offset = offset,
                 includeChildren = true
             )
