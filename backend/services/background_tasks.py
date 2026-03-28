@@ -14,6 +14,7 @@ import threading
 from datetime import datetime
 import boto3
 from supabase import Client
+from tenacity import RetryError
 from services.prompts import build_card_generation_prompt
 from services.topic_manager_process2 import (
     DEFAULT_IDLE_SECONDS,
@@ -42,6 +43,31 @@ def _format_llm_error(error: Exception) -> str:
     if any(k in lower for k in ['not found', 'invalid model', '404', 'unsupported model']):
         return f"LLM model error: {message}"
     return f"LLM generation failed: {message}"
+
+
+def _unwrap_retry_error(error: Exception) -> Exception:
+    if isinstance(error, RetryError):
+        last_attempt = getattr(error, "last_attempt", None)
+        if last_attempt is not None:
+            inner = last_attempt.exception()
+            if inner is not None:
+                return inner
+    return error
+
+
+def _format_transcription_error(error: Exception) -> str:
+    """Convert ASR exceptions into user-facing messages."""
+    root = _unwrap_retry_error(error)
+    message = str(root).strip() or root.__class__.__name__
+    lower = message.lower()
+
+    if any(k in lower for k in ["quota", "credit", "billing", "payment", "insufficient"]):
+        return f"ASR quota exceeded: {message}"
+    if any(k in lower for k in ["401", "403", "unauthorized", "forbidden", "invalid api key"]):
+        return f"ASR authentication failed: {message}"
+    if any(k in lower for k in ["400", "unsupported", "invalid", "too large", "25mb"]):
+        return f"ASR request invalid: {message}"
+    return f"Transcription failed: {message}"
 
 
 def _run_delayed_active_topic_finalize(
@@ -217,7 +243,7 @@ def transcribe_background(
         if supabase:
             supabase.table(TABLE).update({
                 'status': 'failed',
-                'error_message': f"Transcription failed: {str(e)}",
+                'error_message': _format_transcription_error(e),
                 'updated_at': datetime.now().isoformat()
             }).eq('id', session_id).execute()
 
