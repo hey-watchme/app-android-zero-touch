@@ -227,6 +227,71 @@ Summary: {final_summary or "(none)"}
 """
 
 
+def build_topic_annotation_prompt(
+    final_title: str,
+    final_summary: str,
+    final_description: str,
+    utterances: list[dict],
+    now_iso: str,
+) -> str:
+    lines: list[str] = []
+    for row in utterances:
+        session_id = str(row.get("id") or "").strip()
+        recorded_at = str(row.get("recorded_at") or row.get("created_at") or "").strip()
+        text = str(row.get("transcription") or "").strip()
+        if not session_id or not text:
+            continue
+        lines.append(f"- id={session_id} at={recorded_at} text={text}")
+
+    transcript = "\n".join(lines) or "- (none)"
+
+    return f"""You are extracting structured facts from a finalized topic.
+
+You MUST only use the information contained in the utterances.
+If the topic has no reliable facts, return an empty list.
+
+# Categories (choose from these when possible)
+接客 | 調理 | 清掃 | 事務 | トラブル | アイデア | 人事 | 在庫 | 設備
+
+# Intents (choose from these when possible)
+報告 | 相談 | 指示 | 不満 | 提案 | 質問 | 確認 | 共有
+
+# TTL guidance
+- ephemeral: short-lived (1-7 days)
+- seasonal: medium (1-6 months)
+- permanent: no expiry
+
+# Date normalization
+Use this reference as "now": {now_iso}
+Convert relative dates ("tomorrow", "next week") into absolute ISO-8601.
+If time is unknown, set time to 09:00 in the local timezone.
+
+Output ONLY JSON:
+{{
+  "facts": [
+    {{
+      "fact_text": "string",
+      "entities": [
+        {{"type": "person|product|place|datetime|money|other", "value": "string", "role": "string|optional"}}
+      ],
+      "categories": ["string"],
+      "intents": ["string"],
+      "ttl": {{"type": "ephemeral|seasonal|permanent", "expires_at": "ISO-8601|null"}},
+      "source_cards": ["uuid"]
+    }}
+  ]
+}}
+
+# Topic
+Title: {final_title or "(none)"}
+Summary: {final_summary or "(none)"}
+Description: {final_description or "(none)"}
+
+# Utterances
+{transcript}
+"""
+
+
 def build_topic_batch_group_prompt(sessions: list[dict]) -> str:
     lines: list[str] = []
     for session in sessions:

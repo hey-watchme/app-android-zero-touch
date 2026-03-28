@@ -7,6 +7,7 @@ Process 2 topic evaluation:
 from __future__ import annotations
 
 import json
+import threading
 import os
 import re
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from supabase import Client
 from services.llm_providers import LLMFactory, get_current_llm
 from services.prompts import build_topic_batch_group_prompt, build_topic_finalize_prompt
 from services.topic_scorer import score_topic
+from services.topic_annotator import annotate_topic
 
 
 SESSION_TABLE = "zerotouch_sessions"
@@ -552,6 +554,26 @@ def finalize_active_topic_for_device(
         print(f"[Finalize] Topic scoring result: {scoring_result}")
     except Exception as scoring_error:
         print(f"[Finalize] Topic scoring failed (non-blocking): {scoring_error}")
+
+    # Phase 2: Annotation (async, only for Lv.3+)
+    try:
+        if (scoring_result or {}).get("importance_level", -1) >= 3 and llm_service is not None:
+            def _run_annotation():
+                try:
+                    result = annotate_topic(
+                        supabase=supabase,
+                        topic_id=topic["id"],
+                        llm_service=llm_service,
+                        force=False,
+                    )
+                    print(f"[Finalize] Topic annotation result: {result}")
+                except Exception as annotation_error:
+                    print(f"[Finalize] Topic annotation failed (non-blocking): {annotation_error}")
+
+            thread = threading.Thread(target=_run_annotation, daemon=True)
+            thread.start()
+    except Exception as annotation_error:
+        print(f"[Finalize] Topic annotation scheduling failed: {annotation_error}")
 
     return {
         "device_id": device_id,

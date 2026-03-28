@@ -267,6 +267,8 @@ Supabase SQL Editorで以下を順に実行:
 4. `backend/migrations/004_process2_topic_pipeline.sql`
 5. `backend/migrations/005_add_device_settings.sql`
 6. `backend/migrations/006_live_topic_container_constraints.sql`（1 device 1 active topic 制約 + topic description/boundary metadata）
+7. `backend/migrations/007_add_topic_scoring.sql`
+8. `backend/migrations/008_create_zerotouch_facts.sql`
 
 ### Android
 

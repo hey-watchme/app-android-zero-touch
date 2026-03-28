@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,10 +30,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -64,6 +67,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.zero_touch.api.DeviceIdProvider
 import com.example.zero_touch.audio.ambient.AmbientPreferences
 import com.example.zero_touch.audio.ambient.AmbientStatus
+import com.example.zero_touch.ui.AnalysisScreen
 import com.example.zero_touch.ui.SettingsSheet
 import com.example.zero_touch.ui.TimelineScreen
 import com.example.zero_touch.ui.VoiceMemoScreen
@@ -73,12 +77,11 @@ import com.example.zero_touch.ui.theme.ZerotouchTheme
 import com.example.zero_touch.ui.theme.ZtAvatarBg
 import com.example.zero_touch.ui.theme.ZtAvatarText
 import com.example.zero_touch.ui.theme.ZtCaption
+import com.example.zero_touch.ui.theme.ZtOnSurfaceVariant
 import com.example.zero_touch.ui.theme.ZtOutlineVariant
-import com.example.zero_touch.ui.theme.ZtPrimaryContainer
 import com.example.zero_touch.ui.theme.ZtSidebarSelected
 import com.example.zero_touch.ui.theme.ZtSidebarSurface
 import com.example.zero_touch.ui.theme.ZtSurfaceVariant
-import com.example.zero_touch.ui.theme.ZtSuccess
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 
@@ -186,6 +189,12 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         }
     }
 
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 3) {
+            viewModel.loadFacts(context)
+        }
+    }
+
     if (showSettings) {
         SettingsSheet(
             deviceId = DeviceIdProvider.getDeviceId(context),
@@ -195,20 +204,23 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
 
     val activeTopicCount = uiState.topicCards.count { it.status == "active" }
     val savedCount = uiState.favoriteIds.size
+    val analysisCount = uiState.topicCards.count { (it.importanceLevel ?: -1) >= 3 }
     val currentPageTitle = when (selectedTab) {
         1 -> "タイムライン"
         2 -> "保存済み"
+        3 -> "分析"
         else -> "ホーム"
     }
     val currentPageSubtitle = when (selectedTab) {
         1 -> "日付ごとにカードをたどって確認"
         2 -> if (savedCount > 0) "$savedCount 件のカードを保存中" else "あとで見返すカードをまとめて確認"
+        3 -> if (analysisCount > 0) "$analysisCount 件の注目トピックを分析中" else "重要度と抽出結果の確認"
         else -> if (activeTopicCount > 0) "$activeTopicCount 件のライブトピックを監視中" else "会話カードとトピックを一覧で確認"
     }
     val ambientStatusLabel = when {
-        ambientState.isRecording -> "録音中"
-        ambientEnabled -> "待機中"
-        else -> "オフ"
+        ambientState.isRecording -> "Recording"
+        ambientEnabled -> "Listening"
+        else -> "Off"
     }
 
     val handleAmbientToggle: (Boolean) -> Unit = { enabled ->
@@ -246,6 +258,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 selectedTab = selectedTab,
                 activeTopicCount = activeTopicCount,
                 savedCount = savedCount,
+                analysisCount = analysisCount,
                 ambientEnabled = ambientEnabled,
                 isAmbientLive = ambientState.isRecording || ambientState.speech,
                 onToggleSidebar = { isSidebarCollapsed = !isSidebarCollapsed },
@@ -304,10 +317,29 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
                                 onRetryTranscribe = { id -> viewModel.retryTranscribeSession(context, id) }
                             )
-                            else -> VoiceMemoScreen(
+                            2 -> VoiceMemoScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 uiState = uiState,
                                 showFavoritesOnly = true,
+                                ambientEnabled = ambientEnabled,
+                                onDeleteCard = { id -> viewModel.deleteCard(context, id) },
+                                onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
+                                onSelectCard = { id -> viewModel.selectCard(id) },
+                                onDismissDetail = { viewModel.clearSelection() },
+                                onRefresh = { viewModel.refreshSessions(context) },
+                                onLoadMore = { viewModel.loadMoreSessions(context) },
+                                onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
+                                onRetryTranscribe = { id -> viewModel.retryTranscribeSession(context, id) }
+                            )
+                            3 -> AnalysisScreen(
+                                modifier = Modifier.fillMaxSize(),
+                                uiState = uiState,
+                                onRefresh = { viewModel.refreshFacts(context) }
+                            )
+                            else -> VoiceMemoScreen(
+                                modifier = Modifier.fillMaxSize(),
+                                uiState = uiState,
+                                showFavoritesOnly = false,
                                 ambientEnabled = ambientEnabled,
                                 onDeleteCard = { id -> viewModel.deleteCard(context, id) },
                                 onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
@@ -332,6 +364,7 @@ private fun ZeroTouchSidebar(
     selectedTab: Int,
     activeTopicCount: Int,
     savedCount: Int,
+    analysisCount: Int,
     ambientEnabled: Boolean,
     isAmbientLive: Boolean,
     onToggleSidebar: () -> Unit,
@@ -398,11 +431,11 @@ private fun ZeroTouchSidebar(
                         Text(
                             text = "ZeroTouch",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (ambientEnabled) "会話ワークスペース稼働中" else "会話ワークスペース停止中",
+                            text = if (ambientEnabled) "Workspace active" else "Workspace paused",
                             style = MaterialTheme.typography.bodySmall,
                             color = ZtCaption
                         )
@@ -495,6 +528,27 @@ private fun ZeroTouchSidebar(
                 },
                 onClick = { onSelectTab(2) }
             )
+            SidebarDestination(
+                label = "分析",
+                selected = selectedTab == 3,
+                isCollapsed = isCollapsed,
+                badgeCount = analysisCount,
+                selectedIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.Analytics,
+                        contentDescription = "分析",
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Analytics,
+                        contentDescription = "分析",
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                onClick = { onSelectTab(3) }
+            )
 
             Spacer(modifier = Modifier.weight(1f))
             HorizontalDivider(
@@ -581,13 +635,13 @@ private fun SidebarDestination(
                 if (badgeCount > 0) {
                     Surface(
                         shape = RoundedCornerShape(999.dp),
-                        color = if (selected) ZtPrimaryContainer else ZtSurfaceVariant
+                        color = ZtSurfaceVariant
                     ) {
                         Text(
                             text = badgeCount.toString(),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            color = ZtOnSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                         )
                     }
                 }
@@ -632,21 +686,21 @@ private fun WorkspaceHeader(
                 }
                 Surface(
                     shape = RoundedCornerShape(999.dp),
-                    color = if (ambientEnabled) ZtPrimaryContainer else ZtSurfaceVariant
+                    color = ZtSurfaceVariant
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         AmbientDot(
                             isEnabled = isAmbientLive || ambientEnabled,
                             isRecording = isAmbientLive
                         )
-                        Spacer(Modifier.width(8.dp))
                         Text(
                             text = ambientStatusLabel,
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = ZtOnSurfaceVariant
                         )
                     }
                 }
@@ -666,7 +720,7 @@ private fun AmbientToggleSwitch(
     enabled: Boolean,
     onToggle: (Boolean) -> Unit
 ) {
-    val trackColor = if (enabled) ZtSuccess else ZtOutlineVariant
+    val trackColor = if (enabled) MaterialTheme.colorScheme.onSurface else ZtOutlineVariant
     val alignment = if (enabled) Alignment.CenterEnd else Alignment.CenterStart
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -675,14 +729,14 @@ private fun AmbientToggleSwitch(
     ) {
         Box(
             modifier = Modifier
-                .padding(horizontal = 6.dp, vertical = 4.dp)
-                .size(width = 46.dp, height = 24.dp),
+                .padding(horizontal = 4.dp, vertical = 3.dp)
+                .size(width = 44.dp, height = 22.dp),
             contentAlignment = alignment
         ) {
             Surface(
                 shape = CircleShape,
                 color = Color.White,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(16.dp)
             ) {}
         }
     }

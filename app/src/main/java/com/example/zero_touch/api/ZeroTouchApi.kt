@@ -91,6 +91,27 @@ data class TopicListResponse(
     val count: Int
 )
 
+data class FactSummary(
+    val id: String,
+    val topic_id: String,
+    val device_id: String,
+    val fact_text: String,
+    val importance_level: Int? = null,
+    val entities: List<Map<String, Any>>? = null,
+    val categories: List<String> = emptyList(),
+    val intents: List<String> = emptyList(),
+    val ttl_type: String? = null,
+    val expires_at: String? = null,
+    val source_cards: List<String> = emptyList(),
+    val created_at: String? = null,
+    val updated_at: String? = null
+)
+
+data class FactListResponse(
+    val facts: List<FactSummary>,
+    val count: Int
+)
+
 data class TopicBackfillResult(
     val target: Int = 0,
     val processed: Int = 0,
@@ -204,6 +225,32 @@ class ZeroTouchApi(
             throw Exception("Get session failed: ${response.code}")
         }
         gson.fromJson(body, SessionDetail::class.java)
+    }
+
+    suspend fun listFacts(
+        deviceId: String? = null,
+        topicId: String? = null,
+        limit: Int = 200,
+        offset: Int = 0
+    ): FactListResponse = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append("$baseUrl/zerotouch/api/facts?limit=$limit&offset=$offset")
+            if (!deviceId.isNullOrBlank()) append("&device_id=$deviceId")
+            if (!topicId.isNullOrBlank()) append("&topic_id=$topicId")
+        }
+        Log.d(TAG, "GET $url")
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "GET $url failed: ${response.code} ${response.message} body=$body")
+            throw Exception("List facts failed: ${response.code}")
+        }
+        gson.fromJson(body, FactListResponse::class.java)
     }
 
     suspend fun deleteSession(sessionId: String): Map<String, Any> = withContext(Dispatchers.IO) {

@@ -26,6 +26,7 @@ from services.topic_manager_process2 import (
     finalize_active_topic_for_device,
     resolve_device_llm_service,
 )
+from services.topic_annotator import annotate_topic
 from services.topic_manager import backfill_ungrouped_sessions, reconcile_topics
 
 
@@ -127,6 +128,10 @@ class TopicEvaluatePendingRequest(BaseModel):
 class DeviceSettingsRequest(BaseModel):
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
+
+
+class DistillAnnotateRequest(BaseModel):
+    force: bool = False
 
 
 # --- Health ---
@@ -488,6 +493,38 @@ def evaluate_pending_topics(body: TopicEvaluatePendingRequest):
     return {"status": "ok", "result": result}
 
 
+# --- Distillation ---
+
+@app.post("/api/distill/annotate/{topic_id}")
+def distill_annotate(topic_id: str, body: DistillAnnotateRequest = None):
+    if body is None:
+        body = DistillAnnotateRequest()
+
+    device_row = (
+        supabase.table(TOPIC_TABLE)
+        .select("device_id")
+        .eq("id", topic_id)
+        .single()
+        .execute()
+        .data
+        or {}
+    )
+    device_id = device_row.get("device_id")
+    llm_service = resolve_device_llm_service(
+        supabase=supabase,
+        device_id=device_id,
+        fallback_llm_service=_get_topic_llm_service(),
+    )
+
+    result = annotate_topic(
+        supabase=supabase,
+        topic_id=topic_id,
+        llm_service=llm_service,
+        force=body.force,
+    )
+    return {"status": "ok", "result": result}
+
+
 @app.get("/api/device-settings/{device_id}")
 def get_device_settings(device_id: str):
     rows = (
@@ -503,6 +540,45 @@ def get_device_settings(device_id: str):
     if not row:
         return {"device_id": device_id, "llm_provider": None, "llm_model": None}
     return row
+
+
+# --- Facts ---
+
+@app.get("/api/facts")
+def list_facts(
+    device_id: Optional[str] = None,
+    topic_id: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    query = (
+        supabase.table("zerotouch_facts")
+        .select("*")
+        .order("created_at", desc=True)
+        .range(offset, offset + limit - 1)
+    )
+    if device_id:
+        query = query.eq("device_id", device_id)
+    if topic_id:
+        query = query.eq("topic_id", topic_id)
+
+    facts = query.execute().data or []
+    return {"facts": facts, "count": len(facts)}
+
+
+@app.get("/api/facts/{fact_id}")
+def get_fact(fact_id: str):
+    fact = (
+        supabase.table("zerotouch_facts")
+        .select("*")
+        .eq("id", fact_id)
+        .single()
+        .execute()
+        .data
+    )
+    if not fact:
+        raise HTTPException(status_code=404, detail="Fact not found")
+    return {"fact": fact}
 
 
 @app.post("/api/device-settings/{device_id}")

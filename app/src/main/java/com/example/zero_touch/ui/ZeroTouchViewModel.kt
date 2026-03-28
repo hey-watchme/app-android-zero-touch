@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.zero_touch.api.DeviceIdProvider
+import com.example.zero_touch.api.FactSummary
 import com.example.zero_touch.api.SessionListResponse
 import com.example.zero_touch.api.SessionSummary
 import com.example.zero_touch.api.TopicSummary
@@ -78,6 +79,7 @@ data class ZeroTouchUiState(
     val sessions: List<SessionSummary> = emptyList(),
     val feedCards: List<TranscriptCard> = emptyList(),
     val topicCards: List<TopicFeedCard> = emptyList(),
+    val factsByTopic: Map<String, List<FactSummary>> = emptyMap(),
     val isUploading: Boolean = false,
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
@@ -111,6 +113,7 @@ class ZeroTouchViewModel : ViewModel() {
     private var currentTopicOffset = 0
     private var hasMoreTopics = true
     private val optimisticTranscribing = mutableMapOf<String, Long>()
+    private var isLoadingFacts = false
 
     fun loadSessions(context: Context) {
         viewModelScope.launch {
@@ -200,6 +203,42 @@ class ZeroTouchViewModel : ViewModel() {
                 )
             } finally {
                 isRefreshing = false
+            }
+        }
+    }
+
+    fun loadFacts(context: Context, force: Boolean = false) {
+        if (isLoadingFacts && !force) return
+        isLoadingFacts = true
+        viewModelScope.launch {
+            try {
+                val deviceId = DeviceIdProvider.getDeviceId(context)
+                val response = api.listFacts(deviceId = deviceId)
+                val grouped = response.facts.groupBy { it.topic_id }
+                _uiState.value = _uiState.value.copy(factsByTopic = grouped)
+            } catch (e: Exception) {
+                Log.e(TAG, "loadFacts failed", e)
+            } finally {
+                isLoadingFacts = false
+            }
+        }
+    }
+
+    fun refreshFacts(context: Context) {
+        if (isLoadingFacts) return
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
+        viewModelScope.launch {
+            try {
+                val deviceId = DeviceIdProvider.getDeviceId(context)
+                val response = api.listFacts(deviceId = deviceId)
+                val grouped = response.facts.groupBy { it.topic_id }
+                _uiState.value = _uiState.value.copy(
+                    factsByTopic = grouped,
+                    isRefreshing = false
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "refreshFacts failed", e)
+                _uiState.value = _uiState.value.copy(isRefreshing = false)
             }
         }
     }
