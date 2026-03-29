@@ -45,6 +45,18 @@ Android 側の Topic / Card を Web で閲覧できる読み取り専用 MVP を
 > 重要: ZeroTouch は WatchMe のインフラ（同一 Supabase / S3 / EC2）を「間借り」していますが、  
 > **DB は `zerotouch_sessions`（Card）と `zerotouch_conversation_topics`（Topic）を中心に使う POC** です。WatchMe 本家の既存テーブル/パイプラインには触れません。
 
+## 所有モデル
+
+ZeroTouch は今後 `account -> workspace -> device` の多層モデルで運用します。
+
+- `account`: Google サインイン等で識別されるユーザー
+- `workspace`: 家庭、店舗、検証環境などの論理単位
+- `device`: Android 本体、または Amical などを投入する仮想デバイス
+- `context profile`: その workspace の利用者、現場、目的、補足資料、語彙
+
+既存パイプラインは引き続き `device_id` で動作しますが、`workspace_id` を併せて持つことで、
+複数デバイスや仮想デバイスを 1 つのナレッジ単位に束ねられるようにします。
+
 ## 対象タブレット
 
 - 端末: Xiaomi Redmi Pad SE
@@ -112,6 +124,10 @@ Android App (Card-first Display)
 | `/api/topics/evaluate-pending` | POST | active topic の finalize トリガー（エンドポイント名は旧名を踏襲） |
 | `/api/device-settings/{device_id}` | GET | デバイス設定（LLM）取得 |
 | `/api/device-settings/{device_id}` | POST | デバイス設定（LLM）更新 |
+| `/api/accounts` | GET / POST | アカウント一覧 / 作成 |
+| `/api/workspaces` | GET / POST | ワークスペース一覧 / 作成 |
+| `/api/devices` | GET / POST | デバイス一覧 / 登録 |
+| `/api/context-profiles/{workspace_id}` | GET / POST | ワークスペースの文脈プロファイル取得 / 更新 |
 | `/api/sessions/{id}` | GET | セッション詳細取得 |
 | `/api/sessions` | GET | セッション一覧 |
 | `/api/models` | GET | 利用可能なLLMモデル一覧 |
@@ -122,6 +138,11 @@ Android App (Card-first Display)
 ### データベース
 
 - テーブル:
+  - `zerotouch_accounts`（ユーザーアカウント）
+  - `zerotouch_workspaces`（家庭 / 店舗 / 検証環境）
+  - `zerotouch_workspace_members`（workspace メンバー）
+  - `zerotouch_devices`（物理デバイス / 仮想デバイス）
+  - `zerotouch_context_profiles`（workspace の前提情報）
   - `zerotouch_sessions`（Card / 発言単位）
   - `zerotouch_conversation_topics`（Topic / Card を束ねる会話区間）
   - `zerotouch_topic_evaluation_runs`（旧 Process 2 の評価バッチ管理。整理対象）
@@ -269,6 +290,7 @@ Supabase SQL Editorで以下を順に実行:
 6. `backend/migrations/006_live_topic_container_constraints.sql`（1 device 1 active topic 制約 + topic description/boundary metadata）
 7. `backend/migrations/007_add_topic_scoring.sql`
 8. `backend/migrations/008_create_zerotouch_facts.sql`
+9. `backend/migrations/009_add_workspace_ownership_model.sql`
 
 ### Android
 

@@ -19,6 +19,7 @@ from services.llm_providers import LLMFactory, get_current_llm
 from services.prompts import build_topic_batch_group_prompt, build_topic_finalize_prompt
 from services.topic_scorer import score_topic
 from services.topic_annotator import annotate_topic
+from services.workspace_registry import resolve_workspace_id_for_device
 
 
 SESSION_TABLE = "zerotouch_sessions"
@@ -42,7 +43,7 @@ GROUPING_METHOD_LIVE_ACTIVE_TOPIC = "live_active_topic"
 
 DEFAULT_IDLE_SECONDS = 30
 VALID_BOUNDARY_REASONS = {"idle_timeout", "ambient_stopped", "manual", "legacy_repair"}
-OPTIONAL_TOPIC_COLUMNS = {"live_description", "final_description", "boundary_reason"}
+OPTIONAL_TOPIC_COLUMNS = {"live_description", "final_description", "boundary_reason", "workspace_id"}
 
 
 def _now_utc() -> datetime:
@@ -245,10 +246,12 @@ def _create_active_topic(
     device_id: str,
     event_ts: datetime,
     transcript: str,
+    workspace_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     now_iso = _iso_now()
     payload = {
         "device_id": device_id,
+        "workspace_id": workspace_id,
         "topic_status": "active",
         "start_at": event_ts.isoformat(),
         "end_at": event_ts.isoformat(),
@@ -310,7 +313,7 @@ def assign_session_to_active_topic(
 ) -> Dict[str, Any]:
     response = (
         supabase.table(SESSION_TABLE)
-        .select("id, device_id, status, topic_id, transcription, recorded_at, created_at")
+        .select("id, device_id, workspace_id, status, topic_id, transcription, recorded_at, created_at")
         .eq("id", session_id)
         .single()
         .execute()
@@ -342,6 +345,10 @@ def assign_session_to_active_topic(
 
     transcript = (session.get("transcription") or "").strip()
     event_ts = _parse_timestamp(session.get("recorded_at") or session.get("created_at"))
+    workspace_id = session.get("workspace_id") or resolve_workspace_id_for_device(
+        supabase=supabase,
+        device_id=device_id,
+    )
     topic = _get_active_topic(supabase=supabase, device_id=device_id)
     created_new_topic = False
     if not topic:
@@ -350,6 +357,7 @@ def assign_session_to_active_topic(
             device_id=device_id,
             event_ts=event_ts,
             transcript=transcript,
+            workspace_id=workspace_id,
         )
         created_new_topic = True
 

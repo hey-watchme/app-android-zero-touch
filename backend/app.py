@@ -14,7 +14,7 @@ import boto3
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from supabase import create_client, Client
 
 from services.llm_providers import LLMFactory, get_current_llm
@@ -28,6 +28,7 @@ from services.topic_manager_process2 import (
 )
 from services.topic_annotator import annotate_topic
 from services.topic_manager import backfill_ungrouped_sessions, reconcile_topics
+from services.workspace_registry import resolve_workspace_id_for_device
 
 
 # --- Configuration ---
@@ -38,6 +39,13 @@ S3_BUCKET = os.getenv("S3_BUCKET", "watchme-vault")
 AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-2")
 TABLE = "zerotouch_sessions"
 TOPIC_TABLE = os.getenv("TOPIC_TABLE", "zerotouch_conversation_topics")
+ACCOUNT_TABLE = "zerotouch_accounts"
+WORKSPACE_TABLE = "zerotouch_workspaces"
+WORKSPACE_MEMBER_TABLE = "zerotouch_workspace_members"
+DEVICE_TABLE = "zerotouch_devices"
+CONTEXT_PROFILE_TABLE = "zerotouch_context_profiles"
+FACT_TABLE = "zerotouch_facts"
+DEVICE_SETTINGS_TABLE = "zerotouch_device_settings"
 
 
 # --- Globals ---
@@ -134,6 +142,45 @@ class DistillAnnotateRequest(BaseModel):
     force: bool = False
 
 
+class AccountCreateRequest(BaseModel):
+    display_name: str
+    email: Optional[str] = None
+    external_auth_provider: Optional[str] = None
+    external_auth_subject: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+
+class WorkspaceCreateRequest(BaseModel):
+    name: str
+    owner_account_id: Optional[str] = None
+    slug: Optional[str] = None
+    description: Optional[str] = None
+
+
+class DeviceCreateRequest(BaseModel):
+    workspace_id: str
+    device_id: str
+    display_name: str
+    device_kind: str = "android_tablet"
+    source_type: str = "android_ambient"
+    platform: Optional[str] = None
+    context_note: Optional[str] = None
+    is_virtual: bool = False
+    is_active: bool = True
+
+
+class ContextProfileRequest(BaseModel):
+    profile_name: Optional[str] = None
+    owner_name: Optional[str] = None
+    role_title: Optional[str] = None
+    environment: Optional[str] = None
+    usage_scenario: Optional[str] = None
+    goal: Optional[str] = None
+    reference_materials: Optional[List[Dict[str, Any]]] = None
+    glossary: Optional[List[Dict[str, Any]]] = None
+    prompt_preamble: Optional[str] = None
+
+
 # --- Health ---
 
 @app.get("/health")
@@ -196,12 +243,61 @@ def _cleanup_topic_after_session_delete(topic_id: Optional[str]):
     return {"topic_deleted": False, "topic_updated": True}
 
 
+def _error_mentions_missing_column(error: Exception, column: str) -> bool:
+    message = str(error).lower()
+    column_name = column.lower()
+    return column_name in message and (
+        "column" in message
+        or "schema cache" in message
+        or "could not find" in message
+    )
+
+
+def _insert_session_compat(payload: Dict[str, Any]) -> None:
+    candidate = dict(payload)
+    while True:
+        try:
+            supabase.table(TABLE).insert(candidate).execute()
+            return
+        except Exception as error:
+            if "workspace_id" in candidate and _error_mentions_missing_column(error, "workspace_id"):
+                candidate.pop("workspace_id", None)
+                continue
+            raise
+
+
+def _resolve_workspace_id(
+    device_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+) -> Optional[str]:
+    explicit = (workspace_id or "").strip()
+    if explicit:
+        return explicit
+    identifier = (device_id or "").strip()
+    if not identifier:
+        return None
+    return resolve_workspace_id_for_device(supabase=supabase, device_id=identifier)
+
+
+def _workspace_ids_for_account(account_id: str) -> List[str]:
+    rows = (
+        supabase.table(WORKSPACE_MEMBER_TABLE)
+        .select("workspace_id")
+        .eq("account_id", account_id)
+        .execute()
+        .data
+        or []
+    )
+    return [str(row.get("workspace_id")).strip() for row in rows if row.get("workspace_id")]
+
+
 # --- Upload ---
 
 @app.post("/api/upload")
 async def upload_audio(
     file: UploadFile = File(...),
     device_id: str = Form(...),
+    workspace_id: Optional[str] = Form(None),
     recorded_at: Optional[str] = Form(None)
 ):
     """Upload audio file to S3 and create session."""
@@ -224,16 +320,18 @@ async def upload_audio(
         )
 
         # Create session in DB
+        resolved_workspace_id = _resolve_workspace_id(device_id=device_id, workspace_id=workspace_id)
         session_data = {
             "id": session_id,
             "device_id": device_id,
+            "workspace_id": resolved_workspace_id,
             "s3_audio_path": s3_key,
             "status": "uploaded",
             "recorded_at": recorded_at or now.isoformat(),
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
         }
-        supabase.table(TABLE).insert(session_data).execute()
+        _insert_session_compat(session_data)
 
         return {"session_id": session_id, "s3_path": s3_key, "status": "uploaded"}
 
@@ -355,6 +453,7 @@ def generate_cards(session_id: str, body: GenerateCardsRequest = None):
 @app.get("/api/topics")
 def list_topics(
     device_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
@@ -369,6 +468,8 @@ def list_topics(
 
     if device_id:
         query = query.eq("device_id", device_id)
+    if workspace_id:
+        query = query.eq("workspace_id", workspace_id)
     if status:
         query = query.eq("topic_status", status)
 
@@ -525,10 +626,174 @@ def distill_annotate(topic_id: str, body: DistillAnnotateRequest = None):
     return {"status": "ok", "result": result}
 
 
+# --- Ownership ---
+
+@app.get("/api/accounts")
+def list_accounts():
+    rows = (
+        supabase.table(ACCOUNT_TABLE)
+        .select("*")
+        .order("created_at", desc=False)
+        .execute()
+        .data
+        or []
+    )
+    return {"accounts": rows, "count": len(rows)}
+
+
+@app.post("/api/accounts")
+def create_account(body: AccountCreateRequest):
+    payload = {
+        "display_name": body.display_name.strip(),
+        "email": (body.email or "").strip() or None,
+        "external_auth_provider": (body.external_auth_provider or "").strip() or None,
+        "external_auth_subject": (body.external_auth_subject or "").strip() or None,
+        "avatar_url": (body.avatar_url or "").strip() or None,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+    }
+    rows = supabase.table(ACCOUNT_TABLE).insert(payload).execute().data or []
+    return {"status": "ok", "account": rows[0] if rows else payload}
+
+
+@app.get("/api/workspaces")
+def list_workspaces(account_id: Optional[str] = None):
+    if account_id:
+        workspace_ids = _workspace_ids_for_account(account_id)
+        if not workspace_ids:
+            return {"workspaces": [], "count": 0}
+        rows = (
+            supabase.table(WORKSPACE_TABLE)
+            .select("*")
+            .in_("id", workspace_ids)
+            .order("created_at", desc=False)
+            .execute()
+            .data
+            or []
+        )
+        return {"workspaces": rows, "count": len(rows)}
+
+    rows = (
+        supabase.table(WORKSPACE_TABLE)
+        .select("*")
+        .order("created_at", desc=False)
+        .execute()
+        .data
+        or []
+    )
+    return {"workspaces": rows, "count": len(rows)}
+
+
+@app.post("/api/workspaces")
+def create_workspace(body: WorkspaceCreateRequest):
+    now_iso = datetime.now().isoformat()
+    payload = {
+        "owner_account_id": body.owner_account_id,
+        "name": body.name.strip(),
+        "slug": (body.slug or "").strip() or None,
+        "description": (body.description or "").strip() or None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    rows = supabase.table(WORKSPACE_TABLE).insert(payload).execute().data or []
+    workspace = rows[0] if rows else None
+    if not workspace:
+        raise HTTPException(status_code=500, detail="Workspace creation failed")
+
+    if body.owner_account_id:
+        member_payload = {
+            "workspace_id": workspace["id"],
+            "account_id": body.owner_account_id,
+            "role": "owner",
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        supabase.table(WORKSPACE_MEMBER_TABLE).upsert(
+            member_payload,
+            on_conflict="workspace_id,account_id",
+        ).execute()
+
+    return {"status": "ok", "workspace": workspace}
+
+
+@app.get("/api/devices")
+def list_devices(
+    workspace_id: Optional[str] = None,
+    account_id: Optional[str] = None,
+):
+    query = supabase.table(DEVICE_TABLE).select("*").order("created_at", desc=False)
+    if workspace_id:
+        query = query.eq("workspace_id", workspace_id)
+    elif account_id:
+        workspace_ids = _workspace_ids_for_account(account_id)
+        if not workspace_ids:
+            return {"devices": [], "count": 0}
+        query = query.in_("workspace_id", workspace_ids)
+
+    rows = query.execute().data or []
+    return {"devices": rows, "count": len(rows)}
+
+
+@app.post("/api/devices")
+def create_device(body: DeviceCreateRequest):
+    payload = {
+        "workspace_id": body.workspace_id,
+        "device_id": body.device_id.strip(),
+        "display_name": body.display_name.strip(),
+        "device_kind": body.device_kind,
+        "source_type": body.source_type,
+        "platform": (body.platform or "").strip() or None,
+        "context_note": (body.context_note or "").strip() or None,
+        "is_virtual": body.is_virtual,
+        "is_active": body.is_active,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+    }
+    rows = supabase.table(DEVICE_TABLE).insert(payload).execute().data or []
+    return {"status": "ok", "device": rows[0] if rows else payload}
+
+
+@app.get("/api/context-profiles/{workspace_id}")
+def get_context_profile(workspace_id: str):
+    rows = (
+        supabase.table(CONTEXT_PROFILE_TABLE)
+        .select("*")
+        .eq("workspace_id", workspace_id)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    profile = rows[0] if rows else None
+    if not profile:
+        return {"workspace_id": workspace_id, "profile": None}
+    return {"workspace_id": workspace_id, "profile": profile}
+
+
+@app.post("/api/context-profiles/{workspace_id}")
+def upsert_context_profile(workspace_id: str, body: ContextProfileRequest):
+    now_iso = datetime.now().isoformat()
+    payload = {
+        "workspace_id": workspace_id,
+        "profile_name": (body.profile_name or "").strip() or None,
+        "owner_name": (body.owner_name or "").strip() or None,
+        "role_title": (body.role_title or "").strip() or None,
+        "environment": (body.environment or "").strip() or None,
+        "usage_scenario": (body.usage_scenario or "").strip() or None,
+        "goal": (body.goal or "").strip() or None,
+        "reference_materials": body.reference_materials or [],
+        "glossary": body.glossary or [],
+        "prompt_preamble": (body.prompt_preamble or "").strip() or None,
+        "updated_at": now_iso,
+    }
+    rows = supabase.table(CONTEXT_PROFILE_TABLE).upsert(payload).execute().data or []
+    return {"status": "ok", "profile": rows[0] if rows else payload}
+
+
 @app.get("/api/device-settings/{device_id}")
 def get_device_settings(device_id: str):
     rows = (
-        supabase.table("zerotouch_device_settings")
+        supabase.table(DEVICE_SETTINGS_TABLE)
         .select("*")
         .eq("device_id", device_id)
         .limit(1)
@@ -547,18 +812,21 @@ def get_device_settings(device_id: str):
 @app.get("/api/facts")
 def list_facts(
     device_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
     topic_id: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ):
     query = (
-        supabase.table("zerotouch_facts")
+        supabase.table(FACT_TABLE)
         .select("*")
         .order("created_at", desc=True)
         .range(offset, offset + limit - 1)
     )
     if device_id:
         query = query.eq("device_id", device_id)
+    if workspace_id:
+        query = query.eq("workspace_id", workspace_id)
     if topic_id:
         query = query.eq("topic_id", topic_id)
 
@@ -569,7 +837,7 @@ def list_facts(
 @app.get("/api/facts/{fact_id}")
 def get_fact(fact_id: str):
     fact = (
-        supabase.table("zerotouch_facts")
+        supabase.table(FACT_TABLE)
         .select("*")
         .eq("id", fact_id)
         .single()
@@ -585,6 +853,7 @@ def get_fact(fact_id: str):
 def update_device_settings(device_id: str, body: DeviceSettingsRequest):
     payload: Dict[str, Any] = {
         "device_id": device_id,
+        "workspace_id": _resolve_workspace_id(device_id=device_id),
         "updated_at": datetime.now().isoformat(),
     }
     if body.llm_provider is not None:
@@ -593,7 +862,7 @@ def update_device_settings(device_id: str, body: DeviceSettingsRequest):
         payload["llm_model"] = body.llm_model
 
     row = (
-        supabase.table("zerotouch_device_settings")
+        supabase.table(DEVICE_SETTINGS_TABLE)
         .upsert(payload)
         .execute()
         .data
@@ -664,18 +933,21 @@ def delete_session(session_id: str):
 @app.get("/api/sessions")
 def list_sessions(
     device_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 20,
     offset: int = 0
 ):
     """List sessions with optional filters."""
     query = supabase.table(TABLE)\
-        .select("id, device_id, status, duration_seconds, model_used, error_message, recorded_at, created_at, updated_at")\
+        .select("id, device_id, workspace_id, status, duration_seconds, model_used, error_message, recorded_at, created_at, updated_at")\
         .order("created_at", desc=True)\
         .range(offset, offset + limit - 1)
 
     if device_id:
         query = query.eq("device_id", device_id)
+    if workspace_id:
+        query = query.eq("workspace_id", workspace_id)
     if status:
         query = query.eq("status", status)
 

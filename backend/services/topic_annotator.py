@@ -21,6 +21,7 @@ TOPIC_TABLE = "zerotouch_conversation_topics"
 FACT_TABLE = "zerotouch_facts"
 
 ANNOTATION_COLUMNS = {"distillation_status"}
+FACT_OPTIONAL_COLUMNS = {"workspace_id"}
 
 
 def _iso_now_local() -> str:
@@ -84,6 +85,27 @@ def _update_topic_status_compat(
                 return
 
 
+def _insert_facts_compat(
+    supabase: Client,
+    fact_rows: List[Dict[str, Any]],
+) -> None:
+    candidate = [dict(row) for row in fact_rows]
+    while True:
+        try:
+            supabase.table(FACT_TABLE).insert(candidate).execute()
+            return
+        except Exception as error:
+            missing = [
+                col for col in FACT_OPTIONAL_COLUMNS
+                if any(col in row for row in candidate) and _error_mentions_missing_column(error, col)
+            ]
+            if not missing:
+                raise
+            for row in candidate:
+                for col in missing:
+                    row.pop(col, None)
+
+
 def _collect_topic_utterances(supabase: Client, topic_id: str) -> List[Dict[str, Any]]:
     rows = (
         supabase.table(SESSION_TABLE)
@@ -134,7 +156,7 @@ def annotate_topic(
     topic = (
         supabase.table(TOPIC_TABLE)
         .select(
-            "id, device_id, final_title, final_summary, final_description, "
+            "id, device_id, workspace_id, final_title, final_summary, final_description, "
             "importance_level, distillation_status"
         )
         .eq("id", topic_id)
@@ -208,6 +230,7 @@ def annotate_topic(
         row = {
             "topic_id": topic_id,
             "device_id": topic.get("device_id"),
+            "workspace_id": topic.get("workspace_id"),
             "fact_text": fact_text[:1000],
             "importance_level": importance_level,
             "entities": fact.get("entities") if isinstance(fact.get("entities"), list) else [],
@@ -223,7 +246,7 @@ def annotate_topic(
         fact_rows.append(row)
 
     if fact_rows:
-        supabase.table(FACT_TABLE).insert(fact_rows).execute()
+        _insert_facts_compat(supabase=supabase, fact_rows=fact_rows)
 
     _update_topic_status_compat(
         supabase,
