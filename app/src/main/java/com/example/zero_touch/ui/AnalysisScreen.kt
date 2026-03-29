@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.zero_touch.api.FactSummary
 import com.example.zero_touch.ui.theme.ZtCaption
 import com.example.zero_touch.ui.theme.ZtImportanceLv0
 import com.example.zero_touch.ui.theme.ZtImportanceLv1
@@ -42,11 +43,30 @@ import com.example.zero_touch.ui.theme.ZtTopicSurface
 fun AnalysisScreen(
     modifier: Modifier = Modifier,
     uiState: ZeroTouchUiState,
+    selectedCategory: String?,
     onRefresh: () -> Unit
 ) {
     val topics = uiState.topicCards.sortedByDescending { it.updatedAtEpochMs }
     val scoredCount = topics.count { it.importanceLevel != null }
     val highValueCount = topics.count { (it.importanceLevel ?: -1) >= 3 }
+    val rawFactsByTopic = uiState.factsByTopic
+    val filteredFactsByTopic = if (selectedCategory.isNullOrBlank()) {
+        rawFactsByTopic
+    } else {
+        rawFactsByTopic.mapValues { (_, facts) ->
+            facts.filter { fact -> fact.categories.any { it == selectedCategory } }
+        }.filterValues { it.isNotEmpty() }
+    }
+    val filteredTopics = if (selectedCategory.isNullOrBlank()) {
+        topics
+    } else {
+        topics.filter { filteredFactsByTopic.containsKey(it.id) }
+    }
+    val selectedFacts = if (selectedCategory.isNullOrBlank()) {
+        emptyList()
+    } else {
+        filteredFactsByTopic.values.flatten()
+    }
 
     PullToRefreshBox(
         isRefreshing = uiState.isRefreshing,
@@ -65,15 +85,24 @@ fun AnalysisScreen(
                 highValueCount = highValueCount
             )
 
-            if (topics.isEmpty() && !uiState.isLoading) {
+            if (!selectedCategory.isNullOrBlank()) {
+                CategorySummaryCard(
+                    category = selectedCategory,
+                    factCount = selectedFacts.size,
+                    topicCount = filteredFactsByTopic.keys.size,
+                    lastUpdated = selectedFacts.maxOfOrNull { it.updated_at ?: it.created_at }
+                )
+            }
+
+            if (filteredTopics.isEmpty() && !uiState.isLoading) {
                 EmptyAnalysisState()
             } else {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 12.dp)
                 ) {
-                    items(topics, key = { it.id }) { topic ->
-                        val facts = uiState.factsByTopic[topic.id].orEmpty()
+                    items(filteredTopics, key = { it.id }) { topic ->
+                        val facts = filteredFactsByTopic[topic.id].orEmpty()
                         AnalysisTopicCard(topic = topic, facts = facts)
                     }
                 }
@@ -145,7 +174,7 @@ private fun HeaderMetric(label: String, value: String) {
 }
 
 @Composable
-private fun AnalysisTopicCard(topic: TopicFeedCard, facts: List<com.example.zero_touch.api.FactSummary>) {
+private fun AnalysisTopicCard(topic: TopicFeedCard, facts: List<FactSummary>) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -240,6 +269,48 @@ private fun AnalysisTopicCard(topic: TopicFeedCard, facts: List<com.example.zero
             }
         }
     }
+}
+
+@Composable
+private fun CategorySummaryCard(
+    category: String,
+    factCount: Int,
+    topicCount: Int,
+    lastUpdated: String?
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, ZtOutlineVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = category,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                HeaderMetric(label = "Facts", value = factCount.toString())
+                HeaderMetric(label = "Topics", value = topicCount.toString())
+            }
+            Text(
+                text = "最終更新: ${formatIsoDate(lastUpdated)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = ZtCaption
+            )
+        }
+    }
+}
+
+private fun formatIsoDate(value: String?): String {
+    if (value.isNullOrBlank()) return "-"
+    val index = value.indexOf("T")
+    return if (index > 0) value.substring(0, index) else value
 }
 
 @Composable

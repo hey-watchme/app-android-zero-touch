@@ -107,6 +107,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     var isSidebarCollapsed by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
     var ambientEnabled by remember { mutableStateOf(AmbientPreferences.isAmbientEnabled(context)) }
     var hasRecordPermission by remember {
         mutableStateOf(
@@ -205,6 +206,18 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     val activeTopicCount = uiState.topicCards.count { it.status == "active" }
     val savedCount = uiState.favoriteIds.size
     val analysisCount = uiState.topicCards.count { (it.importanceLevel ?: -1) >= 3 }
+    val allFacts = uiState.factsByTopic.values.flatten()
+    val totalFactCount = allFacts.size
+    val categoryCounts = allFacts
+        .flatMap { fact ->
+            val categories = fact.categories.map { it.trim() }.filter { it.isNotEmpty() }
+            if (categories.isEmpty()) listOf("未分類") else categories
+        }
+        .groupingBy { it }
+        .eachCount()
+    val categoryEntries = categoryCounts.entries
+        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+        .map { CategoryEntry(name = it.key, count = it.value) }
     val currentPageTitle = when (selectedTab) {
         1 -> "タイムライン"
         2 -> "保存済み"
@@ -221,6 +234,12 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         ambientState.isRecording -> "Recording"
         ambientEnabled -> "Listening"
         else -> "Off"
+    }
+
+    LaunchedEffect(categoryEntries) {
+        if (selectedCategory != null && categoryEntries.none { it.name == selectedCategory }) {
+            selectedCategory = null
+        }
     }
 
     val handleAmbientToggle: (Boolean) -> Unit = { enabled ->
@@ -259,6 +278,9 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 activeTopicCount = activeTopicCount,
                 savedCount = savedCount,
                 analysisCount = analysisCount,
+                categoryEntries = categoryEntries,
+                totalFactCount = totalFactCount,
+                selectedCategory = selectedCategory,
                 ambientEnabled = ambientEnabled,
                 isAmbientLive = ambientState.isRecording || ambientState.speech,
                 onToggleSidebar = { isSidebarCollapsed = !isSidebarCollapsed },
@@ -266,6 +288,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                     selectedTab = tab
                     showSettings = false
                 },
+                onSelectCategory = { category -> selectedCategory = category },
                 onOpenSettings = { showSettings = true }
             )
 
@@ -334,6 +357,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                             3 -> AnalysisScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 uiState = uiState,
+                                selectedCategory = selectedCategory,
                                 onRefresh = { viewModel.refreshFacts(context) }
                             )
                             else -> VoiceMemoScreen(
@@ -365,10 +389,14 @@ private fun ZeroTouchSidebar(
     activeTopicCount: Int,
     savedCount: Int,
     analysisCount: Int,
+    categoryEntries: List<CategoryEntry>,
+    totalFactCount: Int,
+    selectedCategory: String?,
     ambientEnabled: Boolean,
     isAmbientLive: Boolean,
     onToggleSidebar: () -> Unit,
     onSelectTab: (Int) -> Unit,
+    onSelectCategory: (String?) -> Unit,
     onOpenSettings: () -> Unit
 ) {
     Surface(
@@ -550,6 +578,15 @@ private fun ZeroTouchSidebar(
                 onClick = { onSelectTab(3) }
             )
 
+            if (!isCollapsed && selectedTab == 3) {
+                SidebarCategorySection(
+                    categories = categoryEntries,
+                    totalFactCount = totalFactCount,
+                    selectedCategory = selectedCategory,
+                    onSelectCategory = onSelectCategory
+                )
+            }
+
             Spacer(modifier = Modifier.weight(1f))
             HorizontalDivider(
                 color = ZtOutlineVariant,
@@ -644,6 +681,87 @@ private fun SidebarDestination(
                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+private data class CategoryEntry(
+    val name: String,
+    val count: Int
+)
+
+@Composable
+private fun SidebarCategorySection(
+    categories: List<CategoryEntry>,
+    totalFactCount: Int,
+    selectedCategory: String?,
+    onSelectCategory: (String?) -> Unit
+) {
+    Spacer(Modifier.size(10.dp))
+    Text(
+        text = "カテゴリ",
+        style = MaterialTheme.typography.labelMedium,
+        color = ZtCaption,
+        modifier = Modifier.padding(horizontal = 8.dp)
+    )
+    Spacer(Modifier.size(6.dp))
+
+    SidebarCategoryRow(
+        label = "すべて",
+        count = totalFactCount,
+        selected = selectedCategory == null,
+        onClick = { onSelectCategory(null) }
+    )
+
+    categories.forEach { category ->
+        SidebarCategoryRow(
+            label = category.name,
+            count = category.count,
+            selected = selectedCategory == category.name,
+            onClick = { onSelectCategory(category.name) }
+        )
+    }
+}
+
+@Composable
+private fun SidebarCategoryRow(
+    label: String,
+    count: Int,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = if (selected) ZtSidebarSelected else Color.Transparent,
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            if (count > 0) {
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = ZtSurfaceVariant
+                ) {
+                    Text(
+                        text = count.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtOnSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
                 }
             }
         }

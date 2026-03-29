@@ -253,6 +253,11 @@ If the topic has no reliable facts, return an empty list.
 # Categories (choose from these when possible)
 接客 | 調理 | 清掃 | 事務 | トラブル | アイデア | 人事 | 在庫 | 設備
 
+# Category rule
+- If none of the above fits, create a NEW short category name.
+- Use 1-3 categories per fact.
+- Keep category names concise (2-6 Japanese characters), avoid synonyms or near-duplicates.
+
 # Intents (choose from these when possible)
 報告 | 相談 | 指示 | 不満 | 提案 | 質問 | 確認 | 共有
 
