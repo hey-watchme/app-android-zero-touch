@@ -3,8 +3,19 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+import java.util.Properties
+
+val localProps = Properties()
+val localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.inputStream().use { localProps.load(it) }
+}
+val supabaseUrl = localProps.getProperty("SUPABASE_URL") ?: ""
+val supabaseAnonKey = localProps.getProperty("SUPABASE_ANON_KEY") ?: ""
+val googleWebClientId = localProps.getProperty("GOOGLE_WEB_CLIENT_ID") ?: ""
+
 android {
-    namespace = "com.example.zero_touch"
+    namespace = "com.subbrain.zerotouch"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -12,13 +23,17 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.zero_touch"
+        applicationId = "com.subbrain.zerotouch"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
     }
 
     buildTypes {
@@ -36,6 +51,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -51,6 +67,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.1")
     implementation("androidx.navigation:navigation-compose:2.7.7")
