@@ -101,6 +101,7 @@ data class ZeroTouchUiState(
     val selectedDeviceId: String? = null,
     val isLoadingSelection: Boolean = false,
     val authSession: AuthSession? = null,
+    val isAuthReady: Boolean = false,
     val isAuthenticating: Boolean = false,
     val isUploading: Boolean = false,
     val isLoading: Boolean = false,
@@ -139,6 +140,25 @@ class ZeroTouchViewModel : ViewModel() {
     private var isLoadingFacts = false
     private var isLoadingSelection = false
 
+    private fun resetForAuthSession(session: AuthSession?) {
+        dismissedIds.clear()
+        favoriteIds.clear()
+        currentOffset = 0
+        hasMoreSessions = true
+        currentTopicOffset = 0
+        hasMoreTopics = true
+        isRefreshing = false
+        isLoadingFacts = false
+        isLoadingSelection = false
+        _uiState.value = ZeroTouchUiState(
+            authSession = session,
+            isAuthReady = true,
+            isAuthenticating = false,
+            isLoadingSelection = session != null,
+            isLoading = session != null
+        )
+    }
+
     private fun resolveViewScope(context: Context): ViewScope {
         val selectedDeviceId = _uiState.value.selectedDeviceId?.trim().orEmpty()
         val selectedWorkspaceId = _uiState.value.selectedWorkspaceId?.trim().orEmpty()
@@ -165,7 +185,7 @@ class ZeroTouchViewModel : ViewModel() {
 
     fun loadAuthSession(context: Context) {
         val session = AuthPreferences.getSession(context)
-        _uiState.value = _uiState.value.copy(authSession = session)
+        resetForAuthSession(session)
     }
 
     fun signInWithGoogle(
@@ -193,10 +213,13 @@ class ZeroTouchViewModel : ViewModel() {
                     refreshToken = response.refresh_token
                 )
                 AuthPreferences.setSession(context, session)
-                _uiState.value = _uiState.value.copy(authSession = session, isAuthenticating = false)
+                resetForAuthSession(session)
                 val account = ensureAccountForUser(session)
                 if (account != null) {
-                    selectAccount(context, account.id)
+                    SelectionPreferences.setSelectedAccountId(context, account.id)
+                    SelectionPreferences.setSelectedWorkspaceId(context, null)
+                    SelectionPreferences.setSelectedDeviceId(context, null)
+                    loadSelection(context, force = true)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Google sign-in failed", e)
@@ -208,19 +231,91 @@ class ZeroTouchViewModel : ViewModel() {
         }
     }
 
+    fun signInWithEmailPassword(
+        context: Context,
+        email: String,
+        password: String
+    ) {
+        if (_uiState.value.isAuthenticating) return
+        val normalizedEmail = email.trim()
+        if (normalizedEmail.isBlank() || password.isBlank()) {
+            _uiState.value = _uiState.value.copy(error = "メールアドレスとパスワードを入力してください")
+            return
+        }
+
+        _uiState.value = _uiState.value.copy(isAuthenticating = true, error = null)
+        viewModelScope.launch {
+            try {
+                val response = authApi.signInWithEmailPassword(
+                    email = normalizedEmail,
+                    password = password
+                )
+                val user = response.user ?: throw IllegalStateException("Supabase user not found")
+                val metadata = user.user_metadata ?: emptyMap()
+                val displayName = (metadata["full_name"] as? String)
+                    ?: (metadata["name"] as? String)
+                    ?: user.email
+                val avatarUrl = metadata["avatar_url"] as? String
+                val session = AuthSession(
+                    userId = user.id,
+                    email = user.email,
+                    displayName = displayName,
+                    avatarUrl = avatarUrl,
+                    accessToken = response.access_token,
+                    refreshToken = response.refresh_token
+                )
+                AuthPreferences.setSession(context, session)
+                resetForAuthSession(session)
+                val account = ensureAccountForUser(session)
+                if (account != null) {
+                    SelectionPreferences.setSelectedAccountId(context, account.id)
+                    SelectionPreferences.setSelectedWorkspaceId(context, null)
+                    SelectionPreferences.setSelectedDeviceId(context, null)
+                    loadSelection(context, force = true)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Email sign-in failed", e)
+                _uiState.value = _uiState.value.copy(
+                    isAuthenticating = false,
+                    error = "メールログインに失敗しました: ${e.message}"
+                )
+            }
+        }
+    }
+
     fun signOut(context: Context) {
         AuthPreferences.setSession(context, null)
-        _uiState.value = _uiState.value.copy(authSession = null)
+        SelectionPreferences.setSelectedAccountId(context, null)
+        SelectionPreferences.setSelectedWorkspaceId(context, null)
+        SelectionPreferences.setSelectedDeviceId(context, null)
+        resetForAuthSession(null)
+    }
+
+    private fun findAccountForSession(
+        session: AuthSession,
+        accounts: List<AccountSummary>
+    ): AccountSummary? {
+        val userId = session.userId.trim()
+        if (userId.isNotEmpty()) {
+            accounts.firstOrNull { account ->
+                account.external_auth_provider == "supabase" &&
+                    account.external_auth_subject == userId
+            }?.let { return it }
+        }
+
+        val normalizedEmail = session.email?.trim()?.lowercase(Locale.ROOT)
+        if (!normalizedEmail.isNullOrBlank()) {
+            accounts.firstOrNull { account ->
+                account.email?.trim()?.lowercase(Locale.ROOT) == normalizedEmail
+            }?.let { return it }
+        }
+
+        return null
     }
 
     private suspend fun ensureAccountForUser(session: AuthSession): AccountSummary? {
         val accounts = api.listAccounts().accounts
-        val normalizedEmail = session.email?.lowercase(Locale.ROOT)
-        val existing = if (normalizedEmail != null) {
-            accounts.firstOrNull { it.email?.lowercase(Locale.ROOT) == normalizedEmail }
-        } else {
-            null
-        }
+        val existing = findAccountForSession(session, accounts)
         if (existing != null) return existing
 
         val displayName = session.displayName ?: session.email ?: "ZeroTouch User"
@@ -233,21 +328,22 @@ class ZeroTouchViewModel : ViewModel() {
         )
     }
 
-    fun loadSelection(context: Context, force: Boolean = false) {
+    fun loadSelection(context: Context, force: Boolean = false, loadDataAfter: Boolean = false) {
         if (isLoadingSelection && !force) return
         isLoadingSelection = true
         _uiState.value = _uiState.value.copy(isLoadingSelection = true)
         viewModelScope.launch {
             try {
-                val accounts = api.listAccounts().accounts
-                val savedAccountId = SelectionPreferences.getSelectedAccountId(context)
-                val resolvedAccountId = when {
-                    !savedAccountId.isNullOrBlank() && accounts.any { it.id == savedAccountId } -> savedAccountId
-                    accounts.isNotEmpty() -> accounts.first().id
-                    else -> null
-                }
+                val authSession = _uiState.value.authSession ?: AuthPreferences.getSession(context)
+                val currentAccount = authSession?.let { ensureAccountForUser(it) }
+                val accounts = listOfNotNull(currentAccount)
+                val resolvedAccountId = currentAccount?.id
 
-                val workspaces = api.listWorkspaces(accountId = resolvedAccountId).workspaces
+                val workspaces = if (resolvedAccountId != null) {
+                    api.listWorkspaces(accountId = resolvedAccountId).workspaces
+                } else {
+                    emptyList()
+                }
                 val savedWorkspaceId = SelectionPreferences.getSelectedWorkspaceId(context)
                 var resolvedWorkspaceId = when {
                     !savedWorkspaceId.isNullOrBlank() && workspaces.any { it.id == savedWorkspaceId } -> savedWorkspaceId
@@ -255,7 +351,11 @@ class ZeroTouchViewModel : ViewModel() {
                     else -> null
                 }
 
-                val devices = api.listDevices(accountId = resolvedAccountId).devices
+                val devices = if (resolvedAccountId != null) {
+                    api.listDevices(accountId = resolvedAccountId).devices
+                } else {
+                    emptyList()
+                }
                 val savedDeviceId = SelectionPreferences.getSelectedDeviceId(context)
                 val physicalDeviceId = DeviceIdProvider.getDeviceId(context)
                 var resolvedDeviceId = when {
@@ -283,6 +383,9 @@ class ZeroTouchViewModel : ViewModel() {
                     selectedDeviceId = resolvedDeviceId,
                     isLoadingSelection = false
                 )
+                if (loadDataAfter && resolvedAccountId != null) {
+                    loadSessions(context)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "loadSelection failed", e)
                 _uiState.value = _uiState.value.copy(isLoadingSelection = false)
@@ -290,13 +393,6 @@ class ZeroTouchViewModel : ViewModel() {
                 isLoadingSelection = false
             }
         }
-    }
-
-    fun selectAccount(context: Context, accountId: String?) {
-        SelectionPreferences.setSelectedAccountId(context, accountId)
-        SelectionPreferences.setSelectedWorkspaceId(context, null)
-        SelectionPreferences.setSelectedDeviceId(context, null)
-        loadSelection(context, force = true)
     }
 
     fun selectWorkspace(context: Context, workspaceId: String) {

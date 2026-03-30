@@ -10,9 +10,17 @@ val localPropsFile = rootProject.file("local.properties")
 if (localPropsFile.exists()) {
     localPropsFile.inputStream().use { localProps.load(it) }
 }
-val supabaseUrl = localProps.getProperty("SUPABASE_URL") ?: ""
-val supabaseAnonKey = localProps.getProperty("SUPABASE_ANON_KEY") ?: ""
-val googleWebClientId = localProps.getProperty("GOOGLE_WEB_CLIENT_ID") ?: ""
+fun resolveConfig(key: String): String {
+    val envValue = System.getenv(key)
+    if (!envValue.isNullOrBlank()) return envValue
+    val gradleValue = (project.findProperty(key) as? String)
+    if (!gradleValue.isNullOrBlank()) return gradleValue
+    val localValue = localProps.getProperty(key)
+    return localValue ?: ""
+}
+val supabaseUrl = resolveConfig("SUPABASE_URL")
+val supabaseAnonKey = resolveConfig("SUPABASE_ANON_KEY")
+val googleWebClientId = resolveConfig("GOOGLE_WEB_CLIENT_ID")
 
 android {
     namespace = "com.subbrain.zerotouch"
@@ -68,6 +76,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.google.android.gms:play-services-auth:21.2.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.1")
     implementation("androidx.navigation:navigation-compose:2.7.7")

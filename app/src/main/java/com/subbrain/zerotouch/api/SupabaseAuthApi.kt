@@ -35,13 +35,17 @@ class SupabaseAuthApi(
         .build()
     private val gson = Gson()
 
+    private fun ensureConfigured() {
+        if (supabaseUrl.isBlank() || anonKey.isBlank()) {
+            throw IllegalStateException("Supabase credentials are missing. Set SUPABASE_URL and SUPABASE_ANON_KEY.")
+        }
+    }
+
     suspend fun signInWithGoogleIdToken(
         idToken: String,
         accessToken: String? = null
     ): SupabaseSessionResponse = withContext(Dispatchers.IO) {
-        if (supabaseUrl.isBlank() || anonKey.isBlank()) {
-            throw IllegalStateException("Supabase credentials are missing. Set SUPABASE_URL and SUPABASE_ANON_KEY.")
-        }
+        ensureConfigured()
 
         val payload = mutableMapOf<String, Any>(
             "provider" to "google",
@@ -62,6 +66,32 @@ class SupabaseAuthApi(
         val body = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
             throw Exception("Supabase auth failed: ${response.code} $body")
+        }
+        gson.fromJson(body, SupabaseSessionResponse::class.java)
+    }
+
+    suspend fun signInWithEmailPassword(
+        email: String,
+        password: String
+    ): SupabaseSessionResponse = withContext(Dispatchers.IO) {
+        ensureConfigured()
+
+        val payload = mapOf(
+            "email" to email.trim(),
+            "password" to password
+        )
+
+        val request = Request.Builder()
+            .url("$supabaseUrl/auth/v1/token?grant_type=password")
+            .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+            .header("apikey", anonKey)
+            .header("Authorization", "Bearer $anonKey")
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            throw Exception("Supabase email auth failed: ${response.code} $body")
         }
         gson.fromJson(body, SupabaseSessionResponse::class.java)
     }

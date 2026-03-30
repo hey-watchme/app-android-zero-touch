@@ -13,6 +13,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,13 +27,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Home
@@ -41,6 +47,8 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -51,6 +59,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -61,12 +71,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.subbrain.zerotouch.api.DeviceIdProvider
 import com.subbrain.zerotouch.audio.ambient.AmbientPreferences
 import com.subbrain.zerotouch.audio.ambient.AmbientStatus
@@ -82,11 +100,15 @@ import com.subbrain.zerotouch.ui.theme.ZerotouchTheme
 import com.subbrain.zerotouch.ui.theme.ZtAvatarBg
 import com.subbrain.zerotouch.ui.theme.ZtAvatarText
 import com.subbrain.zerotouch.ui.theme.ZtCaption
+import com.subbrain.zerotouch.ui.theme.ZtOnBackground
 import com.subbrain.zerotouch.ui.theme.ZtOnSurfaceVariant
 import com.subbrain.zerotouch.ui.theme.ZtOutline
 import com.subbrain.zerotouch.ui.theme.ZtOutlineVariant
+import com.subbrain.zerotouch.ui.theme.ZtPrimary
+import com.subbrain.zerotouch.ui.theme.ZtPrimaryContainer
 import com.subbrain.zerotouch.ui.theme.ZtSidebarSelected
 import com.subbrain.zerotouch.ui.theme.ZtSidebarSurface
+import com.subbrain.zerotouch.ui.theme.ZtSurface
 import com.subbrain.zerotouch.ui.theme.ZtSurfaceVariant
 import androidx.core.content.ContextCompat
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -94,6 +116,9 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+private const val AMICAL_TEST_EMAIL = "amical-test@zerotouch.local"
+private const val AMICAL_TEST_PASSWORD = "AmicalTest123!"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -200,17 +225,22 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
 
     LaunchedEffect(Unit) {
         viewModel.loadAuthSession(context)
-        viewModel.loadSelection(context)
-        viewModel.loadSessions(context)
-        while (true) {
-            delay(5000)
-            viewModel.refreshSessions(context, showIndicator = false)
-        }
     }
 
     LaunchedEffect(showWorkspaceSelector) {
-        if (showWorkspaceSelector) {
+        if (showWorkspaceSelector && uiState.authSession != null) {
             viewModel.loadSelection(context, force = true)
+        }
+    }
+
+    LaunchedEffect(uiState.authSession?.userId) {
+        if (uiState.authSession == null) return@LaunchedEffect
+        viewModel.loadSelection(context, force = true, loadDataAfter = true)
+        while (true) {
+            delay(5000)
+            if (!uiState.isLoadingSelection) {
+                viewModel.refreshSessions(context, showIndicator = false)
+            }
         }
     }
 
@@ -241,9 +271,20 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     }
 
     LaunchedEffect(selectedTab) {
-        if (selectedTab == 3) {
+        if (selectedTab == 3 && uiState.authSession != null) {
             viewModel.loadFacts(context)
         }
+    }
+
+    val launchGoogleSignIn: () -> Unit = {
+        if (googleWebClientId.isBlank()) {
+            scope.launch {
+                snackbarHostState.showSnackbar("GOOGLE_WEB_CLIENT_ID が未設定です")
+            }
+        } else {
+            googleSignInLauncher.launch(googleSignInClient.signInIntent)
+        }
+        Unit
     }
 
     if (showSettings) {
@@ -257,24 +298,15 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         WorkspaceSelectorSheet(
             uiState = uiState,
             onClose = { showWorkspaceSelector = false },
-            onGoogleSignIn = {
-                if (googleWebClientId.isBlank()) {
-                    scope.launch {
-                        snackbarHostState.showSnackbar("GOOGLE_WEB_CLIENT_ID が未設定です")
-                    }
-                } else {
-                    googleSignInLauncher.launch(googleSignInClient.signInIntent)
-                }
-            },
             onSignOut = {
                 googleSignInClient.signOut()
                 viewModel.signOut(context)
-            },
-            onSelectAccount = { accountId ->
-                viewModel.selectAccount(context, accountId)
+                showWorkspaceSelector = false
             },
             onSelectWorkspace = { workspaceId ->
                 viewModel.selectWorkspace(context, workspaceId)
+                viewModel.loadSessions(context)
+                viewModel.loadFacts(context, force = true)
             },
             onSelectDevice = { deviceId ->
                 viewModel.selectDevice(context, deviceId)
@@ -300,8 +332,13 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     val categoryEntries = categoryCounts.entries
         .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
         .map { CategoryEntry(name = it.key, count = it.value) }
+    val selectedAccount = uiState.accounts.firstOrNull { it.id == uiState.selectedAccountId }
     val selectedWorkspace = uiState.workspaces.firstOrNull { it.id == uiState.selectedWorkspaceId }
     val selectedDevice = uiState.devices.firstOrNull { it.device_id == uiState.selectedDeviceId }
+    val accountLabel = selectedAccount?.display_name
+        ?: uiState.authSession?.displayName
+        ?: uiState.authSession?.email
+        ?: "未選択"
     val workspaceLabel = selectedWorkspace?.name ?: "未選択"
     val deviceLabel = selectedDevice?.display_name ?: "未選択"
     val currentPageTitle = when (selectedTab) {
@@ -320,6 +357,32 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         ambientState.isRecording -> "Recording"
         ambientEnabled -> "Listening"
         else -> "Off"
+    }
+
+    if (!uiState.isAuthReady) {
+        AuthLoadingScreen()
+        return
+    }
+
+    if (uiState.authSession == null) {
+        LoginScreen(
+            isAuthenticating = uiState.isAuthenticating,
+            onGoogleSignIn = launchGoogleSignIn,
+            onEmailSignIn = { email, password ->
+                viewModel.signInWithEmailPassword(context, email, password)
+            }
+        )
+        return
+    }
+
+    if (
+        uiState.isLoadingSelection &&
+        uiState.accounts.isEmpty() &&
+        uiState.workspaces.isEmpty() &&
+        uiState.devices.isEmpty()
+    ) {
+        AuthLoadingScreen()
+        return
     }
 
     LaunchedEffect(categoryEntries) {
@@ -367,6 +430,8 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 categoryEntries = categoryEntries,
                 totalFactCount = totalFactCount,
                 selectedCategory = selectedCategory,
+                accountLabel = accountLabel,
+                accountAvatarUrl = uiState.authSession?.avatarUrl,
                 workspaceLabel = workspaceLabel,
                 deviceLabel = deviceLabel,
                 ambientEnabled = ambientEnabled,
@@ -378,6 +443,10 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 },
                 onSelectCategory = { category -> selectedCategory = category },
                 onOpenWorkspaceSelector = { showWorkspaceSelector = true },
+                onSignOut = {
+                    googleSignInClient.signOut()
+                    viewModel.signOut(context)
+                },
                 onOpenSettings = { showSettings = true }
             )
 
@@ -472,6 +541,173 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
 }
 
 @Composable
+private fun LoginScreen(
+    isAuthenticating: Boolean,
+    onGoogleSignIn: () -> Unit,
+    onEmailSignIn: (String, String) -> Unit
+) {
+    var email by remember { mutableStateOf(AMICAL_TEST_EMAIL) }
+    var password by remember { mutableStateOf(AMICAL_TEST_PASSWORD) }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFFF4F7FB),
+                        Color(0xFFE8ECE6),
+                        ZtSurface
+                    )
+                )
+            )
+            .statusBarsPadding()
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(start = 28.dp, top = 36.dp)
+                .size(160.dp)
+                .clip(CircleShape)
+                .background(Color(0x1A2563EB))
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 24.dp, bottom = 54.dp)
+                .size(220.dp)
+                .clip(CircleShape)
+                .background(Color(0x1444403C))
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 28.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(28.dp)),
+                shape = RoundedCornerShape(28.dp),
+                color = Color(0xF2FFFFFF)
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.size(56.dp),
+                        shape = RoundedCornerShape(18.dp),
+                        color = ZtPrimaryContainer
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.Lock,
+                                contentDescription = null,
+                                tint = ZtPrimary
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "ZeroTouch",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = ZtOnBackground,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Button(
+                        onClick = onGoogleSignIn,
+                        enabled = !isAuthenticating,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text(
+                            text = if (isAuthenticating) "Google ログイン中..." else "Google でログイン",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+
+                    HorizontalDivider(color = ZtOutlineVariant)
+
+                    Text(
+                        text = "メールアドレスでログイン",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = ZtOnBackground,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    TextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        singleLine = true,
+                        enabled = !isAuthenticating,
+                        label = { Text("メールアドレス") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                        colors = TextFieldDefaults.colors(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        singleLine = true,
+                        enabled = !isAuthenticating,
+                        label = { Text("パスワード") },
+                        visualTransformation = if (password.isEmpty()) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        colors = TextFieldDefaults.colors(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(
+                        onClick = { onEmailSignIn(email, password) },
+                        enabled = !isAuthenticating,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text(
+                            text = if (isAuthenticating) "認証中..." else "メールアドレスでログイン",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AuthLoadingScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFFF4F7FB),
+                        Color(0xFFE8ECE6),
+                        ZtSurface
+                    )
+                )
+            )
+            .statusBarsPadding(),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "Loading...",
+            style = MaterialTheme.typography.titleMedium,
+            color = ZtOnSurfaceVariant
+        )
+    }
+}
+
+@Composable
 private fun ZeroTouchSidebar(
     isCollapsed: Boolean,
     selectedTab: Int,
@@ -481,6 +717,8 @@ private fun ZeroTouchSidebar(
     categoryEntries: List<CategoryEntry>,
     totalFactCount: Int,
     selectedCategory: String?,
+    accountLabel: String,
+    accountAvatarUrl: String?,
     workspaceLabel: String,
     deviceLabel: String,
     ambientEnabled: Boolean,
@@ -489,6 +727,7 @@ private fun ZeroTouchSidebar(
     onSelectTab: (Int) -> Unit,
     onSelectCategory: (String?) -> Unit,
     onOpenWorkspaceSelector: () -> Unit,
+    onSignOut: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     Surface(
@@ -502,6 +741,7 @@ private fun ZeroTouchSidebar(
                 .fillMaxSize()
                 .padding(horizontal = 8.dp, vertical = 14.dp)
         ) {
+            var showAccountMenu by remember { mutableStateOf(false) }
             Row(
                 modifier = if (isCollapsed) {
                     Modifier.fillMaxWidth()
@@ -510,54 +750,80 @@ private fun ZeroTouchSidebar(
                 },
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    modifier = if (isCollapsed) {
-                        Modifier
-                            .size(40.dp)
-                    } else {
-                        Modifier.size(36.dp)
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = ZtAvatarBg,
-                    onClick = {
-                        if (isCollapsed) {
-                            onToggleSidebar()
+                Box {
+                    Surface(
+                        modifier = Modifier.size(if (isCollapsed) 40.dp else 40.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = ZtAvatarBg,
+                        onClick = { showAccountMenu = true }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (!accountAvatarUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(accountAvatarUrl)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = "Account avatar",
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(14.dp))
+                                )
+                            } else {
+                                val initial = accountLabel.trim().firstOrNull()?.toString() ?: "A"
+                                Text(
+                                    text = initial.uppercase(),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ZtAvatarText
+                                )
+                            }
+                            Box(
+                                modifier = Modifier.align(Alignment.BottomEnd)
+                            ) {
+                                AmbientDot(
+                                    isEnabled = isAmbientLive,
+                                    isRecording = isAmbientLive
+                                )
+                            }
                         }
                     }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "ZT",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = ZtAvatarText
+                    DropdownMenu(
+                        expanded = showAccountMenu,
+                        onDismissRequest = { showAccountMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("ログアウト") },
+                            onClick = {
+                                showAccountMenu = false
+                                onSignOut()
+                            }
                         )
-                        Box(
-                            modifier = Modifier.align(Alignment.BottomEnd)
-                        ) {
-                            AmbientDot(
-                                isEnabled = isAmbientLive,
-                                isRecording = isAmbientLive
-                            )
-                        }
                     }
                 }
 
                 if (!isCollapsed) {
                     Spacer(Modifier.width(10.dp))
                     Column(
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onOpenWorkspaceSelector() }
                     ) {
                         Text(
-                            text = "ZeroTouch",
+                            text = accountLabel.ifBlank { "未選択" },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (ambientEnabled) "Workspace active" else "Workspace paused",
+                            text = workspaceLabel.ifBlank { "未選択" },
                             style = MaterialTheme.typography.bodySmall,
                             color = ZtCaption
+                        )
+                        Text(
+                            text = deviceLabel.ifBlank { "未選択" },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ZtOnSurfaceVariant
                         )
                     }
                     IconButton(
@@ -577,12 +843,6 @@ private fun ZeroTouchSidebar(
             Spacer(Modifier.size(18.dp))
 
             if (!isCollapsed) {
-                WorkspaceSwitcher(
-                    workspaceLabel = workspaceLabel,
-                    deviceLabel = deviceLabel,
-                    onClick = onOpenWorkspaceSelector
-                )
-                Spacer(Modifier.size(14.dp))
                 Text(
                     text = "メニュー",
                     style = MaterialTheme.typography.labelMedium,
@@ -868,6 +1128,7 @@ private fun SidebarCategoryRow(
 
 @Composable
 private fun WorkspaceSwitcher(
+    accountLabel: String,
     workspaceLabel: String,
     deviceLabel: String,
     onClick: () -> Unit
@@ -893,6 +1154,12 @@ private fun WorkspaceSwitcher(
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
+                    text = "Account: $accountLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
                     text = "Workspace: $workspaceLabel",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
@@ -912,14 +1179,11 @@ private fun WorkspaceSwitcher(
 private fun WorkspaceSelectorSheet(
     uiState: ZeroTouchUiState,
     onClose: () -> Unit,
-    onGoogleSignIn: () -> Unit,
     onSignOut: () -> Unit,
-    onSelectAccount: (String?) -> Unit,
     onSelectWorkspace: (String) -> Unit,
     onSelectDevice: (String) -> Unit
 ) {
     val selectedWorkspaceId = uiState.selectedWorkspaceId
-    val selectedAccountId = uiState.selectedAccountId
     val filteredDevices = if (!selectedWorkspaceId.isNullOrBlank()) {
         uiState.devices.filter { it.workspace_id == selectedWorkspaceId }
     } else {
@@ -927,23 +1191,16 @@ private fun WorkspaceSelectorSheet(
     }
 
     SideDetailDrawer(
-        title = "Workspace / Device",
+        title = "Account / Workspace / Device",
         onClose = onClose
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                text = "ログイン",
-                style = MaterialTheme.typography.labelMedium,
-                color = ZtCaption
-            )
-            if (uiState.authSession == null) {
-                Button(
-                    onClick = onGoogleSignIn,
-                    enabled = !uiState.isAuthenticating
-                ) {
-                    Text(text = if (uiState.isAuthenticating) "ログイン中..." else "Googleでログイン")
-                }
-            } else {
+            if (uiState.authSession != null) {
+                Text(
+                    text = "ログイン中",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ZtCaption
+                )
                 Text(
                     text = "ログイン中: ${uiState.authSession.displayName ?: uiState.authSession.email ?: "User"}",
                     style = MaterialTheme.typography.bodySmall,
@@ -952,24 +1209,22 @@ private fun WorkspaceSelectorSheet(
                 Button(onClick = onSignOut) {
                     Text("ログアウト")
                 }
+                HorizontalDivider(color = ZtOutline)
             }
 
-            HorizontalDivider(color = ZtOutline)
-
-            if (uiState.accounts.isNotEmpty()) {
+            val currentAccount = uiState.accounts.firstOrNull { it.id == uiState.selectedAccountId }
+            if (currentAccount != null) {
                 Text(
                     text = "アカウント",
                     style = MaterialTheme.typography.labelMedium,
                     color = ZtCaption
                 )
-                uiState.accounts.forEach { account ->
-                    SelectionRow(
-                        title = account.display_name,
-                        subtitle = account.email,
-                        selected = account.id == selectedAccountId,
-                        onClick = { onSelectAccount(account.id) }
-                    )
-                }
+                SelectionRow(
+                    title = currentAccount.display_name,
+                    subtitle = currentAccount.email ?: "Google ログイン中のアカウント",
+                    selected = true,
+                    onClick = {}
+                )
                 HorizontalDivider(color = ZtOutline)
             }
 

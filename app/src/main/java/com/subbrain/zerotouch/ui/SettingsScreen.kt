@@ -69,7 +69,7 @@ fun SettingsSheet(
         mutableStateOf(
             AmbientPreferences.getAsrProvider(context)
                 .takeUnless { it == "cohere" }
-                ?: "speechmatics"
+                ?: "azure"
         )
     }
     var llmProvider by remember { mutableStateOf(AmbientPreferences.getLlmProvider(context)) }
@@ -87,7 +87,7 @@ fun SettingsSheet(
     // Sync settings from server
     androidx.compose.runtime.LaunchedEffect(deviceId) {
         if (AmbientPreferences.getAsrProvider(context) == "cohere") {
-            AmbientPreferences.setAsrProvider(context, "speechmatics")
+            AmbientPreferences.setAsrProvider(context, "azure")
         }
         try {
             val remote = api.getDeviceSettings(deviceId)

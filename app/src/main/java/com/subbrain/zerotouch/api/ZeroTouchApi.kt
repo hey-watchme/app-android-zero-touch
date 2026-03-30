@@ -140,7 +140,9 @@ data class AccountSummary(
     val id: String,
     val display_name: String,
     val email: String? = null,
-    val avatar_url: String? = null
+    val avatar_url: String? = null,
+    val external_auth_provider: String? = null,
+    val external_auth_subject: String? = null
 )
 
 data class AccountListResponse(

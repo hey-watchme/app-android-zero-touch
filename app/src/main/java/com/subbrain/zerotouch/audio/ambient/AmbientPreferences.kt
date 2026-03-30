@@ -12,7 +12,7 @@ object AmbientPreferences {
     private const val KEY_LLM_PROVIDER = "llm_provider"
     private const val KEY_LLM_MODEL = "llm_model"
     private const val KEY_IMPORTANCE_LEVELS = "importance_levels"
-    private const val DEFAULT_ASR_PROVIDER = "speechmatics"
+    private const val DEFAULT_ASR_PROVIDER = "azure"
     private const val DEFAULT_LLM_PROVIDER = "openai"
     private const val DEFAULT_LLM_MODEL = "gpt-4.1-nano"
     private const val DEFAULT_AMBIENT_AUDIO_SOURCE = "mic"
