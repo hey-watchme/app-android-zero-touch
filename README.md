@@ -57,22 +57,14 @@ ZeroTouch は今後 `account -> workspace -> device` の多層モデルで運用
 既存パイプラインは引き続き `device_id` で動作しますが、`workspace_id` を併せて持つことで、
 複数デバイスや仮想デバイスを 1 つのナレッジ単位に束ねられるようにします。
 
-## 認証（Google Sign-In + Supabase Auth）
+## 認証
 
-Android は **Google Sign-In → Supabase Auth** の流れでログインします。
-Supabase 側の Google Provider に **Web Client ID と Android Client ID** を登録する構成です。
+Android は Supabase Auth を使い、**Google ログイン** と **メールアドレス + パスワード** に対応しています。
 
-### 必要な設定
+### 最小限の設定
 
-1. Google Cloud Console で Android OAuth クライアントを作成  
-   - `package name`: `com.subbrain.zerotouch`  
-   - SHA‑1: `./gradlew signingReport` の debug SHA‑1
-2. Supabase Dashboard → Auth → Providers → Google  
-   - 既存の **Web Client ID** に加えて、Android Client ID を追加
-
-### Android 側のローカル設定（Git 管理しない）
-
-`local.properties` に以下を追加します。
+- Supabase の Auth で Google と Email を有効化
+- Android の `local.properties` に下記を設定
 
 ```
 SUPABASE_URL=https://qvtlwotzuzbavrzqhyvt.supabase.co
@@ -80,12 +72,7 @@ SUPABASE_ANON_KEY=（anon key）
 GOOGLE_WEB_CLIENT_ID=（web client id）
 ```
 
-`SUPABASE_ANON_KEY` は **Android クライアント用** です（Service Role Key は絶対に置かない）。
-
-### ログイン後の動作
-
-- Supabase Auth の user から `zerotouch_accounts` を自動作成
-- `workspace / device` の選択画面で閲覧対象を切り替え
+`SUPABASE_ANON_KEY` は **Android クライアント用** です（Service Role Key は置かない）。
 
 ## 対象タブレット
 

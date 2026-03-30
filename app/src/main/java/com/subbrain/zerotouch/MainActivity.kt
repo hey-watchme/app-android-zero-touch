@@ -13,7 +13,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,7 +38,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Analytics
@@ -47,8 +45,6 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -59,8 +55,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -72,7 +66,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -97,6 +90,7 @@ import com.subbrain.zerotouch.ui.ZeroTouchViewModel
 import com.subbrain.zerotouch.ui.components.AmbientDot
 import com.subbrain.zerotouch.ui.components.SideDetailDrawer
 import com.subbrain.zerotouch.ui.theme.ZerotouchTheme
+import com.subbrain.zerotouch.ui.theme.ZtBackground
 import com.subbrain.zerotouch.ui.theme.ZtAvatarBg
 import com.subbrain.zerotouch.ui.theme.ZtAvatarText
 import com.subbrain.zerotouch.ui.theme.ZtCaption
@@ -116,6 +110,12 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 
 private const val AMICAL_TEST_EMAIL = "amical-test@zerotouch.local"
 private const val AMICAL_TEST_PASSWORD = "AmicalTest123!"
@@ -548,134 +548,138 @@ private fun LoginScreen(
 ) {
     var email by remember { mutableStateOf(AMICAL_TEST_EMAIL) }
     var password by remember { mutableStateOf(AMICAL_TEST_PASSWORD) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFFF4F7FB),
-                        Color(0xFFE8ECE6),
-                        ZtSurface
-                    )
-                )
-            )
-            .statusBarsPadding()
+            .background(ZtBackground)
+            .statusBarsPadding(),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
+        Surface(
             modifier = Modifier
-                .padding(start = 28.dp, top = 36.dp)
-                .size(160.dp)
-                .clip(CircleShape)
-                .background(Color(0x1A2563EB))
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = 54.dp)
-                .size(220.dp)
-                .clip(CircleShape)
-                .background(Color(0x1444403C))
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 28.dp),
-            verticalArrangement = Arrangement.Center
+                .widthIn(max = 400.dp)
+                .padding(24.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = ZtSurface,
+            shadowElevation = 4.dp
         ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(28.dp)),
-                shape = RoundedCornerShape(28.dp),
-                color = Color(0xF2FFFFFF)
+            Column(
+                modifier = Modifier.padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                Surface(
+                    modifier = Modifier.size(64.dp),
+                    shape = CircleShape,
+                    color = ZtPrimaryContainer
                 ) {
-                    Surface(
-                        modifier = Modifier.size(56.dp),
-                        shape = RoundedCornerShape(18.dp),
-                        color = ZtPrimaryContainer
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Filled.Lock,
-                                contentDescription = null,
-                                tint = ZtPrimary
-                            )
-                        }
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = null,
+                            tint = ZtPrimary,
+                            modifier = Modifier.size(28.dp)
+                        )
                     }
+                }
 
-                    Text(
-                        text = "ZeroTouch",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = ZtOnBackground,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Button(
-                        onClick = onGoogleSignIn,
-                        enabled = !isAuthenticating,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
+                Spacer(Modifier.height(4.dp))
+
+                Text(
+                    text = "ZeroTouch",
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = ZtOnBackground
+                )
+
+                Text(
+                    text = "Sign in to continue",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ZtOnSurfaceVariant
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    singleLine = true,
+                    enabled = !isAuthenticating,
+                    label = { Text("メールアドレス") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    singleLine = true,
+                    enabled = !isAuthenticating,
+                    label = { Text("パスワード") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                Button(
+                    onClick = { onEmailSignIn(email, password) },
+                    enabled = !isAuthenticating && email.isNotBlank() && password.isNotBlank(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (isAuthenticating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
                         Text(
-                            text = if (isAuthenticating) "Google ログイン中..." else "Google でログイン",
+                            text = "ログイン",
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
+                }
 
-                    HorizontalDivider(color = ZtOutlineVariant)
-
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HorizontalDivider(
+                        modifier = Modifier.weight(1f),
+                        color = ZtOutline
+                    )
                     Text(
-                        text = "メールアドレスでログイン",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = ZtOnBackground,
-                        fontWeight = FontWeight.SemiBold
+                        text = "  または  ",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = ZtCaption
                     )
-                    TextField(
-                        value = email,
-                        onValueChange = { email = it },
-                        singleLine = true,
-                        enabled = !isAuthenticating,
-                        label = { Text("メールアドレス") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                        colors = TextFieldDefaults.colors(),
-                        modifier = Modifier.fillMaxWidth()
+                    HorizontalDivider(
+                        modifier = Modifier.weight(1f),
+                        color = ZtOutline
                     )
-                    TextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        singleLine = true,
-                        enabled = !isAuthenticating,
-                        label = { Text("パスワード") },
-                        visualTransformation = if (password.isEmpty()) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        colors = TextFieldDefaults.colors(),
-                        modifier = Modifier.fillMaxWidth()
+                }
+
+                OutlinedButton(
+                    onClick = onGoogleSignIn,
+                    enabled = !isAuthenticating,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = if (isAuthenticating) "Google ログイン中..." else "Google でログイン",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = ZtOnBackground
                     )
-                    Button(
-                        onClick = { onEmailSignIn(email, password) },
-                        enabled = !isAuthenticating,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Text(
-                            text = if (isAuthenticating) "認証中..." else "メールアドレスでログイン",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
                 }
             }
         }
@@ -687,23 +691,25 @@ private fun AuthLoadingScreen() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFFF4F7FB),
-                        Color(0xFFE8ECE6),
-                        ZtSurface
-                    )
-                )
-            )
+            .background(ZtBackground)
             .statusBarsPadding(),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "Loading...",
-            style = MaterialTheme.typography.titleMedium,
-            color = ZtOnSurfaceVariant
-        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(32.dp),
+                color = ZtPrimary,
+                strokeWidth = 3.dp
+            )
+            Text(
+                text = "Loading...",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ZtOnSurfaceVariant
+            )
+        }
     }
 }
 
@@ -741,21 +747,67 @@ private fun ZeroTouchSidebar(
                 .fillMaxSize()
                 .padding(horizontal = 8.dp, vertical = 14.dp)
         ) {
-            var showAccountMenu by remember { mutableStateOf(false) }
-            Row(
-                modifier = if (isCollapsed) {
-                    Modifier.fillMaxWidth()
-                } else {
-                    Modifier
-                },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box {
+            if (isCollapsed) {
+                // Collapsed: toggle button + avatar stacked
+                IconButton(
+                    onClick = onToggleSidebar,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .align(Alignment.CenterHorizontally)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowRight,
+                        contentDescription = "Expand sidebar",
+                        tint = ZtOnSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .align(Alignment.CenterHorizontally),
+                    shape = CircleShape,
+                    color = ZtAvatarBg,
+                    onClick = onOpenWorkspaceSelector
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (!accountAvatarUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(accountAvatarUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Account avatar",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                            )
+                        } else {
+                            val initial = accountLabel.trim().firstOrNull()?.toString() ?: "A"
+                            Text(
+                                text = initial.uppercase(),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = ZtAvatarText
+                            )
+                        }
+                        Box(modifier = Modifier.align(Alignment.BottomEnd)) {
+                            AmbientDot(isEnabled = isAmbientLive, isRecording = isAmbientLive)
+                        }
+                    }
+                }
+            } else {
+                // Expanded: avatar + labels + collapse button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Surface(
-                        modifier = Modifier.size(if (isCollapsed) 40.dp else 40.dp),
-                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
                         color = ZtAvatarBg,
-                        onClick = { showAccountMenu = true }
+                        onClick = onOpenWorkspaceSelector
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             if (!accountAvatarUrl.isNullOrBlank()) {
@@ -767,7 +819,7 @@ private fun ZeroTouchSidebar(
                                     contentDescription = "Account avatar",
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .clip(RoundedCornerShape(14.dp))
+                                        .clip(CircleShape)
                                 )
                             } else {
                                 val initial = accountLabel.trim().firstOrNull()?.toString() ?: "A"
@@ -778,31 +830,11 @@ private fun ZeroTouchSidebar(
                                     color = ZtAvatarText
                                 )
                             }
-                            Box(
-                                modifier = Modifier.align(Alignment.BottomEnd)
-                            ) {
-                                AmbientDot(
-                                    isEnabled = isAmbientLive,
-                                    isRecording = isAmbientLive
-                                )
+                            Box(modifier = Modifier.align(Alignment.BottomEnd)) {
+                                AmbientDot(isEnabled = isAmbientLive, isRecording = isAmbientLive)
                             }
                         }
                     }
-                    DropdownMenu(
-                        expanded = showAccountMenu,
-                        onDismissRequest = { showAccountMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("ログアウト") },
-                            onClick = {
-                                showAccountMenu = false
-                                onSignOut()
-                            }
-                        )
-                    }
-                }
-
-                if (!isCollapsed) {
                     Spacer(Modifier.width(10.dp))
                     Column(
                         modifier = Modifier
@@ -831,10 +863,10 @@ private fun ZeroTouchSidebar(
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Close,
-                            contentDescription = "サイドバーを閉じる",
+                            imageVector = Icons.Filled.KeyboardArrowLeft,
+                            contentDescription = "Collapse sidebar",
                             tint = ZtCaption,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }

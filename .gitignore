@@ -21,3 +21,6 @@ backend/services/__pycache__/
 backend/services/asr_providers/__pycache__/
 **/__pycache__/
 *.pyc
+
+# Heap dumps
+*.hprof
