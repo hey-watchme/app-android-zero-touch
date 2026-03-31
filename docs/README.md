@@ -13,6 +13,9 @@
 3. `conversation-pipeline-processes.md`
    - ZeroTouch の会話パイプラインの正本
 
+4. `context-enrichment-project.md`
+   - account / workspace / device / environment を分析前提に入れる設計
+
 ## Amical 検証
 
 - `amical-validation-wrapup.md`
@@ -26,6 +29,11 @@
 - `ambient-recording-debug-checklist.md`
 - `ambient-agent-spec.md`
 - `vad-improvement-plan.md`
+
+## Context Enrichment
+
+- `context-enrichment-project.md`
+  - コンテクスト追加のスキーマ、入力導線、artifact 注入、段階導入計画
 
 ## その他
 

@@ -79,6 +79,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.subbrain.zerotouch.api.DeviceIdProvider
+import com.subbrain.zerotouch.api.ContextPreferences
 import com.subbrain.zerotouch.audio.ambient.AmbientPreferences
 import com.subbrain.zerotouch.audio.ambient.AmbientStatus
 import com.subbrain.zerotouch.ui.AnalysisScreen
@@ -87,6 +88,10 @@ import com.subbrain.zerotouch.ui.TimelineScreen
 import com.subbrain.zerotouch.ui.VoiceMemoScreen
 import com.subbrain.zerotouch.ui.ZeroTouchUiState
 import com.subbrain.zerotouch.ui.ZeroTouchViewModel
+import com.subbrain.zerotouch.ui.context.ContextOnboardingScreen
+import com.subbrain.zerotouch.ui.context.ContextProfileDraft
+import com.subbrain.zerotouch.ui.context.ContextSettingsSheet
+import com.subbrain.zerotouch.ui.context.toRequest
 import com.subbrain.zerotouch.ui.components.AmbientDot
 import com.subbrain.zerotouch.ui.components.SideDetailDrawer
 import com.subbrain.zerotouch.ui.theme.ZerotouchTheme
@@ -143,6 +148,8 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     var showWorkspaceSelector by remember { mutableStateOf(false) }
+    var showContextOnboarding by remember { mutableStateOf(false) }
+    var showContextSettings by remember { mutableStateOf(false) }
     var isSidebarCollapsed by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var ambientEnabled by remember { mutableStateOf(AmbientPreferences.isAmbientEnabled(context)) }
@@ -244,6 +251,18 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         }
     }
 
+    LaunchedEffect(uiState.selectedWorkspaceId, uiState.isLoadingSelection) {
+        val workspaceId = uiState.selectedWorkspaceId
+        if (!uiState.isLoadingSelection && !workspaceId.isNullOrBlank()) {
+            viewModel.loadContextProfile(workspaceId)
+            val completed = ContextPreferences.isOnboardingCompleted(context, workspaceId)
+            if (!completed) {
+                showContextOnboarding = true
+                showContextSettings = false
+            }
+        }
+    }
+
     LaunchedEffect(ambientEnabled, hasRecordPermission, hasNotificationPermission) {
         if (!ambientEnabled) return@LaunchedEffect
         val notificationsOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotificationPermission
@@ -313,6 +332,10 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 viewModel.loadSessions(context)
                 viewModel.loadFacts(context, force = true)
                 showWorkspaceSelector = false
+            },
+            onOpenContextSettings = {
+                showWorkspaceSelector = false
+                showContextSettings = true
             }
         )
     }
@@ -335,12 +358,18 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     val selectedAccount = uiState.accounts.firstOrNull { it.id == uiState.selectedAccountId }
     val selectedWorkspace = uiState.workspaces.firstOrNull { it.id == uiState.selectedWorkspaceId }
     val selectedDevice = uiState.devices.firstOrNull { it.device_id == uiState.selectedDeviceId }
+    val selectedWorkspaceId = uiState.selectedWorkspaceId
     val accountLabel = selectedAccount?.display_name
         ?: uiState.authSession?.displayName
         ?: uiState.authSession?.email
         ?: "未選択"
     val workspaceLabel = selectedWorkspace?.name ?: "未選択"
     val deviceLabel = selectedDevice?.display_name ?: "未選択"
+    val contextDraft = ContextProfileDraft.fromProfile(
+        profile = uiState.contextProfile,
+        workspaceName = workspaceLabel,
+        ownerName = accountLabel
+    )
     val currentPageTitle = when (selectedTab) {
         1 -> "タイムライン"
         2 -> "保存済み"
@@ -357,6 +386,21 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         ambientState.isRecording -> "Recording"
         ambientEnabled -> "Listening"
         else -> "Off"
+    }
+
+    if (showContextSettings && !selectedWorkspaceId.isNullOrBlank()) {
+        ContextSettingsSheet(
+            initialDraft = contextDraft,
+            isSaving = uiState.isSavingContext,
+            onSave = { draft ->
+                viewModel.saveContextProfile(
+                    workspaceId = selectedWorkspaceId,
+                    request = draft.toRequest(),
+                    successMessage = "コンテクストを保存しました"
+                )
+            },
+            onDismiss = { showContextSettings = false }
+        )
     }
 
     if (!uiState.isAuthReady) {
@@ -382,6 +426,27 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         uiState.devices.isEmpty()
     ) {
         AuthLoadingScreen()
+        return
+    }
+
+    if (showContextOnboarding && !selectedWorkspaceId.isNullOrBlank()) {
+        ContextOnboardingScreen(
+            initialDraft = contextDraft,
+            isSaving = uiState.isSavingContext,
+            onSkip = {
+                ContextPreferences.setOnboardingCompleted(context, selectedWorkspaceId, true)
+                showContextOnboarding = false
+            },
+            onComplete = { draft ->
+                viewModel.saveContextProfile(
+                    workspaceId = selectedWorkspaceId,
+                    request = draft.toRequest(),
+                    successMessage = "コンテクストを保存しました"
+                )
+                ContextPreferences.setOnboardingCompleted(context, selectedWorkspaceId, true)
+                showContextOnboarding = false
+            }
+        )
         return
     }
 
@@ -1213,7 +1278,8 @@ private fun WorkspaceSelectorSheet(
     onClose: () -> Unit,
     onSignOut: () -> Unit,
     onSelectWorkspace: (String) -> Unit,
-    onSelectDevice: (String) -> Unit
+    onSelectDevice: (String) -> Unit,
+    onOpenContextSettings: () -> Unit
 ) {
     val selectedWorkspaceId = uiState.selectedWorkspaceId
     val filteredDevices = if (!selectedWorkspaceId.isNullOrBlank()) {
@@ -1280,6 +1346,13 @@ private fun WorkspaceSelectorSheet(
                         onClick = { onSelectWorkspace(workspace.id) }
                     )
                 }
+            }
+
+            OutlinedButton(
+                onClick = onOpenContextSettings,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("コンテクストを編集")
             }
 
             HorizontalDivider(color = ZtOutline)

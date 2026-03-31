@@ -10,6 +10,8 @@ import com.subbrain.zerotouch.api.FactSummary
 import com.subbrain.zerotouch.api.AccountSummary
 import com.subbrain.zerotouch.api.AuthPreferences
 import com.subbrain.zerotouch.api.AuthSession
+import com.subbrain.zerotouch.api.ContextProfile
+import com.subbrain.zerotouch.api.ContextProfileRequest
 import com.subbrain.zerotouch.api.SessionListResponse
 import com.subbrain.zerotouch.api.SessionSummary
 import com.subbrain.zerotouch.api.TopicSummary
@@ -112,7 +114,10 @@ data class ZeroTouchUiState(
     val message: String? = null,
     val dismissedIds: Set<String> = emptySet(),
     val favoriteIds: Set<String> = emptySet(),
-    val selectedCardId: String? = null
+    val selectedCardId: String? = null,
+    val contextProfile: ContextProfile? = null,
+    val isLoadingContext: Boolean = false,
+    val isSavingContext: Boolean = false
 )
 
 class ZeroTouchViewModel : ViewModel() {
@@ -423,6 +428,51 @@ class ZeroTouchViewModel : ViewModel() {
             selectedWorkspaceId = workspaceId ?: _uiState.value.selectedWorkspaceId,
             selectedDeviceId = deviceId
         )
+    }
+
+    fun loadContextProfile(workspaceId: String) {
+        if (workspaceId.isBlank()) return
+        _uiState.value = _uiState.value.copy(isLoadingContext = true)
+        viewModelScope.launch {
+            try {
+                val envelope = api.getContextProfile(workspaceId)
+                _uiState.value = _uiState.value.copy(
+                    contextProfile = envelope.profile,
+                    isLoadingContext = false
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "loadContextProfile failed", e)
+                _uiState.value = _uiState.value.copy(
+                    isLoadingContext = false,
+                    error = "コンテクストの取得に失敗しました: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun saveContextProfile(
+        workspaceId: String,
+        request: ContextProfileRequest,
+        successMessage: String? = null
+    ) {
+        if (workspaceId.isBlank()) return
+        _uiState.value = _uiState.value.copy(isSavingContext = true)
+        viewModelScope.launch {
+            try {
+                val profile = api.upsertContextProfile(workspaceId, request)
+                _uiState.value = _uiState.value.copy(
+                    contextProfile = profile,
+                    isSavingContext = false,
+                    message = successMessage
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "saveContextProfile failed", e)
+                _uiState.value = _uiState.value.copy(
+                    isSavingContext = false,
+                    error = "コンテクストの保存に失敗しました: ${e.message}"
+                )
+            }
+        }
     }
 
     fun loadSessions(context: Context) {

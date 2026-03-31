@@ -136,6 +136,43 @@ data class DeviceSettings(
     val llm_model: String? = null
 )
 
+data class ContextProfile(
+    val workspace_id: String,
+    val profile_name: String? = null,
+    val owner_name: String? = null,
+    val role_title: String? = null,
+    val environment: String? = null,
+    val usage_scenario: String? = null,
+    val goal: String? = null,
+    val reference_materials: List<Map<String, Any>> = emptyList(),
+    val glossary: List<Map<String, Any>> = emptyList(),
+    val prompt_preamble: String? = null,
+    val created_at: String? = null,
+    val updated_at: String? = null
+)
+
+data class ContextProfileEnvelope(
+    val workspace_id: String,
+    val profile: ContextProfile? = null
+)
+
+data class ContextProfileResponse(
+    val status: String,
+    val profile: ContextProfile? = null
+)
+
+data class ContextProfileRequest(
+    val profile_name: String? = null,
+    val owner_name: String? = null,
+    val role_title: String? = null,
+    val environment: String? = null,
+    val usage_scenario: String? = null,
+    val goal: String? = null,
+    val reference_materials: List<Map<String, Any>>? = null,
+    val glossary: List<Map<String, Any>>? = null,
+    val prompt_preamble: String? = null
+)
+
 data class AccountSummary(
     val id: String,
     val display_name: String,
@@ -598,6 +635,45 @@ class ZeroTouchApi(
             throw Exception("List devices failed: ${response.code}")
         }
         gson.fromJson(body, DeviceListResponse::class.java)
+    }
+
+    suspend fun getContextProfile(workspaceId: String): ContextProfileEnvelope = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/context-profiles/$workspaceId"
+        Log.d(TAG, "GET $url")
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "GET $url failed: ${response.code} ${response.message} body=$body")
+            throw Exception("Get context profile failed: ${response.code}")
+        }
+        val type = object : TypeToken<ContextProfileEnvelope>() {}.type
+        gson.fromJson(body, type)
+    }
+
+    suspend fun upsertContextProfile(
+        workspaceId: String,
+        payload: ContextProfileRequest
+    ): ContextProfile = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/context-profiles/$workspaceId"
+        val request = Request.Builder()
+            .url(url)
+            .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "POST $url failed: ${response.code} ${response.message} body=$body")
+            throw Exception("Upsert context profile failed: ${response.code}")
+        }
+        val type = object : TypeToken<ContextProfileResponse>() {}.type
+        val envelope: ContextProfileResponse = gson.fromJson(body, type)
+        envelope.profile ?: throw Exception("Context profile missing in response")
     }
 
     fun parseCards(cardsResult: Map<String, Any>?): List<Card> {

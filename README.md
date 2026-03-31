@@ -57,6 +57,19 @@ ZeroTouch は今後 `account -> workspace -> device` の多層モデルで運用
 既存パイプラインは引き続き `device_id` で動作しますが、`workspace_id` を併せて持つことで、
 複数デバイスや仮想デバイスを 1 つのナレッジ単位に束ねられるようにします。
 
+## Context Enrichment
+
+会話だけでは「何について話しているか」が読みづらいため、
+workspace 単位で事前コンテクストを持たせる取り組みを進めています。
+
+- 設計文書: [docs/context-enrichment-project.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/context-enrichment-project.md)
+- DB 拡張: `zerotouch_context_profiles` に `account / workspace / device / environment / analysis` の JSONB カラムを追加
+- Android: 初回オンボーディング画面と、あとから編集できる Context Settings を実装済み
+- API: `/api/context-profiles/{workspace_id}` の GET / POST を使って保存する
+
+この段階では、複雑な推論ではなく「前提情報を先に入力できる状態」を優先します。
+次の焦点は、保存したコンテクストを Viewer と生成処理へ注入して、分析精度の変化を確認することです。
+
 ## 認証
 
 Android は Supabase Auth を使い、**Google ログイン** と **メールアドレス + パスワード** に対応しています。
