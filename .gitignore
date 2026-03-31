@@ -24,3 +24,6 @@ backend/services/asr_providers/__pycache__/
 
 # Heap dumps
 *.hprof
+
+# Amical experiments
+experiments/amical/artifacts/
