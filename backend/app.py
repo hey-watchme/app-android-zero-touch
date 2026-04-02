@@ -150,9 +150,20 @@ class AccountCreateRequest(BaseModel):
     avatar_url: Optional[str] = None
 
 
+class AccountUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+
 class WorkspaceCreateRequest(BaseModel):
     name: str
     owner_account_id: Optional[str] = None
+    slug: Optional[str] = None
+    description: Optional[str] = None
+
+
+class WorkspaceUpdateRequest(BaseModel):
+    name: Optional[str] = None
     slug: Optional[str] = None
     description: Optional[str] = None
 
@@ -169,13 +180,53 @@ class DeviceCreateRequest(BaseModel):
     is_active: bool = True
 
 
+class DeviceUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    context_note: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class ContextAccountContextRequest(BaseModel):
+    owner_name: Optional[str] = None
+    role_title: Optional[str] = None
+    identity_summary: Optional[str] = None
+
+
+class ContextWorkspaceContextRequest(BaseModel):
+    profile_name: Optional[str] = None
+    usage_scenario: Optional[str] = None
+
+
+class ContextDeviceContextRequest(BaseModel):
+    device_id: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class ContextEnvironmentContextRequest(BaseModel):
+    summary: Optional[str] = None
+
+
+class ContextAnalysisContextRequest(BaseModel):
+    goal: Optional[str] = None
+    notes: Optional[str] = None
+
+
 class ContextProfileRequest(BaseModel):
+    schema_version: Optional[int] = 1
     profile_name: Optional[str] = None
     owner_name: Optional[str] = None
     role_title: Optional[str] = None
+    identity_summary: Optional[str] = None
     environment: Optional[str] = None
     usage_scenario: Optional[str] = None
     goal: Optional[str] = None
+    analysis_notes: Optional[str] = None
+    account_context: Optional[ContextAccountContextRequest] = None
+    workspace_context: Optional[ContextWorkspaceContextRequest] = None
+    device_contexts: Optional[List[ContextDeviceContextRequest]] = None
+    environment_context: Optional[ContextEnvironmentContextRequest] = None
+    analysis_context: Optional[ContextAnalysisContextRequest] = None
+    onboarding_completed_at: Optional[str] = None
     reference_materials: Optional[List[Dict[str, Any]]] = None
     glossary: Optional[List[Dict[str, Any]]] = None
     prompt_preamble: Optional[str] = None
@@ -289,6 +340,335 @@ def _workspace_ids_for_account(account_id: str) -> List[str]:
         or []
     )
     return [str(row.get("workspace_id")).strip() for row in rows if row.get("workspace_id")]
+
+
+def _normalize_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _first_non_blank(*values: Any) -> Optional[str]:
+    for value in values:
+        text = _normalize_text(value)
+        if text:
+            return text
+    return None
+
+
+def _safe_json_object(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
+
+
+def _parse_prompt_preamble(preamble: Optional[str]) -> Dict[str, str]:
+    if not preamble:
+        return {}
+    result: Dict[str, str] = {}
+    prefixes = {
+        "Identity:": "identity_summary",
+        "Role:": "role_title",
+        "Workspace:": "workspace_summary",
+        "Device:": "device_summary",
+        "Environment:": "environment_summary",
+        "Goal:": "analysis_goal",
+        "Notes:": "analysis_notes",
+    }
+    for raw_line in str(preamble).splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        for prefix, key in prefixes.items():
+            if line.startswith(prefix):
+                value = _normalize_text(line[len(prefix):])
+                if value:
+                    result[key] = value
+                break
+    return result
+
+
+def _build_prompt_preamble(
+    identity_summary: Optional[str],
+    role_title: Optional[str],
+    workspace_summary: Optional[str],
+    device_summary: Optional[str],
+    environment_summary: Optional[str],
+    analysis_goal: Optional[str],
+    analysis_notes: Optional[str],
+) -> Optional[str]:
+    lines: List[str] = []
+    mapping = [
+        ("Identity", identity_summary),
+        ("Role", role_title),
+        ("Workspace", workspace_summary),
+        ("Device", device_summary),
+        ("Environment", environment_summary),
+        ("Goal", analysis_goal),
+        ("Notes", analysis_notes),
+    ]
+    for label, value in mapping:
+        text = _normalize_text(value)
+        if text:
+            lines.append(f"{label}: {text}")
+    if not lines:
+        return None
+    return "\n".join(lines)
+
+
+def _normalize_device_contexts(raw_device_contexts: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw_device_contexts, list):
+        return []
+    result: List[Dict[str, Any]] = []
+    for item in raw_device_contexts:
+        if not isinstance(item, dict):
+            continue
+        device_id = _normalize_text(item.get("device_id"))
+        summary = _normalize_text(item.get("summary"))
+        if not device_id and not summary:
+            continue
+        row: Dict[str, Any] = {}
+        if device_id:
+            row["device_id"] = device_id
+        if summary:
+            row["summary"] = summary
+        result.append(row)
+    return result
+
+
+def _build_context_profile_payload(
+    workspace_id: str,
+    body: ContextProfileRequest,
+) -> Dict[str, Any]:
+    prompt_fields = _parse_prompt_preamble(body.prompt_preamble)
+
+    account_ctx_in = body.account_context
+    workspace_ctx_in = body.workspace_context
+    environment_ctx_in = body.environment_context
+    analysis_ctx_in = body.analysis_context
+    device_ctx_in = body.device_contexts or []
+
+    owner_name = _first_non_blank(
+        body.owner_name,
+        account_ctx_in.owner_name if account_ctx_in else None,
+    )
+    role_title = _first_non_blank(
+        body.role_title,
+        account_ctx_in.role_title if account_ctx_in else None,
+        prompt_fields.get("role_title"),
+    )
+    identity_summary = _first_non_blank(
+        body.identity_summary,
+        account_ctx_in.identity_summary if account_ctx_in else None,
+        prompt_fields.get("identity_summary"),
+    )
+    profile_name = _first_non_blank(
+        body.profile_name,
+        workspace_ctx_in.profile_name if workspace_ctx_in else None,
+    )
+    usage_scenario = _first_non_blank(
+        body.usage_scenario,
+        workspace_ctx_in.usage_scenario if workspace_ctx_in else None,
+        prompt_fields.get("workspace_summary"),
+    )
+    environment_summary = _first_non_blank(
+        body.environment,
+        environment_ctx_in.summary if environment_ctx_in else None,
+        prompt_fields.get("environment_summary"),
+    )
+    analysis_goal = _first_non_blank(
+        body.goal,
+        analysis_ctx_in.goal if analysis_ctx_in else None,
+        prompt_fields.get("analysis_goal"),
+    )
+    analysis_notes = _first_non_blank(
+        body.analysis_notes,
+        analysis_ctx_in.notes if analysis_ctx_in else None,
+        prompt_fields.get("analysis_notes"),
+    )
+
+    normalized_device_contexts: List[Dict[str, Any]] = []
+    for item in device_ctx_in:
+        if item is None:
+            continue
+        device_id = _normalize_text(item.device_id)
+        summary = _normalize_text(item.summary)
+        if not device_id and not summary:
+            continue
+        row: Dict[str, Any] = {}
+        if device_id:
+            row["device_id"] = device_id
+        if summary:
+            row["summary"] = summary
+        normalized_device_contexts.append(row)
+
+    if not normalized_device_contexts:
+        legacy_device_summary = _first_non_blank(prompt_fields.get("device_summary"))
+        if legacy_device_summary:
+            normalized_device_contexts = [{"summary": legacy_device_summary}]
+
+    account_context: Dict[str, Any] = {}
+    if owner_name:
+        account_context["owner_name"] = owner_name
+    if role_title:
+        account_context["role_title"] = role_title
+    if identity_summary:
+        account_context["identity_summary"] = identity_summary
+
+    workspace_context: Dict[str, Any] = {}
+    if profile_name:
+        workspace_context["profile_name"] = profile_name
+    if usage_scenario:
+        workspace_context["usage_scenario"] = usage_scenario
+
+    environment_context: Dict[str, Any] = {}
+    if environment_summary:
+        environment_context["summary"] = environment_summary
+
+    analysis_context: Dict[str, Any] = {}
+    if analysis_goal:
+        analysis_context["goal"] = analysis_goal
+    if analysis_notes:
+        analysis_context["notes"] = analysis_notes
+
+    prompt_preamble = _build_prompt_preamble(
+        identity_summary=identity_summary,
+        role_title=role_title,
+        workspace_summary=usage_scenario,
+        device_summary=normalized_device_contexts[0].get("summary") if normalized_device_contexts else None,
+        environment_summary=environment_summary,
+        analysis_goal=analysis_goal,
+        analysis_notes=analysis_notes,
+    )
+
+    now_iso = datetime.now().isoformat()
+    schema_version = body.schema_version if body.schema_version and body.schema_version > 0 else 1
+    payload: Dict[str, Any] = {
+        "workspace_id": workspace_id,
+        "schema_version": schema_version,
+        "profile_name": profile_name,
+        "owner_name": owner_name,
+        "role_title": role_title,
+        "environment": environment_summary,
+        "usage_scenario": usage_scenario,
+        "goal": analysis_goal,
+        "account_context": account_context,
+        "workspace_context": workspace_context,
+        "device_contexts": normalized_device_contexts,
+        "environment_context": environment_context,
+        "analysis_context": analysis_context,
+        "reference_materials": body.reference_materials or [],
+        "glossary": body.glossary or [],
+        "prompt_preamble": prompt_preamble,
+        "updated_at": now_iso,
+    }
+
+    if body.onboarding_completed_at is not None:
+        payload["onboarding_completed_at"] = _normalize_text(body.onboarding_completed_at)
+
+    return payload
+
+
+def _normalize_context_profile_record(profile: Dict[str, Any]) -> Dict[str, Any]:
+    prompt_fields = _parse_prompt_preamble(profile.get("prompt_preamble"))
+    account_context = _safe_json_object(profile.get("account_context"))
+    workspace_context = _safe_json_object(profile.get("workspace_context"))
+    environment_context = _safe_json_object(profile.get("environment_context"))
+    analysis_context = _safe_json_object(profile.get("analysis_context"))
+    device_contexts = _normalize_device_contexts(profile.get("device_contexts"))
+
+    owner_name = _first_non_blank(profile.get("owner_name"), account_context.get("owner_name"))
+    role_title = _first_non_blank(profile.get("role_title"), account_context.get("role_title"), prompt_fields.get("role_title"))
+    identity_summary = _first_non_blank(account_context.get("identity_summary"), prompt_fields.get("identity_summary"))
+    profile_name = _first_non_blank(profile.get("profile_name"), workspace_context.get("profile_name"))
+    usage_scenario = _first_non_blank(profile.get("usage_scenario"), workspace_context.get("usage_scenario"), prompt_fields.get("workspace_summary"))
+
+    first_device_summary = None
+    if device_contexts:
+        first_device_summary = _first_non_blank(device_contexts[0].get("summary"))
+    device_summary = _first_non_blank(first_device_summary, prompt_fields.get("device_summary"))
+    if not device_contexts and device_summary:
+        device_contexts = [{"summary": device_summary}]
+
+    environment_summary = _first_non_blank(profile.get("environment"), environment_context.get("summary"), prompt_fields.get("environment_summary"))
+    analysis_goal = _first_non_blank(profile.get("goal"), analysis_context.get("goal"), prompt_fields.get("analysis_goal"))
+    analysis_notes = _first_non_blank(analysis_context.get("notes"), prompt_fields.get("analysis_notes"))
+
+    normalized_account_context = dict(account_context)
+    if owner_name:
+        normalized_account_context["owner_name"] = owner_name
+    if role_title:
+        normalized_account_context["role_title"] = role_title
+    if identity_summary:
+        normalized_account_context["identity_summary"] = identity_summary
+
+    normalized_workspace_context = dict(workspace_context)
+    if profile_name:
+        normalized_workspace_context["profile_name"] = profile_name
+    if usage_scenario:
+        normalized_workspace_context["usage_scenario"] = usage_scenario
+
+    normalized_environment_context = dict(environment_context)
+    if environment_summary:
+        normalized_environment_context["summary"] = environment_summary
+
+    normalized_analysis_context = dict(analysis_context)
+    if analysis_goal:
+        normalized_analysis_context["goal"] = analysis_goal
+    if analysis_notes:
+        normalized_analysis_context["notes"] = analysis_notes
+
+    prompt_preamble = _build_prompt_preamble(
+        identity_summary=identity_summary,
+        role_title=role_title,
+        workspace_summary=usage_scenario,
+        device_summary=device_summary,
+        environment_summary=environment_summary,
+        analysis_goal=analysis_goal,
+        analysis_notes=analysis_notes,
+    )
+    if not prompt_preamble:
+        prompt_preamble = _normalize_text(profile.get("prompt_preamble"))
+
+    normalized = dict(profile)
+    normalized["schema_version"] = int(profile.get("schema_version") or 1)
+    normalized["profile_name"] = profile_name
+    normalized["owner_name"] = owner_name
+    normalized["role_title"] = role_title
+    normalized["environment"] = environment_summary
+    normalized["usage_scenario"] = usage_scenario
+    normalized["goal"] = analysis_goal
+    normalized["identity_summary"] = identity_summary
+    normalized["device_summary"] = device_summary
+    normalized["analysis_notes"] = analysis_notes
+    normalized["account_context"] = normalized_account_context
+    normalized["workspace_context"] = normalized_workspace_context
+    normalized["device_contexts"] = device_contexts
+    normalized["environment_context"] = normalized_environment_context
+    normalized["analysis_context"] = normalized_analysis_context
+    normalized["prompt_preamble"] = prompt_preamble
+    normalized["reference_materials"] = profile.get("reference_materials") or []
+    normalized["glossary"] = profile.get("glossary") or []
+    return normalized
+
+
+def _upsert_context_profile_compat(payload: Dict[str, Any]) -> Dict[str, Any]:
+    candidate = dict(payload)
+    while True:
+        try:
+            rows = supabase.table(CONTEXT_PROFILE_TABLE).upsert(candidate).execute().data or []
+            return rows[0] if rows else candidate
+        except Exception as error:
+            missing_columns = [
+                column
+                for column in list(candidate.keys())
+                if column != "workspace_id" and _error_mentions_missing_column(error, column)
+            ]
+            if not missing_columns:
+                raise
+            for column in missing_columns:
+                candidate.pop(column, None)
 
 
 # --- Upload ---
@@ -656,6 +1036,33 @@ def create_account(body: AccountCreateRequest):
     return {"status": "ok", "account": rows[0] if rows else payload}
 
 
+@app.patch("/api/accounts/{account_id}")
+def update_account(account_id: str, body: AccountUpdateRequest):
+    now_iso = datetime.now().isoformat()
+    payload: Dict[str, Any] = {"updated_at": now_iso}
+
+    if body.display_name is not None:
+        name = body.display_name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="display_name must not be empty")
+        payload["display_name"] = name
+
+    if body.avatar_url is not None:
+        payload["avatar_url"] = (body.avatar_url or "").strip() or None
+
+    rows = (
+        supabase.table(ACCOUNT_TABLE)
+        .update(payload)
+        .eq("id", account_id)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"status": "ok", "account": rows[0]}
+
+
 @app.get("/api/workspaces")
 def list_workspaces(account_id: Optional[str] = None):
     if account_id:
@@ -716,6 +1123,36 @@ def create_workspace(body: WorkspaceCreateRequest):
     return {"status": "ok", "workspace": workspace}
 
 
+@app.patch("/api/workspaces/{workspace_id}")
+def update_workspace(workspace_id: str, body: WorkspaceUpdateRequest):
+    now_iso = datetime.now().isoformat()
+    payload: Dict[str, Any] = {"updated_at": now_iso}
+
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name must not be empty")
+        payload["name"] = name
+
+    if body.slug is not None:
+        payload["slug"] = (body.slug or "").strip() or None
+
+    if body.description is not None:
+        payload["description"] = (body.description or "").strip() or None
+
+    rows = (
+        supabase.table(WORKSPACE_TABLE)
+        .update(payload)
+        .eq("id", workspace_id)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return {"status": "ok", "workspace": rows[0]}
+
+
 @app.get("/api/devices")
 def list_devices(
     workspace_id: Optional[str] = None,
@@ -753,6 +1190,36 @@ def create_device(body: DeviceCreateRequest):
     return {"status": "ok", "device": rows[0] if rows else payload}
 
 
+@app.patch("/api/devices/{device_row_id}")
+def update_device(device_row_id: str, body: DeviceUpdateRequest):
+    now_iso = datetime.now().isoformat()
+    payload: Dict[str, Any] = {"updated_at": now_iso}
+
+    if body.display_name is not None:
+        display_name = body.display_name.strip()
+        if not display_name:
+            raise HTTPException(status_code=400, detail="display_name must not be empty")
+        payload["display_name"] = display_name
+
+    if body.context_note is not None:
+        payload["context_note"] = (body.context_note or "").strip() or None
+
+    if body.is_active is not None:
+        payload["is_active"] = body.is_active
+
+    rows = (
+        supabase.table(DEVICE_TABLE)
+        .update(payload)
+        .eq("id", device_row_id)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Device not found")
+    return {"status": "ok", "device": rows[0]}
+
+
 @app.get("/api/context-profiles/{workspace_id}")
 def get_context_profile(workspace_id: str):
     rows = (
@@ -767,27 +1234,14 @@ def get_context_profile(workspace_id: str):
     profile = rows[0] if rows else None
     if not profile:
         return {"workspace_id": workspace_id, "profile": None}
-    return {"workspace_id": workspace_id, "profile": profile}
+    return {"workspace_id": workspace_id, "profile": _normalize_context_profile_record(profile)}
 
 
 @app.post("/api/context-profiles/{workspace_id}")
 def upsert_context_profile(workspace_id: str, body: ContextProfileRequest):
-    now_iso = datetime.now().isoformat()
-    payload = {
-        "workspace_id": workspace_id,
-        "profile_name": (body.profile_name or "").strip() or None,
-        "owner_name": (body.owner_name or "").strip() or None,
-        "role_title": (body.role_title or "").strip() or None,
-        "environment": (body.environment or "").strip() or None,
-        "usage_scenario": (body.usage_scenario or "").strip() or None,
-        "goal": (body.goal or "").strip() or None,
-        "reference_materials": body.reference_materials or [],
-        "glossary": body.glossary or [],
-        "prompt_preamble": (body.prompt_preamble or "").strip() or None,
-        "updated_at": now_iso,
-    }
-    rows = supabase.table(CONTEXT_PROFILE_TABLE).upsert(payload).execute().data or []
-    return {"status": "ok", "profile": rows[0] if rows else payload}
+    payload = _build_context_profile_payload(workspace_id=workspace_id, body=body)
+    saved = _upsert_context_profile_compat(payload)
+    return {"status": "ok", "profile": _normalize_context_profile_record(saved)}
 
 
 @app.get("/api/device-settings/{device_id}")

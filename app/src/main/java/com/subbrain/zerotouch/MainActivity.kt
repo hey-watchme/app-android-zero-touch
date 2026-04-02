@@ -90,7 +90,6 @@ import com.subbrain.zerotouch.ui.ZeroTouchUiState
 import com.subbrain.zerotouch.ui.ZeroTouchViewModel
 import com.subbrain.zerotouch.ui.context.ContextOnboardingScreen
 import com.subbrain.zerotouch.ui.context.ContextProfileDraft
-import com.subbrain.zerotouch.ui.context.ContextSettingsSheet
 import com.subbrain.zerotouch.ui.context.toRequest
 import com.subbrain.zerotouch.ui.components.AmbientDot
 import com.subbrain.zerotouch.ui.components.SideDetailDrawer
@@ -149,7 +148,6 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     var showSettings by remember { mutableStateOf(false) }
     var showWorkspaceSelector by remember { mutableStateOf(false) }
     var showContextOnboarding by remember { mutableStateOf(false) }
-    var showContextSettings by remember { mutableStateOf(false) }
     var isSidebarCollapsed by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var ambientEnabled by remember { mutableStateOf(AmbientPreferences.isAmbientEnabled(context)) }
@@ -258,7 +256,6 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
             val completed = ContextPreferences.isOnboardingCompleted(context, workspaceId)
             if (!completed) {
                 showContextOnboarding = true
-                showContextSettings = false
             }
         }
     }
@@ -313,33 +310,6 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         )
     }
 
-    if (showWorkspaceSelector) {
-        WorkspaceSelectorSheet(
-            uiState = uiState,
-            onClose = { showWorkspaceSelector = false },
-            onSignOut = {
-                googleSignInClient.signOut()
-                viewModel.signOut(context)
-                showWorkspaceSelector = false
-            },
-            onSelectWorkspace = { workspaceId ->
-                viewModel.selectWorkspace(context, workspaceId)
-                viewModel.loadSessions(context)
-                viewModel.loadFacts(context, force = true)
-            },
-            onSelectDevice = { deviceId ->
-                viewModel.selectDevice(context, deviceId)
-                viewModel.loadSessions(context)
-                viewModel.loadFacts(context, force = true)
-                showWorkspaceSelector = false
-            },
-            onOpenContextSettings = {
-                showWorkspaceSelector = false
-                showContextSettings = true
-            }
-        )
-    }
-
     val activeTopicCount = uiState.topicCards.count { it.status == "active" }
     val savedCount = uiState.favoriteIds.size
     val analysisCount = uiState.topicCards.count { (it.importanceLevel ?: -1) >= 3 }
@@ -388,18 +358,37 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         else -> "Off"
     }
 
-    if (showContextSettings && !selectedWorkspaceId.isNullOrBlank()) {
-        ContextSettingsSheet(
+    if (showWorkspaceSelector) {
+        WorkspaceSelectorSheet(
+            uiState = uiState,
             initialDraft = contextDraft,
             isSaving = uiState.isSavingContext,
-            onSave = { draft ->
-                viewModel.saveContextProfile(
-                    workspaceId = selectedWorkspaceId,
-                    request = draft.toRequest(),
-                    successMessage = "コンテクストを保存しました"
-                )
+            onClose = { showWorkspaceSelector = false },
+            onSignOut = {
+                googleSignInClient.signOut()
+                viewModel.signOut(context)
+                showWorkspaceSelector = false
             },
-            onDismiss = { showContextSettings = false }
+            onSelectWorkspace = { workspaceId ->
+                viewModel.selectWorkspace(context, workspaceId)
+                viewModel.loadSessions(context)
+                viewModel.loadFacts(context, force = true)
+            },
+            onSelectDevice = { deviceId ->
+                viewModel.selectDevice(context, deviceId)
+                viewModel.loadSessions(context)
+                viewModel.loadFacts(context, force = true)
+            },
+            onSaveProfile = { accountName, workspaceName, workspaceDescription, deviceName, draft ->
+                viewModel.saveMyPageProfile(
+                    accountDisplayName = accountName,
+                    workspaceName = workspaceName,
+                    workspaceDescription = workspaceDescription,
+                    deviceDisplayName = deviceName,
+                    contextRequest = draft.toRequest(),
+                    successMessage = "プロフィールを保存しました"
+                )
+            }
         )
     }
 
@@ -1275,59 +1264,253 @@ private fun WorkspaceSwitcher(
 @Composable
 private fun WorkspaceSelectorSheet(
     uiState: ZeroTouchUiState,
+    initialDraft: ContextProfileDraft,
+    isSaving: Boolean,
     onClose: () -> Unit,
     onSignOut: () -> Unit,
     onSelectWorkspace: (String) -> Unit,
     onSelectDevice: (String) -> Unit,
-    onOpenContextSettings: () -> Unit
+    onSaveProfile: (String, String, String, String, ContextProfileDraft) -> Unit
 ) {
     val selectedWorkspaceId = uiState.selectedWorkspaceId
+    val currentAccount = uiState.accounts.firstOrNull { it.id == uiState.selectedAccountId }
+    val currentWorkspace = uiState.workspaces.firstOrNull { it.id == selectedWorkspaceId }
+    val currentDevice = uiState.devices.firstOrNull { it.device_id == uiState.selectedDeviceId }
     val filteredDevices = if (!selectedWorkspaceId.isNullOrBlank()) {
         uiState.devices.filter { it.workspace_id == selectedWorkspaceId }
     } else {
         uiState.devices
     }
+    var isEditing by remember { mutableStateOf(false) }
+    var accountName by remember { mutableStateOf(currentAccount?.display_name.orEmpty()) }
+    var workspaceName by remember { mutableStateOf(currentWorkspace?.name.orEmpty()) }
+    var workspaceDescription by remember { mutableStateOf(currentWorkspace?.description.orEmpty()) }
+    var deviceName by remember { mutableStateOf(currentDevice?.display_name.orEmpty()) }
+    var draft by remember { mutableStateOf(initialDraft) }
+    var pendingSave by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentAccount?.id, currentWorkspace?.id, currentDevice?.id) {
+        if (!isEditing) {
+            accountName = currentAccount?.display_name.orEmpty()
+            workspaceName = currentWorkspace?.name.orEmpty()
+            workspaceDescription = currentWorkspace?.description.orEmpty()
+            deviceName = currentDevice?.display_name.orEmpty()
+        }
+    }
+
+    LaunchedEffect(initialDraft) {
+        if (!isEditing) {
+            draft = initialDraft
+        }
+    }
+
+    val canSave = !isSaving &&
+        accountName.isNotBlank() &&
+        (currentWorkspace == null || workspaceName.isNotBlank()) &&
+        (currentDevice == null || deviceName.isNotBlank())
+
+    LaunchedEffect(isSaving, uiState.message, uiState.error, pendingSave) {
+        if (!pendingSave || isSaving) return@LaunchedEffect
+        if (!uiState.message.isNullOrBlank()) {
+            isEditing = false
+            pendingSave = false
+            return@LaunchedEffect
+        }
+        if (!uiState.error.isNullOrBlank()) {
+            pendingSave = false
+        }
+    }
 
     SideDetailDrawer(
-        title = "Account / Workspace / Device",
+        title = "マイページ",
         onClose = onClose
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (uiState.authSession != null) {
                 Text(
-                    text = "ログイン中",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ZtCaption
+                    text = "ログイン中: ${uiState.authSession.displayName ?: uiState.authSession.email ?: "User"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "ログイン中: ${uiState.authSession.displayName ?: uiState.authSession.email ?: "User"}",
-                    style = MaterialTheme.typography.bodySmall,
+                    text = uiState.authSession.email ?: "",
+                    style = MaterialTheme.typography.labelMedium,
                     color = ZtOnSurfaceVariant
                 )
-                Button(onClick = onSignOut) {
-                    Text("ログアウト")
-                }
                 HorizontalDivider(color = ZtOutline)
             }
 
-            val currentAccount = uiState.accounts.firstOrNull { it.id == uiState.selectedAccountId }
-            if (currentAccount != null) {
+            if (!isEditing) {
                 Text(
-                    text = "アカウント",
+                    text = "基本情報",
                     style = MaterialTheme.typography.labelMedium,
                     color = ZtCaption
                 )
-                SelectionRow(
-                    title = currentAccount.display_name,
-                    subtitle = currentAccount.email ?: "Google ログイン中のアカウント",
-                    selected = true,
-                    onClick = {}
-                )
+                ProfileValueLine("アカウント", currentAccount?.display_name ?: "未設定")
+                ProfileValueLine("ワークスペース", currentWorkspace?.name ?: "未選択")
+                ProfileValueLine("説明", currentWorkspace?.description ?: "未設定")
+                ProfileValueLine("デバイス", currentDevice?.display_name ?: "未選択")
                 HorizontalDivider(color = ZtOutline)
+
+                Text(
+                    text = "コンテクスト",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ZtCaption
+                )
+                ProfileValueLine("役割", draft.roleTitle.ifBlank { "未設定" })
+                ProfileValueLine("あなたについて", draft.identitySummary.ifBlank { "未設定" })
+                ProfileValueLine("ワークスペース前提", draft.workspaceSummary.ifBlank { "未設定" })
+                ProfileValueLine("デバイス前提", draft.deviceSummary.ifBlank { "未設定" })
+                ProfileValueLine("環境", draft.environmentSummary.ifBlank { "未設定" })
+                ProfileValueLine("分析ゴール", draft.analysisGoal.ifBlank { "未設定" })
+                ProfileValueLine("補足メモ", draft.analysisNotes.ifBlank { "未設定" })
+
+                OutlinedButton(
+                    onClick = { isEditing = true },
+                    enabled = currentAccount != null || currentWorkspace != null || currentDevice != null,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("編集")
+                }
+            } else {
+                Text(
+                    text = "基本情報を編集",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ZtCaption
+                )
+                OutlinedTextField(
+                    value = accountName,
+                    onValueChange = { accountName = it },
+                    enabled = !isSaving,
+                    label = { Text("アカウント名") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (currentWorkspace != null) {
+                    OutlinedTextField(
+                        value = workspaceName,
+                        onValueChange = { workspaceName = it },
+                        enabled = !isSaving,
+                        label = { Text("ワークスペース名") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = workspaceDescription,
+                        onValueChange = { workspaceDescription = it },
+                        enabled = !isSaving,
+                        label = { Text("ワークスペース説明") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2
+                    )
+                }
+
+                if (currentDevice != null) {
+                    OutlinedTextField(
+                        value = deviceName,
+                        onValueChange = { deviceName = it },
+                        enabled = !isSaving,
+                        label = { Text("デバイス名") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                HorizontalDivider(color = ZtOutline)
+                Text(
+                    text = "コンテクストを編集",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ZtCaption
+                )
+                OutlinedTextField(
+                    value = draft.roleTitle,
+                    onValueChange = { draft = draft.copy(roleTitle = it) },
+                    enabled = !isSaving,
+                    label = { Text("役割 / 肩書き") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = draft.identitySummary,
+                    onValueChange = { draft = draft.copy(identitySummary = it) },
+                    enabled = !isSaving,
+                    label = { Text("あなたについて") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+                OutlinedTextField(
+                    value = draft.workspaceSummary,
+                    onValueChange = { draft = draft.copy(workspaceSummary = it) },
+                    enabled = !isSaving,
+                    label = { Text("ワークスペースの前提") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+                OutlinedTextField(
+                    value = draft.deviceSummary,
+                    onValueChange = { draft = draft.copy(deviceSummary = it) },
+                    enabled = !isSaving,
+                    label = { Text("デバイスの設置場所と用途") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+                OutlinedTextField(
+                    value = draft.environmentSummary,
+                    onValueChange = { draft = draft.copy(environmentSummary = it) },
+                    enabled = !isSaving,
+                    label = { Text("環境コンテクスト") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+                OutlinedTextField(
+                    value = draft.analysisGoal,
+                    onValueChange = { draft = draft.copy(analysisGoal = it) },
+                    enabled = !isSaving,
+                    label = { Text("このアプリで把握したいこと") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2
+                )
+                OutlinedTextField(
+                    value = draft.analysisNotes,
+                    onValueChange = { draft = draft.copy(analysisNotes = it) },
+                    enabled = !isSaving,
+                    label = { Text("補足メモ") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2
+                )
+
+                Button(
+                    onClick = {
+                        pendingSave = true
+                        onSaveProfile(
+                            accountName.trim(),
+                            workspaceName.trim(),
+                            workspaceDescription.trim(),
+                            deviceName.trim(),
+                            draft.copy(
+                                profileName = workspaceName.trim().ifBlank { draft.profileName },
+                                ownerName = accountName.trim().ifBlank { draft.ownerName }
+                            )
+                        )
+                    },
+                    enabled = canSave,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isSaving) "保存中..." else "保存")
+                }
+                OutlinedButton(
+                    onClick = {
+                        isEditing = false
+                        pendingSave = false
+                        draft = initialDraft
+                    },
+                    enabled = !isSaving,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("キャンセル")
+                }
             }
 
+            HorizontalDivider(color = ZtOutline)
             Text(
-                text = "ワークスペース",
+                text = "データソース切替",
                 style = MaterialTheme.typography.labelMedium,
                 color = ZtCaption
             )
@@ -1348,20 +1531,6 @@ private fun WorkspaceSelectorSheet(
                 }
             }
 
-            OutlinedButton(
-                onClick = onOpenContextSettings,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("コンテクストを編集")
-            }
-
-            HorizontalDivider(color = ZtOutline)
-
-            Text(
-                text = "デバイス",
-                style = MaterialTheme.typography.labelMedium,
-                color = ZtCaption
-            )
             if (filteredDevices.isEmpty()) {
                 Text(
                     text = "対象デバイスがありません",
@@ -1383,7 +1552,31 @@ private fun WorkspaceSelectorSheet(
                     )
                 }
             }
+
+            HorizontalDivider(color = ZtOutline)
+            OutlinedButton(
+                onClick = onSignOut,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("ログアウト")
+            }
         }
+    }
+}
+
+@Composable
+private fun ProfileValueLine(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = ZtCaption
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 

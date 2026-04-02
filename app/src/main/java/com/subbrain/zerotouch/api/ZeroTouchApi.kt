@@ -136,14 +136,49 @@ data class DeviceSettings(
     val llm_model: String? = null
 )
 
+data class ContextAccountContext(
+    val owner_name: String? = null,
+    val role_title: String? = null,
+    val identity_summary: String? = null
+)
+
+data class ContextWorkspaceContext(
+    val profile_name: String? = null,
+    val usage_scenario: String? = null
+)
+
+data class ContextDeviceContext(
+    val device_id: String? = null,
+    val summary: String? = null
+)
+
+data class ContextEnvironmentContext(
+    val summary: String? = null
+)
+
+data class ContextAnalysisContext(
+    val goal: String? = null,
+    val notes: String? = null
+)
+
 data class ContextProfile(
     val workspace_id: String,
+    val schema_version: Int? = null,
     val profile_name: String? = null,
     val owner_name: String? = null,
     val role_title: String? = null,
+    val identity_summary: String? = null,
     val environment: String? = null,
     val usage_scenario: String? = null,
     val goal: String? = null,
+    val device_summary: String? = null,
+    val analysis_notes: String? = null,
+    val account_context: ContextAccountContext? = null,
+    val workspace_context: ContextWorkspaceContext? = null,
+    val device_contexts: List<ContextDeviceContext> = emptyList(),
+    val environment_context: ContextEnvironmentContext? = null,
+    val analysis_context: ContextAnalysisContext? = null,
+    val onboarding_completed_at: String? = null,
     val reference_materials: List<Map<String, Any>> = emptyList(),
     val glossary: List<Map<String, Any>> = emptyList(),
     val prompt_preamble: String? = null,
@@ -162,12 +197,21 @@ data class ContextProfileResponse(
 )
 
 data class ContextProfileRequest(
+    val schema_version: Int? = null,
     val profile_name: String? = null,
     val owner_name: String? = null,
     val role_title: String? = null,
+    val identity_summary: String? = null,
     val environment: String? = null,
     val usage_scenario: String? = null,
     val goal: String? = null,
+    val analysis_notes: String? = null,
+    val account_context: ContextAccountContext? = null,
+    val workspace_context: ContextWorkspaceContext? = null,
+    val device_contexts: List<ContextDeviceContext>? = null,
+    val environment_context: ContextEnvironmentContext? = null,
+    val analysis_context: ContextAnalysisContext? = null,
+    val onboarding_completed_at: String? = null,
     val reference_materials: List<Map<String, Any>>? = null,
     val glossary: List<Map<String, Any>>? = null,
     val prompt_preamble: String? = null
@@ -190,6 +234,11 @@ data class AccountListResponse(
 data class AccountCreateResponse(
     val status: String,
     val account: AccountSummary? = null
+)
+
+data class WorkspaceMutationResponse(
+    val status: String,
+    val workspace: WorkspaceSummary? = null
 )
 
 data class WorkspaceSummary(
@@ -220,6 +269,11 @@ data class DeviceSummary(
 data class DeviceListResponse(
     val devices: List<DeviceSummary>,
     val count: Int
+)
+
+data class DeviceMutationResponse(
+    val status: String,
+    val device: DeviceSummary? = null
 )
 
 data class Card(
@@ -588,6 +642,31 @@ class ZeroTouchApi(
         envelope.account
     }
 
+    suspend fun updateAccount(
+        accountId: String,
+        displayName: String? = null,
+        avatarUrl: String? = null
+    ): AccountSummary = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/accounts/$accountId"
+        val payload = mutableMapOf<String, Any?>()
+        if (displayName != null) payload["display_name"] = displayName
+        if (avatarUrl != null) payload["avatar_url"] = avatarUrl
+
+        val request = Request.Builder()
+            .url(url)
+            .patch(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "PATCH $url failed: ${response.code} ${response.message} body=$body")
+            throw Exception("Update account failed: ${response.code}")
+        }
+        val envelope = gson.fromJson(body, AccountCreateResponse::class.java)
+        envelope.account ?: throw Exception("Account missing in update response")
+    }
+
     suspend fun listWorkspaces(accountId: String? = null): WorkspaceListResponse = withContext(Dispatchers.IO) {
         val url = buildString {
             append("$baseUrl/zerotouch/api/workspaces")
@@ -606,6 +685,31 @@ class ZeroTouchApi(
             throw Exception("List workspaces failed: ${response.code}")
         }
         gson.fromJson(body, WorkspaceListResponse::class.java)
+    }
+
+    suspend fun updateWorkspace(
+        workspaceId: String,
+        name: String? = null,
+        description: String? = null
+    ): WorkspaceSummary = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/workspaces/$workspaceId"
+        val payload = mutableMapOf<String, Any?>()
+        if (name != null) payload["name"] = name
+        if (description != null) payload["description"] = description
+
+        val request = Request.Builder()
+            .url(url)
+            .patch(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "PATCH $url failed: ${response.code} ${response.message} body=$body")
+            throw Exception("Update workspace failed: ${response.code}")
+        }
+        val envelope = gson.fromJson(body, WorkspaceMutationResponse::class.java)
+        envelope.workspace ?: throw Exception("Workspace missing in update response")
     }
 
     suspend fun listDevices(
@@ -635,6 +739,29 @@ class ZeroTouchApi(
             throw Exception("List devices failed: ${response.code}")
         }
         gson.fromJson(body, DeviceListResponse::class.java)
+    }
+
+    suspend fun updateDevice(
+        deviceRowId: String,
+        displayName: String? = null
+    ): DeviceSummary = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/devices/$deviceRowId"
+        val payload = mutableMapOf<String, Any?>()
+        if (displayName != null) payload["display_name"] = displayName
+
+        val request = Request.Builder()
+            .url(url)
+            .patch(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "PATCH $url failed: ${response.code} ${response.message} body=$body")
+            throw Exception("Update device failed: ${response.code}")
+        }
+        val envelope = gson.fromJson(body, DeviceMutationResponse::class.java)
+        envelope.device ?: throw Exception("Device missing in update response")
     }
 
     suspend fun getContextProfile(workspaceId: String): ContextProfileEnvelope = withContext(Dispatchers.IO) {

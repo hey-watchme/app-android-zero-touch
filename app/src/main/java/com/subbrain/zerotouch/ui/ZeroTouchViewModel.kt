@@ -350,24 +350,26 @@ class ZeroTouchViewModel : ViewModel() {
                     emptyList()
                 }
                 val savedWorkspaceId = SelectionPreferences.getSelectedWorkspaceId(context)
-                var resolvedWorkspaceId = when {
-                    !savedWorkspaceId.isNullOrBlank() && workspaces.any { it.id == savedWorkspaceId } -> savedWorkspaceId
-                    workspaces.isNotEmpty() -> workspaces.first().id
-                    else -> null
-                }
+                val physicalDeviceId = DeviceIdProvider.getDeviceId(context)
 
                 val devices = if (resolvedAccountId != null) {
                     api.listDevices(accountId = resolvedAccountId).devices
                 } else {
                     emptyList()
                 }
+                val physicalDeviceRow = devices.firstOrNull { it.device_id == physicalDeviceId }
+                var resolvedWorkspaceId = when {
+                    !savedWorkspaceId.isNullOrBlank() && workspaces.any { it.id == savedWorkspaceId } -> savedWorkspaceId
+                    !physicalDeviceRow?.workspace_id.isNullOrBlank() &&
+                        workspaces.any { it.id == physicalDeviceRow?.workspace_id } -> physicalDeviceRow?.workspace_id
+                    else -> null
+                }
+
                 val savedDeviceId = SelectionPreferences.getSelectedDeviceId(context)
-                val physicalDeviceId = DeviceIdProvider.getDeviceId(context)
                 var resolvedDeviceId = when {
                     !savedDeviceId.isNullOrBlank() && devices.any { it.device_id == savedDeviceId } -> savedDeviceId
-                    devices.any { it.device_id == physicalDeviceId } -> physicalDeviceId
-                    resolvedWorkspaceId != null -> devices.firstOrNull { it.workspace_id == resolvedWorkspaceId }?.device_id
-                    else -> devices.firstOrNull()?.device_id
+                    physicalDeviceRow != null -> physicalDeviceRow.device_id
+                    else -> null
                 }
 
                 if (resolvedDeviceId != null) {
@@ -472,6 +474,114 @@ class ZeroTouchViewModel : ViewModel() {
                     error = "コンテクストの保存に失敗しました: ${e.message}"
                 )
             }
+        }
+    }
+
+    fun saveMyPageProfile(
+        accountDisplayName: String?,
+        workspaceName: String?,
+        workspaceDescription: String?,
+        deviceDisplayName: String?,
+        contextRequest: ContextProfileRequest,
+        successMessage: String? = null
+    ) {
+        val state = _uiState.value
+        val selectedAccountId = state.selectedAccountId
+        val selectedWorkspaceId = state.selectedWorkspaceId
+        val selectedDeviceId = state.selectedDeviceId
+        val selectedDeviceRow = state.devices.firstOrNull { it.device_id == selectedDeviceId }
+
+        _uiState.value = state.copy(isSavingContext = true)
+        viewModelScope.launch {
+            var nextAccounts = _uiState.value.accounts
+            var nextWorkspaces = _uiState.value.workspaces
+            var nextDevices = _uiState.value.devices
+            val warnings = mutableListOf<String>()
+
+            if (!selectedAccountId.isNullOrBlank() && !accountDisplayName.isNullOrBlank()) {
+                runCatching {
+                    api.updateAccount(
+                        accountId = selectedAccountId,
+                        displayName = accountDisplayName.trim()
+                    )
+                }.onSuccess { updated ->
+                    nextAccounts = nextAccounts.map { row ->
+                        if (row.id == updated.id) updated else row
+                    }
+                }.onFailure { e ->
+                    Log.w(TAG, "updateAccount skipped: ${e.message}")
+                    warnings += "アカウント名更新に失敗"
+                }
+            }
+
+            if (!selectedWorkspaceId.isNullOrBlank() && !workspaceName.isNullOrBlank()) {
+                runCatching {
+                    api.updateWorkspace(
+                        workspaceId = selectedWorkspaceId,
+                        name = workspaceName.trim(),
+                        description = workspaceDescription
+                    )
+                }.onSuccess { updated ->
+                    nextWorkspaces = nextWorkspaces.map { row ->
+                        if (row.id == updated.id) updated else row
+                    }
+                }.onFailure { e ->
+                    Log.w(TAG, "updateWorkspace skipped: ${e.message}")
+                    warnings += "ワークスペース更新に失敗"
+                }
+            }
+
+            if (selectedDeviceRow != null && !deviceDisplayName.isNullOrBlank()) {
+                runCatching {
+                    api.updateDevice(
+                        deviceRowId = selectedDeviceRow.id,
+                        displayName = deviceDisplayName.trim()
+                    )
+                }.onSuccess { updated ->
+                    nextDevices = nextDevices.map { row ->
+                        if (row.id == updated.id) updated else row
+                    }
+                }.onFailure { e ->
+                    Log.w(TAG, "updateDevice skipped: ${e.message}")
+                    warnings += "デバイス名更新に失敗"
+                }
+            }
+
+            val contextResult = if (!selectedWorkspaceId.isNullOrBlank()) {
+                runCatching {
+                    api.upsertContextProfile(selectedWorkspaceId, contextRequest)
+                }
+            } else {
+                Result.failure(IllegalStateException("workspace is not selected"))
+            }
+
+            contextResult
+                .onSuccess { profile ->
+                    val message = if (warnings.isEmpty()) {
+                        successMessage
+                    } else {
+                        "コンテクストは保存しました（${warnings.joinToString(" / ")}）"
+                    }
+                    _uiState.value = _uiState.value.copy(
+                        accounts = nextAccounts,
+                        workspaces = nextWorkspaces,
+                        devices = nextDevices,
+                        contextProfile = profile,
+                        isSavingContext = false,
+                        message = message
+                    )
+                }
+                .onFailure { e ->
+                    Log.e(TAG, "saveMyPageProfile context failed", e)
+                    val suffix = if (warnings.isEmpty()) "" else " / ${warnings.joinToString(" / ")}"
+                    _uiState.value = _uiState.value.copy(
+                        accounts = nextAccounts,
+                        workspaces = nextWorkspaces,
+                        devices = nextDevices,
+                        isSavingContext = false,
+                        error = "コンテクスト保存に失敗しました: ${e.message}$suffix"
+                    )
+                }
         }
     }
 
