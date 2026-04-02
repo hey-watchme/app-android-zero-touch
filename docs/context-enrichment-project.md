@@ -48,7 +48,7 @@
 
 - `zerotouch_context_profiles` のスキーマ拡張 migration
 - Android の初回オンボーディング画面
-- Android の Context Settings 編集シート
+- Android のマイページ編集導線
 - API クライアント / ViewModel の context profile 読み書き
 
 バックエンドの endpoint 自体は既に存在しているため、
@@ -274,7 +274,7 @@ ZeroTouch の次段では、
 5. 何を知りたいか
 6. review / skip / save
 
-### 2. マイページ / Context Settings
+### 2. マイページ
 
 オンボーディング後も、いつでも編集可能にする。
 
@@ -352,7 +352,7 @@ Android に最小入力 UI を追加。
 やること:
 
 - 初回オンボーディング画面
-- マイページ / context settings 画面
+- マイページ画面
 - API 経由の保存 / 再取得
 
 ### Phase 3

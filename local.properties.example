@@ -1,0 +1,5 @@
+# Copy these keys into your local `local.properties` alongside `sdk.dir`.
+# Do not commit real values.
+SUPABASE_URL=https://qvtlwotzuzbavrzqhyvt.supabase.co
+SUPABASE_ANON_KEY=your_supabase_anon_key
+GOOGLE_WEB_CLIENT_ID=your_google_web_client_id
