@@ -1,5 +1,9 @@
 # Amical Validation Wrap-Up
 
+> この文書は初期検証の履歴です。
+> 現在の作業再開は [`amical-longterm-memory-handoff.md`](./amical-longterm-memory-handoff.md)、
+> 設計判断は [`knowledge-pipeline-v2.md`](./knowledge-pipeline-v2.md) を参照してください。
+
 ## 目的
 
 この文書は、`Amical` の文字起こし済みログを使った
@@ -13,8 +17,8 @@ ZeroTouch のオフライン価値検証について、
 
 関連文書:
 
-- [amical-stateful-daily-design.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/amical-stateful-daily-design.md)
-- [conversation-pipeline-processes.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/conversation-pipeline-processes.md)
+- [amical-longterm-memory-handoff.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/amical-longterm-memory-handoff.md)
+- [knowledge-pipeline-v2.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/knowledge-pipeline-v2.md)
 
 ---
 

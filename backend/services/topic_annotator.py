@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from supabase import Client
 
 from services.prompts import build_topic_annotation_prompt
+from services.workspace_registry import fetch_context_preamble
 
 
 SESSION_TABLE = "zerotouch_sessions"
@@ -194,12 +195,18 @@ def annotate_topic(
     if not llm_service:
         return {"topic_id": topic_id, "annotated": False, "reason": "llm_unavailable"}
 
+    context_preamble = fetch_context_preamble(
+        supabase=supabase,
+        workspace_id=(topic.get("workspace_id") or ""),
+    )
+
     prompt = build_topic_annotation_prompt(
         final_title=(topic.get("final_title") or "").strip(),
         final_summary=(topic.get("final_summary") or "").strip(),
         final_description=(topic.get("final_description") or "").strip(),
         utterances=utterances,
         now_iso=_iso_now_local(),
+        context_preamble=context_preamble,
     )
 
     try:

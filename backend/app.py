@@ -28,6 +28,7 @@ from services.topic_manager_process2 import (
 )
 from services.topic_annotator import annotate_topic
 from services.topic_manager import backfill_ungrouped_sessions, reconcile_topics
+from services.wiki_ingestor import ingest_wiki
 from services.workspace_registry import resolve_workspace_id_for_device
 
 
@@ -1407,6 +1408,38 @@ def list_sessions(
 
     result = query.execute()
     return {"sessions": result.data or [], "count": len(result.data or [])}
+
+
+# --- Wiki Ingest ---
+
+class WikiIngestRequest(BaseModel):
+    device_id: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    min_importance: int = 3
+
+
+@app.post("/api/ingest-wiki")
+def run_wiki_ingest(request: WikiIngestRequest):
+    """
+    Phase 3: Ingest Facts into wiki pages for a device.
+    Reads all Facts (Lv.min_importance+), calls LLM to generate/update wiki pages,
+    and upserts the result into zerotouch_wiki_pages.
+    """
+    device_id = request.device_id or os.getenv("ZEROTOUCH_DEVICE_ID", "amical-db-test")
+
+    if request.provider and request.model:
+        llm_service = LLMFactory.create(provider=request.provider, model=request.model)
+    else:
+        llm_service = get_current_llm()
+
+    result = ingest_wiki(
+        supabase=supabase,
+        device_id=device_id,
+        llm_service=llm_service,
+        min_importance=request.min_importance,
+    )
+    return result
 
 
 # --- Model Catalog ---

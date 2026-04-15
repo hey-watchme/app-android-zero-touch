@@ -181,6 +181,7 @@ def build_topic_scoring_prompt(
     final_title: str,
     final_summary: str,
     utterances: list[str],
+    context_preamble: str = "",
 ) -> str:
     """
     Build prompt for Phase 1 importance scoring (Lv.0-5).
@@ -189,7 +190,16 @@ def build_topic_scoring_prompt(
     transcript = "\n".join(
         [f"- {line}" for line in utterances if (line or "").strip()]
     )
+    context_section = ""
+    if context_preamble.strip():
+        context_section = f"""
+# Context about the speaker and workspace
+
+{context_preamble.strip()}
+
+"""
     return f"""You are scoring the importance of a finalized conversation topic from an ambient workplace recorder.
+{context_section}
 
 Rate the topic from 0 to 5 based on its information value to the workplace.
 
@@ -233,6 +243,7 @@ def build_topic_annotation_prompt(
     final_description: str,
     utterances: list[dict],
     now_iso: str,
+    context_preamble: str = "",
 ) -> str:
     lines: list[str] = []
     for row in utterances:
@@ -245,7 +256,16 @@ def build_topic_annotation_prompt(
 
     transcript = "\n".join(lines) or "- (none)"
 
+    context_section = ""
+    if context_preamble.strip():
+        context_section = f"""
+# Context about the speaker and workspace
+
+{context_preamble.strip()}
+
+"""
     return f"""You are extracting structured facts from a finalized topic.
+{context_section}
 
 You MUST only use the information contained in the utterances.
 If the topic has no reliable facts, return an empty list.
@@ -294,6 +314,90 @@ Description: {final_description or "(none)"}
 
 # Utterances
 {transcript}
+"""
+
+
+def build_wiki_ingest_prompt(
+    facts: list[dict],
+    existing_pages: list[dict],
+    context_preamble: str = "",
+) -> str:
+    """
+    Build prompt for Phase 3 Wiki Ingest.
+    Takes Facts (Lv.3+) and existing wiki pages, outputs an updated wiki.
+
+    Args:
+        facts: list of fact dicts with id, fact_text, importance_level, categories, ttl_type
+        existing_pages: list of current wiki page dicts with id, title, body, theme, kind
+        context_preamble: workspace context string
+
+    Returns:
+        Prompt string for LLM
+    """
+    context_section = ""
+    if context_preamble.strip():
+        context_section = f"""
+# Context about the speaker and workspace
+
+{context_preamble.strip()}
+
+"""
+
+    existing_section = ""
+    if existing_pages:
+        lines = []
+        for page in existing_pages:
+            lines.append(
+                f'- id={page["id"]} title="{page["title"]}" theme={page.get("theme") or "?"} '
+                f'kind={page.get("kind") or "?"} version={page.get("version", 1)}\n'
+                f'  body: {(page.get("body") or "")[:400]}'
+            )
+        existing_section = "# Existing Wiki Pages\n\n" + "\n\n".join(lines)
+    else:
+        existing_section = "# Existing Wiki Pages\n\n(none yet)"
+
+    fact_lines = []
+    for fact in facts:
+        cats = ", ".join(fact.get("categories") or []) or "-"
+        fact_lines.append(
+            f'- id={fact["id"]} lv={fact.get("importance_level", 0)} '
+            f'ttl={fact.get("ttl_type") or "?"} categories=[{cats}]\n'
+            f'  text: {fact.get("fact_text", "")}'
+        )
+    facts_section = "# Facts to Integrate\n\n" + "\n\n".join(fact_lines)
+
+    return f"""You are a knowledge curator building a personal wiki from structured facts.
+{context_section}
+Your job: integrate the given Facts into the wiki.
+
+Rules:
+- Group related facts into focused wiki pages.
+- If a fact fits an existing page, update that page (expand or refine its body).
+- If a fact introduces a new theme, create a new page.
+- Write body in clear plain text (no markdown headers needed, but bullet lists are ok).
+- Each page should be focused on one theme or topic.
+- kind values: decision | rule | insight | procedure | task
+- theme: a short label (e.g. "ASR", "Pipeline Design", "UI", "Cost", "Operations").
+- source_fact_ids: include ALL fact IDs that contributed to this page (across all ingest runs).
+- You MUST include every existing page in the output, even if unchanged.
+- Do not merge unrelated facts into one page.
+
+{existing_section}
+
+{facts_section}
+
+Output ONLY JSON:
+{{
+  "pages": [
+    {{
+      "title": "string",
+      "body": "string",
+      "theme": "string",
+      "kind": "decision | rule | insight | procedure | task",
+      "source_fact_ids": ["uuid", "..."]
+    }}
+  ]
+}}
 """
 
 

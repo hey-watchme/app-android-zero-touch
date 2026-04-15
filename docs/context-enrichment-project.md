@@ -22,8 +22,8 @@
 
 関連文書:
 
-- [conversation-pipeline-processes.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/conversation-pipeline-processes.md)
-- [amical-stateful-daily-design.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/amical-stateful-daily-design.md)
+- [knowledge-pipeline-v2.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/knowledge-pipeline-v2.md)
+- [amical-longterm-memory-handoff.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/amical-longterm-memory-handoff.md)
 
 ---
 

@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from supabase import Client
 
 from services.prompts import build_topic_scoring_prompt
+from services.workspace_registry import fetch_context_preamble
 
 
 SESSION_TABLE = "zerotouch_sessions"
@@ -147,6 +148,7 @@ def score_topic(
     supabase: Client,
     topic_id: str,
     llm_service=None,
+    force: bool = False,
 ) -> Dict[str, Any]:
     """
     Score a finalized topic's importance (Lv.0-5).
@@ -155,11 +157,14 @@ def score_topic(
     2. Apply heuristic rules (failed/empty -> Lv.0 without LLM)
     3. If heuristics don't resolve, call LLM for scoring
     4. Save result to topic record
+
+    Args:
+        force: If True, re-score even if already scored.
     """
     # Fetch topic
     topic_resp = (
         supabase.table(TOPIC_TABLE)
-        .select("id, topic_status, final_title, final_summary, importance_level")
+        .select("id, topic_status, final_title, final_summary, importance_level, workspace_id")
         .eq("id", topic_id)
         .single()
         .execute()
@@ -168,8 +173,8 @@ def score_topic(
     if not topic:
         return {"topic_id": topic_id, "scored": False, "reason": "topic_not_found"}
 
-    # Already scored
-    if topic.get("importance_level") is not None:
+    # Already scored (skip unless force=True)
+    if topic.get("importance_level") is not None and not force:
         return {
             "topic_id": topic_id,
             "scored": False,
@@ -212,12 +217,17 @@ def score_topic(
 
     final_title = (topic.get("final_title") or "").strip()
     final_summary = (topic.get("final_summary") or "").strip()
+    context_preamble = fetch_context_preamble(
+        supabase=supabase,
+        workspace_id=(topic.get("workspace_id") or ""),
+    )
 
     try:
         prompt = build_topic_scoring_prompt(
             final_title=final_title,
             final_summary=final_summary,
             utterances=texts,
+            context_preamble=context_preamble,
         )
         raw_output = llm_service.generate(prompt)
         payload = _extract_json(raw_output) or {}
