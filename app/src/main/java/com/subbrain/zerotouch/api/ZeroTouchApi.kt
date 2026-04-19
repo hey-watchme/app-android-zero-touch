@@ -139,12 +139,24 @@ data class DeviceSettings(
 data class ContextAccountContext(
     val owner_name: String? = null,
     val role_title: String? = null,
-    val identity_summary: String? = null
+    val identity_summary: String? = null,
+    val primary_roles: List<String>? = null,
+    val product_summary: String? = null
+)
+
+data class WorkspaceKeyProject(
+    val name: String = "",
+    val type: String? = null,
+    val summary: String? = null,
+    val wiki_theme: String? = null
 )
 
 data class ContextWorkspaceContext(
     val profile_name: String? = null,
-    val usage_scenario: String? = null
+    val usage_scenario: String? = null,
+    val workspace_summary: String? = null,
+    val workspace_goals: List<String>? = null,
+    val key_projects: List<WorkspaceKeyProject>? = null
 )
 
 data class ContextDeviceContext(
@@ -158,7 +170,10 @@ data class ContextEnvironmentContext(
 
 data class ContextAnalysisContext(
     val goal: String? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    val analysis_objective: String? = null,
+    val focus_topics: List<String>? = null,
+    val ignore_topics: List<String>? = null
 )
 
 data class ContextProfile(

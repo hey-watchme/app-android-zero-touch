@@ -83,9 +83,15 @@ import com.subbrain.zerotouch.api.ContextPreferences
 import com.subbrain.zerotouch.audio.ambient.AmbientPreferences
 import com.subbrain.zerotouch.audio.ambient.AmbientStatus
 import com.subbrain.zerotouch.ui.AnalysisScreen
+import com.subbrain.zerotouch.ui.QueryWebViewScreen
 import com.subbrain.zerotouch.ui.SettingsSheet
 import com.subbrain.zerotouch.ui.TimelineScreen
 import com.subbrain.zerotouch.ui.VoiceMemoScreen
+import com.subbrain.zerotouch.ui.WikiWebViewScreen
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.outlined.MenuBook
+import androidx.compose.material.icons.filled.QuestionAnswer
+import androidx.compose.material.icons.outlined.QuestionAnswer
 import com.subbrain.zerotouch.ui.ZeroTouchUiState
 import com.subbrain.zerotouch.ui.ZeroTouchViewModel
 import com.subbrain.zerotouch.ui.context.ContextOnboardingScreen
@@ -344,12 +350,16 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         1 -> "タイムライン"
         2 -> "保存済み"
         3 -> "分析"
+        4 -> "Wiki"
+        5 -> "Query"
         else -> "ホーム"
     }
     val currentPageSubtitle = when (selectedTab) {
         1 -> "日付ごとにカードをたどって確認"
         2 -> if (savedCount > 0) "$savedCount 件のカードを保存中" else "あとで見返すカードをまとめて確認"
         3 -> if (analysisCount > 0) "$analysisCount 件の注目トピックを分析中" else "重要度と抽出結果の確認"
+        4 -> "ナレッジベースを閲覧"
+        5 -> "Wikiに質問する"
         else -> if (activeTopicCount > 0) "$activeTopicCount 件のライブトピックを監視中" else "会話カードとトピックを一覧で確認"
     }
     val ambientStatusLabel = when {
@@ -572,6 +582,8 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 selectedCategory = selectedCategory,
                                 onRefresh = { viewModel.refreshFacts(context) }
                             )
+                            4 -> WikiWebViewScreen(modifier = Modifier.fillMaxSize())
+                            5 -> QueryWebViewScreen(modifier = Modifier.fillMaxSize())
                             else -> VoiceMemoScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 uiState = uiState,
@@ -1031,6 +1043,47 @@ private fun ZeroTouchSidebar(
                 )
             }
 
+            SidebarDestination(
+                label = "Wiki",
+                selected = selectedTab == 4,
+                isCollapsed = isCollapsed,
+                selectedIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.MenuBook,
+                        contentDescription = "Wiki",
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Outlined.MenuBook,
+                        contentDescription = "Wiki",
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                onClick = { onSelectTab(4) }
+            )
+            SidebarDestination(
+                label = "Query",
+                selected = selectedTab == 5,
+                isCollapsed = isCollapsed,
+                selectedIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.QuestionAnswer,
+                        contentDescription = "Query",
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Outlined.QuestionAnswer,
+                        contentDescription = "Query",
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                onClick = { onSelectTab(5) }
+            )
+
             Spacer(modifier = Modifier.weight(1f))
             HorizontalDivider(
                 color = ZtOutlineVariant,
@@ -1357,13 +1410,34 @@ private fun WorkspaceSelectorSheet(
                     style = MaterialTheme.typography.labelMedium,
                     color = ZtCaption
                 )
-                ProfileValueLine("役割", draft.roleTitle.ifBlank { "未設定" })
-                ProfileValueLine("あなたについて", draft.identitySummary.ifBlank { "未設定" })
-                ProfileValueLine("ワークスペース前提", draft.workspaceSummary.ifBlank { "未設定" })
-                ProfileValueLine("デバイス前提", draft.deviceSummary.ifBlank { "未設定" })
-                ProfileValueLine("環境", draft.environmentSummary.ifBlank { "未設定" })
-                ProfileValueLine("分析ゴール", draft.analysisGoal.ifBlank { "未設定" })
-                ProfileValueLine("補足メモ", draft.analysisNotes.ifBlank { "未設定" })
+                val profile = uiState.contextProfile
+                val accountCtx = profile?.account_context
+                val workspaceCtx = profile?.workspace_context
+                val analysisCtx = profile?.analysis_context
+                ProfileValueLine(
+                    "あなたについて",
+                    accountCtx?.identity_summary ?: "未設定"
+                )
+                ProfileValueLine(
+                    "役割",
+                    accountCtx?.primary_roles?.joinToString(" / ") ?: "未設定"
+                )
+                ProfileValueLine(
+                    "ワークスペース",
+                    workspaceCtx?.workspace_summary ?: "未設定"
+                )
+                ProfileValueLine(
+                    "プロジェクト",
+                    workspaceCtx?.key_projects?.joinToString(", ") { it.name } ?: "未設定"
+                )
+                ProfileValueLine(
+                    "分析目標",
+                    analysisCtx?.analysis_objective ?: "未設定"
+                )
+                ProfileValueLine(
+                    "注目トピック",
+                    analysisCtx?.focus_topics?.joinToString(", ") ?: "未設定"
+                )
 
                 OutlinedButton(
                     onClick = { isEditing = true },
