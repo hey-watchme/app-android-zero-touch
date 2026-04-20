@@ -19,7 +19,7 @@ from services.llm_providers import LLMFactory, get_current_llm
 from services.prompts import build_topic_batch_group_prompt, build_topic_finalize_prompt
 from services.topic_scorer import score_topic
 from services.topic_annotator import annotate_topic
-from services.workspace_registry import resolve_workspace_id_for_device
+from services.workspace_registry import fetch_context_preamble, resolve_workspace_id_for_device
 
 
 SESSION_TABLE = "zerotouch_sessions"
@@ -211,7 +211,7 @@ def _get_active_topic(
             supabase.table(TOPIC_TABLE)
             .select(
                 "id, device_id, topic_status, start_at, end_at, last_utterance_at, "
-                "utterance_count, live_title, live_summary, live_description"
+                "utterance_count, live_title, live_summary, live_description, workspace_id"
             )
             .eq("device_id", device_id)
             .eq("topic_status", "active")
@@ -222,7 +222,10 @@ def _get_active_topic(
             or []
         )
     except Exception as error:
-        if not _error_mentions_missing_column(error, "live_description"):
+        if not (
+            _error_mentions_missing_column(error, "live_description")
+            or _error_mentions_missing_column(error, "workspace_id")
+        ):
             raise
         rows = (
             supabase.table(TOPIC_TABLE)
@@ -447,6 +450,7 @@ def _run_llm_topic_finalize(
     fallback_title: str,
     fallback_summary: str,
     fallback_description: str,
+    context_preamble: str = "",
 ) -> Tuple[str, str, str, bool]:
     texts = [
         (row.get("transcription") or "").strip()
@@ -457,7 +461,10 @@ def _run_llm_topic_finalize(
         return fallback_title, fallback_summary, fallback_description, False
 
     try:
-        prompt = build_topic_finalize_prompt(texts)
+        prompt = build_topic_finalize_prompt(
+            texts,
+            context_preamble=context_preamble,
+        )
         raw_output = llm_service.generate(prompt)
         payload = _extract_json(raw_output) or {}
 
@@ -517,6 +524,15 @@ def finalize_active_topic_for_device(
         }
 
     sessions = _collect_topic_sessions(supabase=supabase, topic_id=topic["id"])
+    workspace_id = topic.get("workspace_id") or resolve_workspace_id_for_device(
+        supabase=supabase,
+        device_id=device_id,
+    )
+    context_preamble = fetch_context_preamble(
+        supabase=supabase,
+        workspace_id=(workspace_id or ""),
+        device_id=device_id,
+    )
     fallback_title, fallback_summary, fallback_description = _build_finalize_defaults(topic, sessions)
     final_title, final_summary, final_description, used_llm = _run_llm_topic_finalize(
         llm_service=llm_service,
@@ -524,6 +540,7 @@ def finalize_active_topic_for_device(
         fallback_title=fallback_title,
         fallback_summary=fallback_summary,
         fallback_description=fallback_description,
+        context_preamble=context_preamble,
     )
     provider, model = _extract_llm_metadata(llm_service if used_llm else None)
     normalized_boundary_reason = _normalize_boundary_reason(boundary_reason=boundary_reason, force=force)
@@ -686,7 +703,7 @@ def _fetch_pending_sessions(
         supabase.table(SESSION_TABLE)
         .select(
             "id, device_id, status, transcription, recorded_at, created_at, "
-            "topic_id, topic_eval_status"
+            "topic_id, topic_eval_status, workspace_id"
         )
         .eq("device_id", device_id)
         .is_("topic_id", "null")
@@ -792,11 +809,15 @@ def _normalize_topics(
 def _group_sessions_with_llm(
     sessions: List[Dict[str, Any]],
     llm_service=None,
+    context_preamble: str = "",
 ) -> Tuple[List[Dict[str, Any]], str, Optional[str]]:
     if not llm_service:
         return _fallback_group(sessions), GROUPING_METHOD_FALLBACK_BATCH, None
 
-    prompt = build_topic_batch_group_prompt(sessions)
+    prompt = build_topic_batch_group_prompt(
+        sessions,
+        context_preamble=context_preamble,
+    )
     raw_output = llm_service.generate(prompt)
     payload = _extract_json(raw_output) or {}
     topics = _normalize_topics(sessions=sessions, llm_topics=payload.get("topics"))
@@ -822,6 +843,17 @@ def _persist_topics_for_run(
         group_rows = [session_map[session_id] for session_id in session_ids]
         start_at = min(_parse_timestamp(r.get("recorded_at") or r.get("created_at")) for r in group_rows)
         end_at = max(_parse_timestamp(r.get("recorded_at") or r.get("created_at")) for r in group_rows)
+        workspace_id = next(
+            (
+                str(row.get("workspace_id")).strip()
+                for row in group_rows
+                if str(row.get("workspace_id") or "").strip()
+            ),
+            "",
+        ) or resolve_workspace_id_for_device(
+            supabase=supabase,
+            device_id=device_id,
+        )
 
         title = str(grouped.get("title") or "").strip() or "Conversation"
         summary = str(grouped.get("summary") or "").strip()
@@ -831,6 +863,7 @@ def _persist_topics_for_run(
 
         topic_payload = {
             "device_id": device_id,
+            "workspace_id": workspace_id,
             "topic_status": "finalized",
             "start_at": start_at.isoformat(),
             "end_at": end_at.isoformat(),
@@ -970,9 +1003,26 @@ def process_pending_topics_for_device(
     ).in_("id", session_ids).execute()
 
     try:
+        workspace_id = next(
+            (
+                str(row.get("workspace_id")).strip()
+                for row in sessions
+                if str(row.get("workspace_id") or "").strip()
+            ),
+            "",
+        ) or resolve_workspace_id_for_device(
+            supabase=supabase,
+            device_id=device_id,
+        )
+        context_preamble = fetch_context_preamble(
+            supabase=supabase,
+            workspace_id=(workspace_id or ""),
+            device_id=device_id,
+        )
         grouped_topics, grouping_method, raw_output = _group_sessions_with_llm(
             sessions=sessions,
             llm_service=llm_service,
+            context_preamble=context_preamble,
         )
         if raw_output:
             supabase.table(RUN_TABLE).update(

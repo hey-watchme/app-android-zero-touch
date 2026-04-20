@@ -52,6 +52,33 @@ for i in {1..12}; do
   sleep 5
 done
 
+# Step 7: API contract check (required routes for Android Wiki/Query WebView)
+echo "Step 7: Verifying required API routes..."
+python3 - <<'PY'
+import json
+import sys
+import urllib.request
+
+required_paths = [
+    "/api/topics",
+    "/api/ingest-wiki",
+    "/api/query-wiki",
+    "/api/wiki-log",
+]
+
+with urllib.request.urlopen("http://localhost:8061/openapi.json", timeout=10) as response:
+    payload = json.loads(response.read().decode("utf-8"))
+
+paths = payload.get("paths", {})
+missing = [path for path in required_paths if path not in paths]
+
+if missing:
+    print("API contract check failed. Missing paths:", ", ".join(missing))
+    sys.exit(1)
+
+print("API contract check passed:", ", ".join(required_paths))
+PY
+
 echo ""
 echo "Deployment complete!"
 echo "Container: ${CONTAINER_NAME}"

@@ -198,6 +198,7 @@ def annotate_topic(
     context_preamble = fetch_context_preamble(
         supabase=supabase,
         workspace_id=(topic.get("workspace_id") or ""),
+        device_id=(topic.get("device_id") or ""),
     )
 
     prompt = build_topic_annotation_prompt(

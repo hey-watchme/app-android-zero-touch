@@ -29,6 +29,8 @@ from services.topic_manager_process2 import (
 from services.topic_annotator import annotate_topic
 from services.topic_manager import backfill_ungrouped_sessions, reconcile_topics
 from services.wiki_ingestor import ingest_wiki
+from services.wiki_querier import query_wiki
+from services.wiki_linter import lint_wiki
 from services.workspace_registry import resolve_workspace_id_for_device
 
 
@@ -187,31 +189,6 @@ class DeviceUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
 
 
-class ContextAccountContextRequest(BaseModel):
-    owner_name: Optional[str] = None
-    role_title: Optional[str] = None
-    identity_summary: Optional[str] = None
-
-
-class ContextWorkspaceContextRequest(BaseModel):
-    profile_name: Optional[str] = None
-    usage_scenario: Optional[str] = None
-
-
-class ContextDeviceContextRequest(BaseModel):
-    device_id: Optional[str] = None
-    summary: Optional[str] = None
-
-
-class ContextEnvironmentContextRequest(BaseModel):
-    summary: Optional[str] = None
-
-
-class ContextAnalysisContextRequest(BaseModel):
-    goal: Optional[str] = None
-    notes: Optional[str] = None
-
-
 class ContextProfileRequest(BaseModel):
     schema_version: Optional[int] = 1
     profile_name: Optional[str] = None
@@ -222,11 +199,11 @@ class ContextProfileRequest(BaseModel):
     usage_scenario: Optional[str] = None
     goal: Optional[str] = None
     analysis_notes: Optional[str] = None
-    account_context: Optional[ContextAccountContextRequest] = None
-    workspace_context: Optional[ContextWorkspaceContextRequest] = None
-    device_contexts: Optional[List[ContextDeviceContextRequest]] = None
-    environment_context: Optional[ContextEnvironmentContextRequest] = None
-    analysis_context: Optional[ContextAnalysisContextRequest] = None
+    account_context: Optional[Dict[str, Any]] = None
+    workspace_context: Optional[Dict[str, Any]] = None
+    device_contexts: Optional[List[Dict[str, Any]]] = None
+    environment_context: Optional[Dict[str, Any]] = None
+    analysis_context: Optional[Dict[str, Any]] = None
     onboarding_completed_at: Optional[str] = None
     reference_materials: Optional[List[Dict[str, Any]]] = None
     glossary: Optional[List[Dict[str, Any]]] = None
@@ -452,40 +429,40 @@ def _build_context_profile_payload(
 
     owner_name = _first_non_blank(
         body.owner_name,
-        account_ctx_in.owner_name if account_ctx_in else None,
+        account_ctx_in.get("owner_name") if account_ctx_in else None,
     )
     role_title = _first_non_blank(
         body.role_title,
-        account_ctx_in.role_title if account_ctx_in else None,
+        account_ctx_in.get("role_title") if account_ctx_in else None,
         prompt_fields.get("role_title"),
     )
     identity_summary = _first_non_blank(
         body.identity_summary,
-        account_ctx_in.identity_summary if account_ctx_in else None,
+        account_ctx_in.get("identity_summary") if account_ctx_in else None,
         prompt_fields.get("identity_summary"),
     )
     profile_name = _first_non_blank(
         body.profile_name,
-        workspace_ctx_in.profile_name if workspace_ctx_in else None,
+        workspace_ctx_in.get("profile_name") if workspace_ctx_in else None,
     )
     usage_scenario = _first_non_blank(
         body.usage_scenario,
-        workspace_ctx_in.usage_scenario if workspace_ctx_in else None,
+        workspace_ctx_in.get("usage_scenario") if workspace_ctx_in else None,
         prompt_fields.get("workspace_summary"),
     )
     environment_summary = _first_non_blank(
         body.environment,
-        environment_ctx_in.summary if environment_ctx_in else None,
+        environment_ctx_in.get("summary") if environment_ctx_in else None,
         prompt_fields.get("environment_summary"),
     )
     analysis_goal = _first_non_blank(
         body.goal,
-        analysis_ctx_in.goal if analysis_ctx_in else None,
+        analysis_ctx_in.get("goal") if analysis_ctx_in else None,
         prompt_fields.get("analysis_goal"),
     )
     analysis_notes = _first_non_blank(
         body.analysis_notes,
-        analysis_ctx_in.notes if analysis_ctx_in else None,
+        analysis_ctx_in.get("notes") if analysis_ctx_in else None,
         prompt_fields.get("analysis_notes"),
     )
 
@@ -493,8 +470,8 @@ def _build_context_profile_payload(
     for item in device_ctx_in:
         if item is None:
             continue
-        device_id = _normalize_text(item.device_id)
-        summary = _normalize_text(item.summary)
+        device_id = _normalize_text(item.get("device_id") if isinstance(item, dict) else None)
+        summary = _normalize_text(item.get("summary") if isinstance(item, dict) else None)
         if not device_id and not summary:
             continue
         row: Dict[str, Any] = {}
@@ -509,7 +486,8 @@ def _build_context_profile_payload(
         if legacy_device_summary:
             normalized_device_contexts = [{"summary": legacy_device_summary}]
 
-    account_context: Dict[str, Any] = {}
+    # Start from the full incoming dict, then enforce/override scalar fields
+    account_context: Dict[str, Any] = dict(account_ctx_in or {})
     if owner_name:
         account_context["owner_name"] = owner_name
     if role_title:
@@ -517,17 +495,17 @@ def _build_context_profile_payload(
     if identity_summary:
         account_context["identity_summary"] = identity_summary
 
-    workspace_context: Dict[str, Any] = {}
+    workspace_context: Dict[str, Any] = dict(workspace_ctx_in or {})
     if profile_name:
         workspace_context["profile_name"] = profile_name
     if usage_scenario:
         workspace_context["usage_scenario"] = usage_scenario
 
-    environment_context: Dict[str, Any] = {}
+    environment_context: Dict[str, Any] = dict(environment_ctx_in or {})
     if environment_summary:
         environment_context["summary"] = environment_summary
 
-    analysis_context: Dict[str, Any] = {}
+    analysis_context: Dict[str, Any] = dict(analysis_ctx_in or {})
     if analysis_goal:
         analysis_context["goal"] = analysis_goal
     if analysis_notes:
@@ -1440,6 +1418,102 @@ def run_wiki_ingest(request: WikiIngestRequest):
         min_importance=request.min_importance,
     )
     return result
+
+
+# --- Wiki Query ---
+
+class WikiQueryRequest(BaseModel):
+    device_id: Optional[str] = None
+    question: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    max_pages: int = 5
+
+
+@app.post("/api/query-wiki")
+def run_wiki_query(request: WikiQueryRequest):
+    """
+    Run a natural-language query against the wiki for a device.
+    Uses the wiki index for page selection, answers with selected pages,
+    and files the outcome back via zerotouch_wiki_log (and a new query_answer
+    page when outcome='synthesis').
+    """
+    device_id = request.device_id or os.getenv("ZEROTOUCH_DEVICE_ID", "amical-db-test")
+
+    if request.provider and request.model:
+        llm_service = LLMFactory.create(provider=request.provider, model=request.model)
+    else:
+        llm_service = get_current_llm()
+
+    result = query_wiki(
+        supabase=supabase,
+        device_id=device_id,
+        question=request.question,
+        llm_service=llm_service,
+        max_pages=request.max_pages,
+    )
+    return result
+
+
+# --- Wiki Lint ---
+
+class WikiLintRequest(BaseModel):
+    device_id: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+
+
+@app.post("/api/lint-wiki")
+def run_wiki_lint(request: WikiLintRequest):
+    """
+    Run Wiki Lint for a device: detect orphan pages and summarize recurring data gaps.
+    Results are written to zerotouch_wiki_log only (operation='lint').
+    Wiki pages are never modified.
+    """
+    device_id = request.device_id or os.getenv("ZEROTOUCH_DEVICE_ID", "amical-db-test")
+    if request.provider and request.model:
+        llm_service = LLMFactory.create(provider=request.provider, model=request.model)
+    else:
+        llm_service = get_current_llm()
+    result = lint_wiki(supabase=supabase, device_id=device_id, llm_service=llm_service)
+    return result
+
+
+@app.get("/api/lint-results")
+def get_lint_results(device_id: Optional[str] = None, limit: int = 50):
+    """Return recent lint log entries for a device from zerotouch_wiki_log."""
+    device_id = device_id or os.getenv("ZEROTOUCH_DEVICE_ID", "amical-db-test")
+    result = (
+        supabase.table("zerotouch_wiki_log")
+        .select("*")
+        .eq("device_id", device_id)
+        .eq("operation", "lint")
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return {"device_id": device_id, "entries": result.data or []}
+
+
+@app.get("/api/wiki-log")
+def get_wiki_log(
+    device_id: Optional[str] = None,
+    operation: Optional[str] = None,
+    limit: int = 50,
+):
+    """Return recent entries from zerotouch_wiki_log for a device, optionally filtered by operation."""
+    device_id = device_id or os.getenv("ZEROTOUCH_DEVICE_ID", "amical-db-test")
+    query = (
+        supabase.table("zerotouch_wiki_log")
+        .select("*")
+        .eq("device_id", device_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    if operation:
+        query = query.eq("operation", operation)
+    result = query.execute()
+    return {"device_id": device_id, "entries": result.data or []}
 
 
 # --- Model Catalog ---

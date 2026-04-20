@@ -164,7 +164,7 @@ def score_topic(
     # Fetch topic
     topic_resp = (
         supabase.table(TOPIC_TABLE)
-        .select("id, topic_status, final_title, final_summary, importance_level, workspace_id")
+        .select("id, device_id, topic_status, final_title, final_summary, importance_level, workspace_id")
         .eq("id", topic_id)
         .single()
         .execute()
@@ -220,6 +220,7 @@ def score_topic(
     context_preamble = fetch_context_preamble(
         supabase=supabase,
         workspace_id=(topic.get("workspace_id") or ""),
+        device_id=(topic.get("device_id") or ""),
     )
 
     try:
