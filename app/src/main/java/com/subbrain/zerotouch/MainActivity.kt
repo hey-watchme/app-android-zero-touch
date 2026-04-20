@@ -32,15 +32,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -82,7 +78,6 @@ import com.subbrain.zerotouch.api.DeviceIdProvider
 import com.subbrain.zerotouch.api.ContextPreferences
 import com.subbrain.zerotouch.audio.ambient.AmbientPreferences
 import com.subbrain.zerotouch.audio.ambient.AmbientStatus
-import com.subbrain.zerotouch.ui.AnalysisScreen
 import com.subbrain.zerotouch.ui.QueryWebViewScreen
 import com.subbrain.zerotouch.ui.SettingsSheet
 import com.subbrain.zerotouch.ui.TimelineScreen
@@ -103,17 +98,37 @@ import com.subbrain.zerotouch.ui.theme.ZerotouchTheme
 import com.subbrain.zerotouch.ui.theme.ZtBackground
 import com.subbrain.zerotouch.ui.theme.ZtAvatarBg
 import com.subbrain.zerotouch.ui.theme.ZtAvatarText
+import com.subbrain.zerotouch.ui.theme.ZtBlack
+import com.subbrain.zerotouch.ui.theme.ZtBlackSoft
+import com.subbrain.zerotouch.ui.theme.ZtError
 import com.subbrain.zerotouch.ui.theme.ZtCaption
+import com.subbrain.zerotouch.ui.theme.ZtGlassSurface
+import com.subbrain.zerotouch.ui.theme.ZtLoginBgTop
+import com.subbrain.zerotouch.ui.theme.ZtLoginBgBottom
 import com.subbrain.zerotouch.ui.theme.ZtOnBackground
+import com.subbrain.zerotouch.ui.theme.ZtOnSurface
 import com.subbrain.zerotouch.ui.theme.ZtOnSurfaceVariant
 import com.subbrain.zerotouch.ui.theme.ZtOutline
 import com.subbrain.zerotouch.ui.theme.ZtOutlineVariant
 import com.subbrain.zerotouch.ui.theme.ZtPrimary
 import com.subbrain.zerotouch.ui.theme.ZtPrimaryContainer
+import com.subbrain.zerotouch.ui.theme.ZtSidebarDivider
 import com.subbrain.zerotouch.ui.theme.ZtSidebarSelected
 import com.subbrain.zerotouch.ui.theme.ZtSidebarSurface
+import com.subbrain.zerotouch.ui.theme.ZtSidebarText
+import com.subbrain.zerotouch.ui.theme.ZtSidebarTextMuted
 import com.subbrain.zerotouch.ui.theme.ZtSurface
 import com.subbrain.zerotouch.ui.theme.ZtSurfaceVariant
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -126,6 +141,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.activity.SystemBarStyle
 
 private const val AMICAL_TEST_EMAIL = "amical-test@zerotouch.local"
 private const val AMICAL_TEST_PASSWORD = "AmicalTest123!"
@@ -134,7 +150,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        enableEdgeToEdge()
+        // Status bar: transparent bg with white (light) icons to match dark sidebar
+        // Navigation bar: fully transparent — removes the white gap at the bottom
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
         setContent {
             ZerotouchTheme {
                 ZeroTouchApp()
@@ -155,7 +179,6 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     var showWorkspaceSelector by remember { mutableStateOf(false) }
     var showContextOnboarding by remember { mutableStateOf(false) }
     var isSidebarCollapsed by remember { mutableStateOf(false) }
-    var selectedCategory by remember { mutableStateOf<String?>(null) }
     var ambientEnabled by remember { mutableStateOf(AmbientPreferences.isAmbientEnabled(context)) }
     var hasRecordPermission by remember {
         mutableStateOf(
@@ -292,12 +315,6 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         }
     }
 
-    LaunchedEffect(selectedTab) {
-        if (selectedTab == 3 && uiState.authSession != null) {
-            viewModel.loadFacts(context)
-        }
-    }
-
     val launchGoogleSignIn: () -> Unit = {
         if (googleWebClientId.isBlank()) {
             scope.launch {
@@ -317,20 +334,6 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     }
 
     val activeTopicCount = uiState.topicCards.count { it.status == "active" }
-    val savedCount = uiState.favoriteIds.size
-    val analysisCount = uiState.topicCards.count { (it.importanceLevel ?: -1) >= 3 }
-    val allFacts = uiState.factsByTopic.values.flatten()
-    val totalFactCount = allFacts.size
-    val categoryCounts = allFacts
-        .flatMap { fact ->
-            val categories = fact.categories.map { it.trim() }.filter { it.isNotEmpty() }
-            if (categories.isEmpty()) listOf("未分類") else categories
-        }
-        .groupingBy { it }
-        .eachCount()
-    val categoryEntries = categoryCounts.entries
-        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-        .map { CategoryEntry(name = it.key, count = it.value) }
     val selectedAccount = uiState.accounts.firstOrNull { it.id == uiState.selectedAccountId }
     val selectedWorkspace = uiState.workspaces.firstOrNull { it.id == uiState.selectedWorkspaceId }
     val selectedDevice = uiState.devices.firstOrNull { it.device_id == uiState.selectedDeviceId }
@@ -348,18 +351,14 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     )
     val currentPageTitle = when (selectedTab) {
         1 -> "タイムライン"
-        2 -> "保存済み"
-        3 -> "分析"
-        4 -> "Wiki"
-        5 -> "Query"
+        2 -> "Wiki"
+        3 -> "Query"
         else -> "ホーム"
     }
     val currentPageSubtitle = when (selectedTab) {
         1 -> "日付ごとにカードをたどって確認"
-        2 -> if (savedCount > 0) "$savedCount 件のカードを保存中" else "あとで見返すカードをまとめて確認"
-        3 -> if (analysisCount > 0) "$analysisCount 件の注目トピックを分析中" else "重要度と抽出結果の確認"
-        4 -> "ナレッジベースを閲覧"
-        5 -> "Wikiに質問する"
+        2 -> "ナレッジベースを閲覧"
+        3 -> "Wikiに質問する"
         else -> if (activeTopicCount > 0) "$activeTopicCount 件のライブトピックを監視中" else "会話カードとトピックを一覧で確認"
     }
     val ambientStatusLabel = when {
@@ -449,12 +448,6 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         return
     }
 
-    LaunchedEffect(categoryEntries) {
-        if (selectedCategory != null && categoryEntries.none { it.name == selectedCategory }) {
-            selectedCategory = null
-        }
-    }
-
     val handleAmbientToggle: (Boolean) -> Unit = { enabled ->
         if (enabled) {
             ambientEnabled = true
@@ -477,40 +470,30 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = MaterialTheme.colorScheme.background,
+        // Use sidebar color as the window-wide background so the nav bar area is never white
+        containerColor = ZtBlack,
     ) { innerPadding ->
         Row(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(MaterialTheme.colorScheme.background)
+                .background(ZtBackground)
         ) {
             ZeroTouchSidebar(
                 isCollapsed = isSidebarCollapsed,
                 selectedTab = selectedTab,
                 activeTopicCount = activeTopicCount,
-                savedCount = savedCount,
-                analysisCount = analysisCount,
-                categoryEntries = categoryEntries,
-                totalFactCount = totalFactCount,
-                selectedCategory = selectedCategory,
                 accountLabel = accountLabel,
                 accountAvatarUrl = uiState.authSession?.avatarUrl,
                 workspaceLabel = workspaceLabel,
                 deviceLabel = deviceLabel,
-                ambientEnabled = ambientEnabled,
                 isAmbientLive = ambientState.isRecording || ambientState.speech,
                 onToggleSidebar = { isSidebarCollapsed = !isSidebarCollapsed },
                 onSelectTab = { tab ->
                     selectedTab = tab
                     showSettings = false
                 },
-                onSelectCategory = { category -> selectedCategory = category },
                 onOpenWorkspaceSelector = { showWorkspaceSelector = true },
-                onSignOut = {
-                    googleSignInClient.signOut()
-                    viewModel.signOut(context)
-                },
                 onOpenSettings = { showSettings = true }
             )
 
@@ -562,28 +545,8 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
                                 onRetryTranscribe = { id -> viewModel.retryTranscribeSession(context, id) }
                             )
-                            2 -> VoiceMemoScreen(
-                                modifier = Modifier.fillMaxSize(),
-                                uiState = uiState,
-                                showFavoritesOnly = true,
-                                ambientEnabled = ambientEnabled,
-                                onDeleteCard = { id -> viewModel.deleteCard(context, id) },
-                                onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
-                                onSelectCard = { id -> viewModel.selectCard(id) },
-                                onDismissDetail = { viewModel.clearSelection() },
-                                onRefresh = { viewModel.refreshSessions(context) },
-                                onLoadMore = { viewModel.loadMoreSessions(context) },
-                                onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
-                                onRetryTranscribe = { id -> viewModel.retryTranscribeSession(context, id) }
-                            )
-                            3 -> AnalysisScreen(
-                                modifier = Modifier.fillMaxSize(),
-                                uiState = uiState,
-                                selectedCategory = selectedCategory,
-                                onRefresh = { viewModel.refreshFacts(context) }
-                            )
-                            4 -> WikiWebViewScreen(modifier = Modifier.fillMaxSize())
-                            5 -> QueryWebViewScreen(modifier = Modifier.fillMaxSize())
+                            2 -> WikiWebViewScreen(modifier = Modifier.fillMaxSize())
+                            3 -> QueryWebViewScreen(modifier = Modifier.fillMaxSize())
                             else -> VoiceMemoScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 uiState = uiState,
@@ -606,6 +569,26 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     }
 }
 
+// ZT brand logo mark — replaced with real logo later
+@Composable
+private fun ZtLogoMark(size: Int = 48) {
+    Box(
+        modifier = Modifier
+            .size(size.dp)
+            .clip(RoundedCornerShape((size * 0.28f).dp))
+            .background(ZtBlack),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "ZT",
+            color = Color.White,
+            fontWeight = FontWeight.Black,
+            fontSize = (size * 0.25f).sp,
+            letterSpacing = (-0.5).sp
+        )
+    }
+}
+
 @Composable
 private fun LoginScreen(
     isAuthenticating: Boolean,
@@ -614,102 +597,121 @@ private fun LoginScreen(
 ) {
     var email by remember { mutableStateOf(AMICAL_TEST_EMAIL) }
     var password by remember { mutableStateOf(AMICAL_TEST_PASSWORD) }
+    @Suppress("UNUSED_VARIABLE")
+    var showPassword by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(ZtBackground)
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(ZtLoginBgTop, ZtLoginBgBottom)
+                )
+            )
             .statusBarsPadding(),
         contentAlignment = Alignment.Center
     ) {
+        // Frosted glass card
         Surface(
             modifier = Modifier
                 .widthIn(max = 400.dp)
                 .padding(24.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = ZtSurface,
-            shadowElevation = 4.dp
+            shape = RoundedCornerShape(28.dp),
+            color = ZtGlassSurface,
+            shadowElevation = 28.dp,
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.6f))
         ) {
             Column(
-                modifier = Modifier.padding(32.dp),
+                modifier = Modifier.padding(horizontal = 32.dp, vertical = 36.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Surface(
-                    modifier = Modifier.size(64.dp),
-                    shape = CircleShape,
-                    color = ZtPrimaryContainer
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Filled.Lock,
-                            contentDescription = null,
-                            tint = ZtPrimary,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
+                ZtLogoMark(size = 52)
 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(2.dp))
 
                 Text(
-                    text = "ZeroTouch",
+                    text = "Log in",
                     style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Bold,
                     color = ZtOnBackground
                 )
 
                 Text(
-                    text = "Sign in to continue",
+                    text = "ZeroTouch へようこそ",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = ZtOnSurfaceVariant
+                    color = ZtCaption
                 )
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
 
-                OutlinedTextField(
+                // Email field — filled style
+                TextField(
                     value = email,
                     onValueChange = { email = it },
                     singleLine = true,
                     enabled = !isAuthenticating,
-                    label = { Text("メールアドレス") },
+                    placeholder = { Text("メールアドレス", color = ZtCaption) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = TextFieldDefaults.colors(
+                        unfocusedContainerColor = Color(0xFFF0EFE9),
+                        focusedContainerColor = Color(0xFFEAE9E2),
+                        unfocusedIndicatorColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    )
                 )
 
-                OutlinedTextField(
+                // Password field
+                TextField(
                     value = password,
                     onValueChange = { password = it },
                     singleLine = true,
                     enabled = !isAuthenticating,
-                    label = { Text("パスワード") },
+                    placeholder = { Text("パスワード", color = ZtCaption) },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = TextFieldDefaults.colors(
+                        unfocusedContainerColor = Color(0xFFF0EFE9),
+                        focusedContainerColor = Color(0xFFEAE9E2),
+                        unfocusedIndicatorColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    )
                 )
 
                 Spacer(Modifier.height(4.dp))
 
+                // Primary black button
                 Button(
                     onClick = { onEmailSignIn(email, password) },
                     enabled = !isAuthenticating && email.isNotBlank() && password.isNotBlank(),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp)
+                        .height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ZtBlack,
+                        contentColor = Color.White,
+                        disabledContainerColor = Color(0xFFD0CFCB),
+                        disabledContentColor = Color.White
+                    )
                 ) {
                     if (isAuthenticating) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
+                            color = Color.White,
                             strokeWidth = 2.dp
                         )
                     } else {
                         Text(
                             text = "ログイン",
-                            style = MaterialTheme.typography.titleMedium
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
@@ -718,33 +720,32 @@ private fun LoginScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    HorizontalDivider(
-                        modifier = Modifier.weight(1f),
-                        color = ZtOutline
-                    )
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = ZtOutline)
                     Text(
                         text = "  または  ",
                         style = MaterialTheme.typography.labelMedium,
                         color = ZtCaption
                     )
-                    HorizontalDivider(
-                        modifier = Modifier.weight(1f),
-                        color = ZtOutline
-                    )
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = ZtOutline)
                 }
 
+                // Google outlined button
                 OutlinedButton(
                     onClick = onGoogleSignIn,
                     enabled = !isAuthenticating,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp)
+                        .height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.5.dp, ZtBlackSoft),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = ZtOnBackground
+                    )
                 ) {
                     Text(
                         text = if (isAuthenticating) "Google ログイン中..." else "Google でログイン",
                         style = MaterialTheme.typography.titleMedium,
-                        color = ZtOnBackground
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
@@ -763,17 +764,13 @@ private fun AuthLoadingScreen() {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            ZtLogoMark(size = 52)
             CircularProgressIndicator(
-                modifier = Modifier.size(32.dp),
-                color = ZtPrimary,
-                strokeWidth = 3.dp
-            )
-            Text(
-                text = "Loading...",
-                style = MaterialTheme.typography.bodyMedium,
-                color = ZtOnSurfaceVariant
+                modifier = Modifier.size(22.dp),
+                color = ZtBlack,
+                strokeWidth = 2.dp
             )
         }
     }
@@ -784,22 +781,14 @@ private fun ZeroTouchSidebar(
     isCollapsed: Boolean,
     selectedTab: Int,
     activeTopicCount: Int,
-    savedCount: Int,
-    analysisCount: Int,
-    categoryEntries: List<CategoryEntry>,
-    totalFactCount: Int,
-    selectedCategory: String?,
     accountLabel: String,
     accountAvatarUrl: String?,
     workspaceLabel: String,
     deviceLabel: String,
-    ambientEnabled: Boolean,
     isAmbientLive: Boolean,
     onToggleSidebar: () -> Unit,
     onSelectTab: (Int) -> Unit,
-    onSelectCategory: (String?) -> Unit,
     onOpenWorkspaceSelector: () -> Unit,
-    onSignOut: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     Surface(
@@ -808,46 +797,49 @@ private fun ZeroTouchSidebar(
             .fillMaxHeight(),
         color = ZtSidebarSurface
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 8.dp, vertical = 14.dp)
-        ) {
-            if (isCollapsed) {
-                // Collapsed: toggle button + avatar stacked
-                IconButton(
-                    onClick = onToggleSidebar,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .align(Alignment.CenterHorizontally)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.KeyboardArrowRight,
-                        contentDescription = "Expand sidebar",
-                        tint = ZtOnSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Surface(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .align(Alignment.CenterHorizontally),
-                    shape = CircleShape,
-                    color = ZtAvatarBg,
-                    onClick = onOpenWorkspaceSelector
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
+        // All child composables inherit white as LocalContentColor
+        CompositionLocalProvider(LocalContentColor provides ZtSidebarText) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp, vertical = 14.dp)
+            ) {
+                if (isCollapsed) {
+                    // ZT logo mark — tap to expand
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .align(Alignment.CenterHorizontally)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF1E1E1E))
+                            .clickable { onToggleSidebar() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "ZT",
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 11.sp,
+                            letterSpacing = (-0.5).sp
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    // Avatar
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .align(Alignment.CenterHorizontally)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2A2A2A))
+                            .clickable { onOpenWorkspaceSelector() },
+                        contentAlignment = Alignment.Center
+                    ) {
                         if (!accountAvatarUrl.isNullOrBlank()) {
                             AsyncImage(
                                 model = ImageRequest.Builder(LocalContext.current)
-                                    .data(accountAvatarUrl)
-                                    .crossfade(true)
-                                    .build(),
+                                    .data(accountAvatarUrl).crossfade(true).build(),
                                 contentDescription = "Account avatar",
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape)
+                                modifier = Modifier.fillMaxSize().clip(CircleShape)
                             )
                         } else {
                             val initial = accountLabel.trim().firstOrNull()?.toString() ?: "A"
@@ -855,254 +847,190 @@ private fun ZeroTouchSidebar(
                                 text = initial.uppercase(),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = ZtAvatarText
+                                color = Color.White
                             )
                         }
                         Box(modifier = Modifier.align(Alignment.BottomEnd)) {
                             AmbientDot(isEnabled = isAmbientLive, isRecording = isAmbientLive)
                         }
                     }
-                }
-            } else {
-                // Expanded: avatar + labels + collapse button
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        modifier = Modifier.size(40.dp),
-                        shape = CircleShape,
-                        color = ZtAvatarBg,
-                        onClick = onOpenWorkspaceSelector
+                } else {
+                    // Expanded: logo + collapse button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF1E1E1E)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "ZT",
+                                color = Color.White,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 9.sp,
+                                letterSpacing = (-0.5).sp
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "ZeroTouch",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = onToggleSidebar,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowLeft,
+                                contentDescription = "Collapse sidebar",
+                                tint = ZtSidebarTextMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+                    HorizontalDivider(color = ZtSidebarDivider, thickness = 1.dp)
+                    Spacer(Modifier.height(12.dp))
+
+                    // Avatar + account info row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onOpenWorkspaceSelector() }
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF2A2A2A)),
+                            contentAlignment = Alignment.Center
+                        ) {
                             if (!accountAvatarUrl.isNullOrBlank()) {
                                 AsyncImage(
                                     model = ImageRequest.Builder(LocalContext.current)
-                                        .data(accountAvatarUrl)
-                                        .crossfade(true)
-                                        .build(),
+                                        .data(accountAvatarUrl).crossfade(true).build(),
                                     contentDescription = "Account avatar",
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(CircleShape)
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
                                 )
                             } else {
                                 val initial = accountLabel.trim().firstOrNull()?.toString() ?: "A"
                                 Text(
                                     text = initial.uppercase(),
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = ZtAvatarText
+                                    color = Color.White
                                 )
                             }
                             Box(modifier = Modifier.align(Alignment.BottomEnd)) {
                                 AmbientDot(isEnabled = isAmbientLive, isRecording = isAmbientLive)
                             }
                         }
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { onOpenWorkspaceSelector() }
-                    ) {
-                        Text(
-                            text = accountLabel.ifBlank { "未選択" },
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = workspaceLabel.ifBlank { "未選択" },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ZtCaption
-                        )
-                        Text(
-                            text = deviceLabel.ifBlank { "未選択" },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ZtOnSurfaceVariant
-                        )
-                    }
-                    IconButton(
-                        onClick = onToggleSidebar,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.KeyboardArrowLeft,
-                            contentDescription = "Collapse sidebar",
-                            tint = ZtCaption,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = accountLabel.ifBlank { "未選択" },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = workspaceLabel.ifBlank { "未選択" },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ZtSidebarTextMuted,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
-            }
 
-            Spacer(Modifier.size(18.dp))
+                Spacer(Modifier.size(16.dp))
 
-            if (!isCollapsed) {
-                Text(
-                    text = "メニュー",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ZtCaption,
-                    modifier = Modifier.padding(horizontal = 8.dp)
+                if (!isCollapsed) {
+                    Text(
+                        text = "MENU",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtSidebarTextMuted,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                    Spacer(Modifier.size(6.dp))
+                }
+
+                SidebarDestination(
+                    label = "ホーム",
+                    selected = selectedTab == 0,
+                    isCollapsed = isCollapsed,
+                    badgeCount = activeTopicCount,
+                    selectedIcon = {
+                        Icon(imageVector = Icons.Filled.Home, contentDescription = "ホーム", modifier = Modifier.size(20.dp))
+                    },
+                    icon = {
+                        Icon(imageVector = Icons.Outlined.Home, contentDescription = "ホーム", modifier = Modifier.size(20.dp))
+                    },
+                    onClick = { onSelectTab(0) }
                 )
-                Spacer(Modifier.size(4.dp))
-            }
+                SidebarDestination(
+                    label = "タイムライン",
+                    selected = selectedTab == 1,
+                    isCollapsed = isCollapsed,
+                    selectedIcon = {
+                        Icon(imageVector = Icons.Filled.Schedule, contentDescription = "タイムライン", modifier = Modifier.size(20.dp))
+                    },
+                    icon = {
+                        Icon(imageVector = Icons.Outlined.Schedule, contentDescription = "タイムライン", modifier = Modifier.size(20.dp))
+                    },
+                    onClick = { onSelectTab(1) }
+                )
+                SidebarDestination(
+                    label = "Wiki",
+                    selected = selectedTab == 2,
+                    isCollapsed = isCollapsed,
+                    selectedIcon = {
+                        Icon(imageVector = Icons.Filled.MenuBook, contentDescription = "Wiki", modifier = Modifier.size(20.dp))
+                    },
+                    icon = {
+                        Icon(imageVector = Icons.Outlined.MenuBook, contentDescription = "Wiki", modifier = Modifier.size(20.dp))
+                    },
+                    onClick = { onSelectTab(2) }
+                )
+                SidebarDestination(
+                    label = "Query",
+                    selected = selectedTab == 3,
+                    isCollapsed = isCollapsed,
+                    selectedIcon = {
+                        Icon(imageVector = Icons.Filled.QuestionAnswer, contentDescription = "Query", modifier = Modifier.size(20.dp))
+                    },
+                    icon = {
+                        Icon(imageVector = Icons.Outlined.QuestionAnswer, contentDescription = "Query", modifier = Modifier.size(20.dp))
+                    },
+                    onClick = { onSelectTab(3) }
+                )
 
-            SidebarDestination(
-                label = "ホーム",
-                selected = selectedTab == 0,
-                isCollapsed = isCollapsed,
-                badgeCount = activeTopicCount,
-                selectedIcon = {
-                    Icon(
-                        imageVector = Icons.Filled.Home,
-                        contentDescription = "ホーム",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Home,
-                        contentDescription = "ホーム",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                onClick = { onSelectTab(0) }
-            )
-            SidebarDestination(
-                label = "タイムライン",
-                selected = selectedTab == 1,
-                isCollapsed = isCollapsed,
-                selectedIcon = {
-                    Icon(
-                        imageVector = Icons.Filled.Schedule,
-                        contentDescription = "タイムライン",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Schedule,
-                        contentDescription = "タイムライン",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                onClick = { onSelectTab(1) }
-            )
-            SidebarDestination(
-                label = "保存",
-                selected = selectedTab == 2,
-                isCollapsed = isCollapsed,
-                badgeCount = savedCount,
-                selectedIcon = {
-                    Icon(
-                        imageVector = Icons.Filled.Bookmark,
-                        contentDescription = "保存",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Outlined.BookmarkBorder,
-                        contentDescription = "保存",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                onClick = { onSelectTab(2) }
-            )
-            SidebarDestination(
-                label = "分析",
-                selected = selectedTab == 3,
-                isCollapsed = isCollapsed,
-                badgeCount = analysisCount,
-                selectedIcon = {
-                    Icon(
-                        imageVector = Icons.Filled.Analytics,
-                        contentDescription = "分析",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Analytics,
-                        contentDescription = "分析",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                onClick = { onSelectTab(3) }
-            )
-
-            if (!isCollapsed && selectedTab == 3) {
-                SidebarCategorySection(
-                    categories = categoryEntries,
-                    totalFactCount = totalFactCount,
-                    selectedCategory = selectedCategory,
-                    onSelectCategory = onSelectCategory
+                Spacer(modifier = Modifier.weight(1f))
+                HorizontalDivider(color = ZtSidebarDivider, thickness = 1.dp)
+                Spacer(Modifier.size(8.dp))
+                SidebarDestination(
+                    label = "設定",
+                    selected = false,
+                    isCollapsed = isCollapsed,
+                    icon = {
+                        Icon(imageVector = Icons.Outlined.Settings, contentDescription = "設定", modifier = Modifier.size(20.dp))
+                    },
+                    onClick = onOpenSettings
                 )
             }
-
-            SidebarDestination(
-                label = "Wiki",
-                selected = selectedTab == 4,
-                isCollapsed = isCollapsed,
-                selectedIcon = {
-                    Icon(
-                        imageVector = Icons.Filled.MenuBook,
-                        contentDescription = "Wiki",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Outlined.MenuBook,
-                        contentDescription = "Wiki",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                onClick = { onSelectTab(4) }
-            )
-            SidebarDestination(
-                label = "Query",
-                selected = selectedTab == 5,
-                isCollapsed = isCollapsed,
-                selectedIcon = {
-                    Icon(
-                        imageVector = Icons.Filled.QuestionAnswer,
-                        contentDescription = "Query",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Outlined.QuestionAnswer,
-                        contentDescription = "Query",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                onClick = { onSelectTab(5) }
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-            HorizontalDivider(
-                color = ZtOutlineVariant,
-                thickness = 1.dp
-            )
-            Spacer(Modifier.size(10.dp))
-            SidebarDestination(
-                label = "設定",
-                selected = false,
-                isCollapsed = isCollapsed,
-                icon = {
-                    Icon(
-                        imageVector = Icons.Outlined.Settings,
-                        contentDescription = "設定",
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                onClick = onOpenSettings
-            )
         }
     }
 }
@@ -1117,44 +1045,36 @@ private fun SidebarDestination(
     icon: @Composable () -> Unit,
     onClick: () -> Unit
 ) {
+    val iconColor = if (selected) Color.White else ZtSidebarTextMuted
+    val textColor = if (selected) Color.White else ZtSidebarTextMuted
+    val bgColor = if (selected) ZtSidebarSelected else Color.Transparent
+
     Surface(
-        modifier = Modifier
-            .width(if (isCollapsed) 56.dp else 220.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = if (selected) ZtSidebarSelected else Color.Transparent,
+        modifier = Modifier.width(if (isCollapsed) 56.dp else 220.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = bgColor,
         onClick = onClick
     ) {
-        val destinationIcon: @Composable () -> Unit = {
-            if (selected && selectedIcon != null) {
-                selectedIcon()
-            } else {
-                icon()
-            }
-        }
-
         Row(
-            modifier = Modifier
-                .padding(horizontal = 10.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isCollapsed && badgeCount > 0) {
-                BadgedBox(
-                    badge = {
-                        Badge(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ) {
-                            Text(
-                                text = badgeCount.toString(),
-                                style = MaterialTheme.typography.labelSmall
-                            )
+            val destinationIcon: @Composable () -> Unit = {
+                if (selected && selectedIcon != null) selectedIcon() else icon()
+            }
+            // Provide icon color via CompositionLocal
+            CompositionLocalProvider(LocalContentColor provides iconColor) {
+                if (isCollapsed && badgeCount > 0) {
+                    BadgedBox(
+                        badge = {
+                            Badge(containerColor = Color.White, contentColor = ZtBlack) {
+                                Text(badgeCount.toString(), style = MaterialTheme.typography.labelSmall)
+                            }
                         }
-                    }
-                ) {
+                    ) { destinationIcon() }
+                } else {
                     destinationIcon()
                 }
-            } else {
-                destinationIcon()
             }
 
             if (!isCollapsed) {
@@ -1162,103 +1082,23 @@ private fun SidebarDestination(
                 Text(
                     text = label,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = textColor,
                     modifier = Modifier.weight(1f)
                 )
                 if (badgeCount > 0) {
-                    Surface(
-                        shape = RoundedCornerShape(999.dp),
-                        color = ZtSurfaceVariant
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color(0xFF2A2A2A))
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = badgeCount.toString(),
                             style = MaterialTheme.typography.labelSmall,
-                            color = ZtOnSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            color = Color(0xFFAAAAAA)
                         )
                     }
-                }
-            }
-        }
-    }
-}
-
-private data class CategoryEntry(
-    val name: String,
-    val count: Int
-)
-
-@Composable
-private fun SidebarCategorySection(
-    categories: List<CategoryEntry>,
-    totalFactCount: Int,
-    selectedCategory: String?,
-    onSelectCategory: (String?) -> Unit
-) {
-    Spacer(Modifier.size(10.dp))
-    Text(
-        text = "カテゴリ",
-        style = MaterialTheme.typography.labelMedium,
-        color = ZtCaption,
-        modifier = Modifier.padding(horizontal = 8.dp)
-    )
-    Spacer(Modifier.size(6.dp))
-
-    SidebarCategoryRow(
-        label = "すべて",
-        count = totalFactCount,
-        selected = selectedCategory == null,
-        onClick = { onSelectCategory(null) }
-    )
-
-    categories.forEach { category ->
-        SidebarCategoryRow(
-            label = category.name,
-            count = category.count,
-            selected = selectedCategory == category.name,
-            onClick = { onSelectCategory(category.name) }
-        )
-    }
-}
-
-@Composable
-private fun SidebarCategoryRow(
-    label: String,
-    count: Int,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 6.dp),
-        shape = RoundedCornerShape(8.dp),
-        color = if (selected) ZtSidebarSelected else Color.Transparent,
-        onClick = onClick
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f)
-            )
-            if (count > 0) {
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = ZtSurfaceVariant
-                ) {
-                    Text(
-                        text = count.toString(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = ZtOnSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
                 }
             }
         }
@@ -1378,278 +1218,353 @@ private fun WorkspaceSelectorSheet(
         title = "マイページ",
         onClose = onClose
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (uiState.authSession != null) {
-                Text(
-                    text = "ログイン中: ${uiState.authSession.displayName ?: uiState.authSession.email ?: "User"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = uiState.authSession.email ?: "",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ZtOnSurfaceVariant
-                )
-                HorizontalDivider(color = ZtOutline)
+        Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+
+            // ── Account header card ──────────────────────────────
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = ZtBlack
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Avatar
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2A2A2A)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val initial = (currentAccount?.display_name
+                            ?: uiState.authSession?.displayName
+                            ?: uiState.authSession?.email
+                            ?: "A").trim().firstOrNull()?.toString() ?: "A"
+                        Text(
+                            text = initial.uppercase(),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            text = currentAccount?.display_name
+                                ?: uiState.authSession?.displayName
+                                ?: "未設定",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = uiState.authSession?.email ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF888888)
+                        )
+                    }
+                }
             }
 
-            if (!isEditing) {
-                Text(
-                    text = "基本情報",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ZtCaption
-                )
-                ProfileValueLine("アカウント", currentAccount?.display_name ?: "未設定")
-                ProfileValueLine("ワークスペース", currentWorkspace?.name ?: "未選択")
-                ProfileValueLine("説明", currentWorkspace?.description ?: "未設定")
-                ProfileValueLine("デバイス", currentDevice?.display_name ?: "未選択")
-                HorizontalDivider(color = ZtOutline)
+            Spacer(Modifier.height(8.dp))
 
-                Text(
-                    text = "コンテクスト",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ZtCaption
-                )
+            // Sign out button
+            OutlinedButton(
+                onClick = onSignOut,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, ZtOutline),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZtError)
+            ) {
+                Text("ログアウト", style = MaterialTheme.typography.bodyMedium)
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // ── Workspace selection ──────────────────────────────
+            SectionHeader("WORKSPACE")
+            Spacer(Modifier.height(8.dp))
+            if (uiState.workspaces.isEmpty()) {
+                EmptyHint("ワークスペースがありません")
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    uiState.workspaces.forEach { workspace ->
+                        SelectionRow(
+                            title = workspace.name,
+                            subtitle = workspace.description,
+                            selected = workspace.id == selectedWorkspaceId,
+                            onClick = { onSelectWorkspace(workspace.id) }
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ── Device selection ─────────────────────────────────
+            SectionHeader("DEVICE")
+            Spacer(Modifier.height(8.dp))
+            if (filteredDevices.isEmpty()) {
+                EmptyHint("対象デバイスがありません")
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    filteredDevices.forEach { device ->
+                        val subtitle = listOfNotNull(
+                            device.source_type?.takeIf { it.isNotBlank() },
+                            device.device_kind?.takeIf { it.isNotBlank() },
+                            if (device.is_virtual) "virtual" else null
+                        ).joinToString(" · ").ifBlank { null }
+                        SelectionRow(
+                            title = device.display_name,
+                            subtitle = subtitle,
+                            selected = device.device_id == uiState.selectedDeviceId,
+                            onClick = { onSelectDevice(device.device_id) }
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = ZtOutline)
+            Spacer(Modifier.height(20.dp))
+
+            // ── Context profile ──────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SectionHeader("CONTEXT", modifier = Modifier.weight(1f))
+                if (!isEditing) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = ZtSurfaceVariant,
+                        onClick = {
+                            isEditing = currentAccount != null || currentWorkspace != null || currentDevice != null
+                        }
+                    ) {
+                        Text(
+                            text = "編集",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = ZtOnSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+
+            if (!isEditing) {
                 val profile = uiState.contextProfile
                 val accountCtx = profile?.account_context
                 val workspaceCtx = profile?.workspace_context
                 val analysisCtx = profile?.analysis_context
-                ProfileValueLine(
-                    "あなたについて",
-                    accountCtx?.identity_summary ?: "未設定"
-                )
-                ProfileValueLine(
-                    "役割",
-                    accountCtx?.primary_roles?.joinToString(" / ") ?: "未設定"
-                )
-                ProfileValueLine(
-                    "ワークスペース",
-                    workspaceCtx?.workspace_summary ?: "未設定"
-                )
-                ProfileValueLine(
-                    "プロジェクト",
-                    workspaceCtx?.key_projects?.joinToString(", ") { it.name } ?: "未設定"
-                )
-                ProfileValueLine(
-                    "分析目標",
-                    analysisCtx?.analysis_objective ?: "未設定"
-                )
-                ProfileValueLine(
-                    "注目トピック",
-                    analysisCtx?.focus_topics?.joinToString(", ") ?: "未設定"
-                )
 
-                OutlinedButton(
-                    onClick = { isEditing = true },
-                    enabled = currentAccount != null || currentWorkspace != null || currentDevice != null,
-                    modifier = Modifier.fillMaxWidth()
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = ZtSurfaceVariant
                 ) {
-                    Text("編集")
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        ProfileValueLine("あなたについて", accountCtx?.identity_summary ?: "未設定")
+                        ProfileValueLine("役割", accountCtx?.primary_roles?.joinToString(" / ") ?: "未設定")
+                        HorizontalDivider(color = ZtOutline)
+                        ProfileValueLine("ワークスペース", workspaceCtx?.workspace_summary ?: "未設定")
+                        ProfileValueLine("プロジェクト", workspaceCtx?.key_projects?.joinToString(", ") { it.name } ?: "未設定")
+                        HorizontalDivider(color = ZtOutline)
+                        ProfileValueLine("分析目標", analysisCtx?.analysis_objective ?: "未設定")
+                        ProfileValueLine("注目トピック", analysisCtx?.focus_topics?.joinToString(", ") ?: "未設定")
+                    }
                 }
             } else {
-                Text(
-                    text = "基本情報を編集",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ZtCaption
-                )
-                OutlinedTextField(
-                    value = accountName,
-                    onValueChange = { accountName = it },
-                    enabled = !isSaving,
-                    label = { Text("アカウント名") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                if (currentWorkspace != null) {
+                // Edit mode
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionHeader("基本情報")
                     OutlinedTextField(
-                        value = workspaceName,
-                        onValueChange = { workspaceName = it },
+                        value = accountName,
+                        onValueChange = { accountName = it },
                         enabled = !isSaving,
-                        label = { Text("ワークスペース名") },
+                        label = { Text("アカウント名") },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (currentWorkspace != null) {
+                        OutlinedTextField(
+                            value = workspaceName,
+                            onValueChange = { workspaceName = it },
+                            enabled = !isSaving,
+                            label = { Text("ワークスペース名") },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = workspaceDescription,
+                            onValueChange = { workspaceDescription = it },
+                            enabled = !isSaving,
+                            label = { Text("ワークスペース説明") },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 2
+                        )
+                    }
+                    if (currentDevice != null) {
+                        OutlinedTextField(
+                            value = deviceName,
+                            onValueChange = { deviceName = it },
+                            enabled = !isSaving,
+                            label = { Text("デバイス名") },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+                    SectionHeader("コンテクスト")
+                    OutlinedTextField(
+                        value = draft.roleTitle,
+                        onValueChange = { draft = draft.copy(roleTitle = it) },
+                        enabled = !isSaving,
+                        label = { Text("役割 / 肩書き") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
-                        value = workspaceDescription,
-                        onValueChange = { workspaceDescription = it },
+                        value = draft.identitySummary,
+                        onValueChange = { draft = draft.copy(identitySummary = it) },
                         enabled = !isSaving,
-                        label = { Text("ワークスペース説明") },
+                        label = { Text("あなたについて") },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3
+                    )
+                    OutlinedTextField(
+                        value = draft.workspaceSummary,
+                        onValueChange = { draft = draft.copy(workspaceSummary = it) },
+                        enabled = !isSaving,
+                        label = { Text("ワークスペースの前提") },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3
+                    )
+                    OutlinedTextField(
+                        value = draft.deviceSummary,
+                        onValueChange = { draft = draft.copy(deviceSummary = it) },
+                        enabled = !isSaving,
+                        label = { Text("デバイスの設置場所と用途") },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3
+                    )
+                    OutlinedTextField(
+                        value = draft.environmentSummary,
+                        onValueChange = { draft = draft.copy(environmentSummary = it) },
+                        enabled = !isSaving,
+                        label = { Text("環境コンテクスト") },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3
+                    )
+                    OutlinedTextField(
+                        value = draft.analysisGoal,
+                        onValueChange = { draft = draft.copy(analysisGoal = it) },
+                        enabled = !isSaving,
+                        label = { Text("このアプリで把握したいこと") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2
                     )
-                }
-
-                if (currentDevice != null) {
                     OutlinedTextField(
-                        value = deviceName,
-                        onValueChange = { deviceName = it },
+                        value = draft.analysisNotes,
+                        onValueChange = { draft = draft.copy(analysisNotes = it) },
                         enabled = !isSaving,
-                        label = { Text("デバイス名") },
-                        modifier = Modifier.fillMaxWidth()
+                        label = { Text("補足メモ") },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2
                     )
-                }
 
-                HorizontalDivider(color = ZtOutline)
-                Text(
-                    text = "コンテクストを編集",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = ZtCaption
-                )
-                OutlinedTextField(
-                    value = draft.roleTitle,
-                    onValueChange = { draft = draft.copy(roleTitle = it) },
-                    enabled = !isSaving,
-                    label = { Text("役割 / 肩書き") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = draft.identitySummary,
-                    onValueChange = { draft = draft.copy(identitySummary = it) },
-                    enabled = !isSaving,
-                    label = { Text("あなたについて") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3
-                )
-                OutlinedTextField(
-                    value = draft.workspaceSummary,
-                    onValueChange = { draft = draft.copy(workspaceSummary = it) },
-                    enabled = !isSaving,
-                    label = { Text("ワークスペースの前提") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3
-                )
-                OutlinedTextField(
-                    value = draft.deviceSummary,
-                    onValueChange = { draft = draft.copy(deviceSummary = it) },
-                    enabled = !isSaving,
-                    label = { Text("デバイスの設置場所と用途") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3
-                )
-                OutlinedTextField(
-                    value = draft.environmentSummary,
-                    onValueChange = { draft = draft.copy(environmentSummary = it) },
-                    enabled = !isSaving,
-                    label = { Text("環境コンテクスト") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3
-                )
-                OutlinedTextField(
-                    value = draft.analysisGoal,
-                    onValueChange = { draft = draft.copy(analysisGoal = it) },
-                    enabled = !isSaving,
-                    label = { Text("このアプリで把握したいこと") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 2
-                )
-                OutlinedTextField(
-                    value = draft.analysisNotes,
-                    onValueChange = { draft = draft.copy(analysisNotes = it) },
-                    enabled = !isSaving,
-                    label = { Text("補足メモ") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 2
-                )
-
-                Button(
-                    onClick = {
-                        pendingSave = true
-                        onSaveProfile(
-                            accountName.trim(),
-                            workspaceName.trim(),
-                            workspaceDescription.trim(),
-                            deviceName.trim(),
-                            draft.copy(
-                                profileName = workspaceName.trim().ifBlank { draft.profileName },
-                                ownerName = accountName.trim().ifBlank { draft.ownerName }
+                    Spacer(Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            pendingSave = true
+                            onSaveProfile(
+                                accountName.trim(),
+                                workspaceName.trim(),
+                                workspaceDescription.trim(),
+                                deviceName.trim(),
+                                draft.copy(
+                                    profileName = workspaceName.trim().ifBlank { draft.profileName },
+                                    ownerName = accountName.trim().ifBlank { draft.ownerName }
+                                )
                             )
+                        },
+                        enabled = canSave,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ZtBlack,
+                            contentColor = Color.White
                         )
-                    },
-                    enabled = canSave,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isSaving) "保存中..." else "保存")
+                    ) {
+                        Text(if (isSaving) "保存中..." else "保存", style = MaterialTheme.typography.titleMedium)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            isEditing = false
+                            pendingSave = false
+                            draft = initialDraft
+                        },
+                        enabled = !isSaving,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, ZtOutline)
+                    ) {
+                        Text("キャンセル", style = MaterialTheme.typography.titleMedium, color = ZtOnSurface)
+                    }
                 }
-                OutlinedButton(
-                    onClick = {
-                        isEditing = false
-                        pendingSave = false
-                        draft = initialDraft
-                    },
-                    enabled = !isSaving,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("キャンセル")
-                }
-            }
-
-            HorizontalDivider(color = ZtOutline)
-            Text(
-                text = "データソース切替",
-                style = MaterialTheme.typography.labelMedium,
-                color = ZtCaption
-            )
-            if (uiState.workspaces.isEmpty()) {
-                Text(
-                    text = "ワークスペースがありません",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ZtOnSurfaceVariant
-                )
-            } else {
-                uiState.workspaces.forEach { workspace ->
-                    SelectionRow(
-                        title = workspace.name,
-                        subtitle = workspace.description,
-                        selected = workspace.id == selectedWorkspaceId,
-                        onClick = { onSelectWorkspace(workspace.id) }
-                    )
-                }
-            }
-
-            if (filteredDevices.isEmpty()) {
-                Text(
-                    text = "対象デバイスがありません",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ZtOnSurfaceVariant
-                )
-            } else {
-                filteredDevices.forEach { device ->
-                    val subtitle = listOfNotNull(
-                        device.source_type?.takeIf { it.isNotBlank() },
-                        device.device_kind?.takeIf { it.isNotBlank() },
-                        if (device.is_virtual) "virtual" else null
-                    ).joinToString(" · ").ifBlank { null }
-                    SelectionRow(
-                        title = device.display_name,
-                        subtitle = subtitle,
-                        selected = device.device_id == uiState.selectedDeviceId,
-                        onClick = { onSelectDevice(device.device_id) }
-                    )
-                }
-            }
-
-            HorizontalDivider(color = ZtOutline)
-            OutlinedButton(
-                onClick = onSignOut,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("ログアウト")
             }
         }
     }
 }
 
 @Composable
+private fun SectionHeader(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = ZtCaption,
+        letterSpacing = 0.8.sp,
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun EmptyHint(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = ZtCaption,
+        modifier = Modifier.padding(vertical = 4.dp)
+    )
+}
+
+@Composable
 private fun ProfileValueLine(label: String, value: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(
-            text = label,
+            text = label.uppercase(),
             style = MaterialTheme.typography.labelSmall,
-            color = ZtCaption
+            color = ZtCaption,
+            letterSpacing = 0.6.sp
         )
         Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface
+            text = value.ifBlank { "—" },
+            style = MaterialTheme.typography.bodyMedium,
+            color = ZtOnSurface
         )
     }
 }
@@ -1661,29 +1576,39 @@ private fun SelectionRow(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val background = if (selected) ZtSidebarSelected else Color.Transparent
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = background,
-        border = androidx.compose.foundation.BorderStroke(1.dp, ZtOutline),
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) ZtBlack else ZtSurface,
+        border = if (!selected) BorderStroke(1.dp, ZtOutline) else null,
         onClick = onClick
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            if (!subtitle.isNullOrBlank()) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ZtOnSurfaceVariant
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (selected) Color.White else ZtOnSurface
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (selected) Color(0xFFCCCCCC) else ZtCaption
+                    )
+                }
+            }
+            if (selected) {
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -1700,36 +1625,37 @@ private fun WorkspaceHeader(
     onToggleAmbient: (Boolean) -> Unit
 ) {
     Column {
-        Surface(
-            color = Color.White
-        ) {
+        Surface(color = ZtSurface) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = ZtOnBackground
                     )
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ZtCaption
-                    )
+                    if (subtitle.isNotBlank()) {
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ZtCaption
+                        )
+                    }
                 }
+                // Ambient status pill — black when live, soft grey when off
+                val pillColor = if (isAmbientLive) ZtBlack else Color(0xFFF0EFEB)
+                val pillTextColor = if (isAmbientLive) Color.White else ZtOnSurfaceVariant
                 Surface(
                     shape = RoundedCornerShape(999.dp),
-                    color = ZtSurfaceVariant
+                    color = pillColor
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -1740,18 +1666,15 @@ private fun WorkspaceHeader(
                         Text(
                             text = ambientStatusLabel,
                             style = MaterialTheme.typography.labelMedium,
-                            color = ZtOnSurfaceVariant
+                            color = pillTextColor
                         )
                     }
                 }
                 Spacer(Modifier.width(12.dp))
-                AmbientToggleSwitch(
-                    enabled = ambientEnabled,
-                    onToggle = onToggleAmbient
-                )
+                AmbientToggleSwitch(enabled = ambientEnabled, onToggle = onToggleAmbient)
             }
         }
-        HorizontalDivider(color = ZtOutlineVariant, thickness = 1.dp)
+        HorizontalDivider(color = ZtOutline, thickness = 1.dp)
     }
 }
 
@@ -1760,7 +1683,7 @@ private fun AmbientToggleSwitch(
     enabled: Boolean,
     onToggle: (Boolean) -> Unit
 ) {
-    val trackColor = if (enabled) MaterialTheme.colorScheme.onSurface else ZtOutlineVariant
+    val trackColor = if (enabled) ZtBlack else Color(0xFFD8D7D3)
     val alignment = if (enabled) Alignment.CenterEnd else Alignment.CenterStart
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -1769,14 +1692,15 @@ private fun AmbientToggleSwitch(
     ) {
         Box(
             modifier = Modifier
-                .padding(horizontal = 4.dp, vertical = 3.dp)
-                .size(width = 44.dp, height = 22.dp),
+                .padding(horizontal = 3.dp, vertical = 3.dp)
+                .size(width = 44.dp, height = 24.dp),
             contentAlignment = alignment
         ) {
             Surface(
                 shape = CircleShape,
                 color = Color.White,
-                modifier = Modifier.size(16.dp)
+                shadowElevation = 1.dp,
+                modifier = Modifier.size(18.dp)
             ) {}
         }
     }
