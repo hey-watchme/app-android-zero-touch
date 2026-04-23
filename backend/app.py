@@ -1516,6 +1516,51 @@ def get_wiki_log(
     return {"device_id": device_id, "entries": result.data or []}
 
 
+# --- Wiki Pages ---
+
+@app.get("/api/wiki-pages")
+def get_wiki_pages(device_id: Optional[str] = None, limit: int = 500):
+    """Return wiki pages for a device, enriched with project info."""
+    resolved_device_id = device_id or os.getenv("ZEROTOUCH_DEVICE_ID", "amical-db-test")
+
+    wiki_result = (
+        supabase.table("zerotouch_wiki_pages")
+        .select(
+            "id, title, body, project_id, category, page_key, kind, status, version, "
+            "source_fact_ids, last_ingest_at, created_at, updated_at"
+        )
+        .eq("device_id", resolved_device_id)
+        .order("updated_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    wiki_rows = wiki_result.data or []
+
+    project_ids = list({row["project_id"] for row in wiki_rows if row.get("project_id")})
+    projects_by_id: dict = {}
+
+    if project_ids:
+        project_result = (
+            supabase.table("zerotouch_workspace_projects")
+            .select("id, project_key, display_name")
+            .in_("id", project_ids)
+            .execute()
+        )
+        for proj in (project_result.data or []):
+            projects_by_id[proj["id"]] = proj
+
+    pages = []
+    for row in wiki_rows:
+        proj = projects_by_id.get(row.get("project_id")) if row.get("project_id") else None
+        pages.append({
+            **row,
+            "project_key": proj["project_key"] if proj else None,
+            "project_name": proj["display_name"] if proj else None,
+        })
+
+    return {"device_id": resolved_device_id, "pages": pages, "wiki_available": True}
+
+
 # --- Model Catalog ---
 
 @app.get("/api/models")
