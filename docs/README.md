@@ -28,13 +28,17 @@
    - wiki スキーマ 3 軸の定義
    - 既存実装との対応
 
-3. `context-enrichment-project.md`
+3. `wiki-project-category-page-design.md`
+   - `theme` を `project > category > page` に切り替える設計
+   - project を人間管理しつつ、category/page を整理する方針
+
+4. `context-enrichment-project.md`
    - account / workspace / device / environment を分析前提に入れる設計（現在も有効）
 
-4. `pipeline-cost-benchmarks.md`
+5. `pipeline-cost-benchmarks.md`
    - 再処理コストの目安
 
-5. `amical-validation-wrapup.md`
+6. `amical-validation-wrapup.md`
    - 初期検証の結果まとめ。履歴参照用
 
 ---
@@ -47,6 +51,8 @@
 |---------|------|------|
 | `amical-longterm-memory-handoff.md` | 現在の作業引き継ぎ | ✅ 最新 |
 | `knowledge-pipeline-v2.md` | 長期記憶パイプラインの設計正本 | ✅ 最新 |
+| `wiki-project-category-page-design.md` | `project > category > page` 再設計 | ✅ 最新 |
+| `account-workspace-org-design.md` | Account / Workspace / Organization 4層構造と権限モデル | ✅ 最新 |
 | `context-enrichment-project.md` | コンテキスト軸の詳細設計 | ✅ 有効 |
 | `pipeline-cost-benchmarks.md` | 再処理コスト・トークン目安 | ✅ 有効 |
 
@@ -74,6 +80,8 @@
 
 - `context-enrichment-project.md`
   - コンテクスト追加のスキーマ、入力導線、artifact 注入、段階導入計画
+- `wiki-project-category-page-design.md`
+  - project / category / page の分類再設計
 
 ## その他
 
