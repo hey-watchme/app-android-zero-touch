@@ -45,6 +45,9 @@ TOPIC_TABLE = os.getenv("TOPIC_TABLE", "zerotouch_conversation_topics")
 ACCOUNT_TABLE = "zerotouch_accounts"
 WORKSPACE_TABLE = "zerotouch_workspaces"
 WORKSPACE_MEMBER_TABLE = "zerotouch_workspace_members"
+ORGANIZATION_TABLE = "zerotouch_organizations"
+ORGANIZATION_MEMBER_TABLE = "zerotouch_organization_members"
+INVITATION_TABLE = "zerotouch_workspace_invitations"
 DEVICE_TABLE = "zerotouch_devices"
 CONTEXT_PROFILE_TABLE = "zerotouch_context_profiles"
 FACT_TABLE = "zerotouch_facts"
@@ -161,8 +164,30 @@ class AccountUpdateRequest(BaseModel):
 class WorkspaceCreateRequest(BaseModel):
     name: str
     owner_account_id: Optional[str] = None
+    organization_id: Optional[str] = None
     slug: Optional[str] = None
     description: Optional[str] = None
+
+
+class OrganizationCreateRequest(BaseModel):
+    name: str
+    created_by: Optional[str] = None
+    slug: Optional[str] = None
+
+
+class OrganizationUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    slug: Optional[str] = None
+
+
+class OrganizationMemberUpsertRequest(BaseModel):
+    account_id: str
+    role: str = "org_member"
+
+
+class WorkspaceMemberUpsertRequest(BaseModel):
+    account_id: str
+    role: str = "editor"
 
 
 class WorkspaceUpdateRequest(BaseModel):
@@ -308,8 +333,45 @@ def _resolve_workspace_id(
     return resolve_workspace_id_for_device(supabase=supabase, device_id=identifier)
 
 
-def _workspace_ids_for_account(account_id: str) -> List[str]:
+def _organization_ids_for_account(account_id: str) -> List[str]:
     rows = (
+        supabase.table(ORGANIZATION_MEMBER_TABLE)
+        .select("organization_id")
+        .eq("account_id", account_id)
+        .execute()
+        .data
+        or []
+    )
+    return [str(row.get("organization_id")).strip() for row in rows if row.get("organization_id")]
+
+
+def _workspace_ids_for_organizations(organization_ids: List[str]) -> List[str]:
+    if not organization_ids:
+        return []
+    rows = (
+        supabase.table(WORKSPACE_TABLE)
+        .select("id")
+        .in_("organization_id", organization_ids)
+        .execute()
+        .data
+        or []
+    )
+    return [str(row.get("id")).strip() for row in rows if row.get("id")]
+
+
+def _workspace_ids_for_account(account_id: str) -> List[str]:
+    # Resolution order:
+    #   1. Workspaces belonging to any organization the account is a member of
+    #      (covers the common case and gives org_admins access to every workspace).
+    #   2. Workspaces where the account is directly listed as a workspace_member
+    #      (covers historical data and explicit per-workspace membership).
+    ids: set[str] = set()
+
+    org_ids = _organization_ids_for_account(account_id)
+    if org_ids:
+        ids.update(_workspace_ids_for_organizations(org_ids))
+
+    direct_rows = (
         supabase.table(WORKSPACE_MEMBER_TABLE)
         .select("workspace_id")
         .eq("account_id", account_id)
@@ -317,7 +379,12 @@ def _workspace_ids_for_account(account_id: str) -> List[str]:
         .data
         or []
     )
-    return [str(row.get("workspace_id")).strip() for row in rows if row.get("workspace_id")]
+    for row in direct_rows:
+        ws_id = row.get("workspace_id")
+        if ws_id:
+            ids.add(str(ws_id).strip())
+
+    return [ws_id for ws_id in ids if ws_id]
 
 
 def _normalize_text(value: Any) -> Optional[str]:
@@ -1042,6 +1109,256 @@ def update_account(account_id: str, body: AccountUpdateRequest):
     return {"status": "ok", "account": rows[0]}
 
 
+@app.get("/api/organizations")
+def list_organizations(account_id: Optional[str] = None):
+    if account_id:
+        org_ids = _organization_ids_for_account(account_id)
+        if not org_ids:
+            return {"organizations": [], "count": 0}
+        rows = (
+            supabase.table(ORGANIZATION_TABLE)
+            .select("*")
+            .in_("id", org_ids)
+            .order("created_at", desc=False)
+            .execute()
+            .data
+            or []
+        )
+        return {"organizations": rows, "count": len(rows)}
+
+    rows = (
+        supabase.table(ORGANIZATION_TABLE)
+        .select("*")
+        .order("created_at", desc=False)
+        .execute()
+        .data
+        or []
+    )
+    return {"organizations": rows, "count": len(rows)}
+
+
+@app.post("/api/organizations")
+def create_organization(body: OrganizationCreateRequest):
+    now_iso = datetime.now().isoformat()
+    payload = {
+        "name": body.name.strip(),
+        "slug": (body.slug or "").strip() or None,
+        "created_by": (body.created_by or "").strip() or None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    rows = supabase.table(ORGANIZATION_TABLE).insert(payload).execute().data or []
+    org = rows[0] if rows else None
+    if not org:
+        raise HTTPException(status_code=500, detail="Organization creation failed")
+
+    if body.created_by:
+        member_payload = {
+            "organization_id": org["id"],
+            "account_id": body.created_by,
+            "role": "org_admin",
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        supabase.table(ORGANIZATION_MEMBER_TABLE).upsert(
+            member_payload,
+            on_conflict="organization_id,account_id",
+        ).execute()
+
+    return {"status": "ok", "organization": org}
+
+
+@app.patch("/api/organizations/{organization_id}")
+def update_organization(organization_id: str, body: OrganizationUpdateRequest):
+    now_iso = datetime.now().isoformat()
+    payload: Dict[str, Any] = {"updated_at": now_iso}
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name must not be empty")
+        payload["name"] = name
+    if body.slug is not None:
+        payload["slug"] = (body.slug or "").strip() or None
+
+    rows = (
+        supabase.table(ORGANIZATION_TABLE)
+        .update(payload)
+        .eq("id", organization_id)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return {"status": "ok", "organization": rows[0]}
+
+
+@app.get("/api/organizations/{organization_id}/members")
+def list_organization_members(organization_id: str):
+    rows = (
+        supabase.table(ORGANIZATION_MEMBER_TABLE)
+        .select("*, account:zerotouch_accounts(id, display_name, email, avatar_url)")
+        .eq("organization_id", organization_id)
+        .order("created_at", desc=False)
+        .execute()
+        .data
+        or []
+    )
+    return {"members": rows, "count": len(rows)}
+
+
+@app.post("/api/organizations/{organization_id}/members")
+def upsert_organization_member(
+    organization_id: str,
+    body: OrganizationMemberUpsertRequest,
+):
+    allowed_roles = {"org_admin", "org_member"}
+    role = (body.role or "").strip() or "org_member"
+    if role not in allowed_roles:
+        raise HTTPException(
+            status_code=400,
+            detail=f"role must be one of {sorted(allowed_roles)}",
+        )
+
+    org_exists = (
+        supabase.table(ORGANIZATION_TABLE)
+        .select("id")
+        .eq("id", organization_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not org_exists:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    account_exists = (
+        supabase.table(ACCOUNT_TABLE)
+        .select("id")
+        .eq("id", body.account_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not account_exists:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    now_iso = datetime.now().isoformat()
+    payload = {
+        "organization_id": organization_id,
+        "account_id": body.account_id,
+        "role": role,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    rows = (
+        supabase.table(ORGANIZATION_MEMBER_TABLE)
+        .upsert(payload, on_conflict="organization_id,account_id")
+        .execute()
+        .data
+        or []
+    )
+    return {"status": "ok", "member": rows[0] if rows else payload}
+
+
+@app.delete("/api/organizations/{organization_id}/members/{account_id}")
+def remove_organization_member(organization_id: str, account_id: str):
+    rows = (
+        supabase.table(ORGANIZATION_MEMBER_TABLE)
+        .delete()
+        .eq("organization_id", organization_id)
+        .eq("account_id", account_id)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    return {"status": "ok", "removed": len(rows)}
+
+
+@app.get("/api/workspaces/{workspace_id}/members")
+def list_workspace_members(workspace_id: str):
+    rows = (
+        supabase.table(WORKSPACE_MEMBER_TABLE)
+        .select("*, account:zerotouch_accounts(id, display_name, email, avatar_url)")
+        .eq("workspace_id", workspace_id)
+        .order("created_at", desc=False)
+        .execute()
+        .data
+        or []
+    )
+    return {"members": rows, "count": len(rows)}
+
+
+@app.post("/api/workspaces/{workspace_id}/members")
+def upsert_workspace_member(
+    workspace_id: str,
+    body: WorkspaceMemberUpsertRequest,
+):
+    allowed_roles = {"admin", "editor", "viewer"}
+    role = (body.role or "").strip() or "editor"
+    if role not in allowed_roles:
+        raise HTTPException(
+            status_code=400,
+            detail=f"role must be one of {sorted(allowed_roles)}",
+        )
+
+    ws_exists = (
+        supabase.table(WORKSPACE_TABLE)
+        .select("id")
+        .eq("id", workspace_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not ws_exists:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    account_exists = (
+        supabase.table(ACCOUNT_TABLE)
+        .select("id")
+        .eq("id", body.account_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not account_exists:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    now_iso = datetime.now().isoformat()
+    payload = {
+        "workspace_id": workspace_id,
+        "account_id": body.account_id,
+        "role": role,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    rows = (
+        supabase.table(WORKSPACE_MEMBER_TABLE)
+        .upsert(payload, on_conflict="workspace_id,account_id")
+        .execute()
+        .data
+        or []
+    )
+    return {"status": "ok", "member": rows[0] if rows else payload}
+
+
+@app.delete("/api/workspaces/{workspace_id}/members/{account_id}")
+def remove_workspace_member(workspace_id: str, account_id: str):
+    rows = (
+        supabase.table(WORKSPACE_MEMBER_TABLE)
+        .delete()
+        .eq("workspace_id", workspace_id)
+        .eq("account_id", account_id)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    return {"status": "ok", "removed": len(rows)}
+
+
 @app.get("/api/workspaces")
 def list_workspaces(account_id: Optional[str] = None):
     if account_id:
@@ -1073,7 +1390,21 @@ def list_workspaces(account_id: Optional[str] = None):
 @app.post("/api/workspaces")
 def create_workspace(body: WorkspaceCreateRequest):
     now_iso = datetime.now().isoformat()
+
+    # Resolve organization_id. If not provided, fall back to the owner's first org.
+    organization_id = (body.organization_id or "").strip() or None
+    if not organization_id and body.owner_account_id:
+        org_ids = _organization_ids_for_account(body.owner_account_id)
+        if org_ids:
+            organization_id = org_ids[0]
+    if not organization_id:
+        raise HTTPException(
+            status_code=400,
+            detail="organization_id is required (owner has no organization membership)",
+        )
+
     payload = {
+        "organization_id": organization_id,
         "owner_account_id": body.owner_account_id,
         "name": body.name.strip(),
         "slug": (body.slug or "").strip() or None,
@@ -1090,7 +1421,7 @@ def create_workspace(body: WorkspaceCreateRequest):
         member_payload = {
             "workspace_id": workspace["id"],
             "account_id": body.owner_account_id,
-            "role": "owner",
+            "role": "admin",
             "created_at": now_iso,
             "updated_at": now_iso,
         }
