@@ -174,8 +174,10 @@ class AmbientRecordingService : Service() {
             try {
                 val api = ZeroTouchApi()
                 val upload = api.uploadAudio(file, deviceId)
-                val uploaded = AmbientStatus.state.value.recordings.map { item ->
-                    if (item.path == file.absolutePath) item.copy(sessionId = upload.session_id) else item
+                // Once upload succeeds, rely on backend sessions/topics for rendering state.
+                // Keeping local entries indefinitely causes stale "processing" placeholders.
+                val uploaded = AmbientStatus.state.value.recordings.filterNot { item ->
+                    item.path == file.absolutePath
                 }
                 AmbientStatus.update(
                     recordings = uploaded,
@@ -189,6 +191,13 @@ class AmbientRecordingService : Service() {
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "Upload failed: ${file.name} ${e.message}")
+                val retained = AmbientStatus.state.value.recordings.filterNot { item ->
+                    item.path == file.absolutePath
+                }
+                AmbientStatus.update(
+                    recordings = retained,
+                    lastEvent = "Upload failed"
+                )
             }
         }
     }

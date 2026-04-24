@@ -58,6 +58,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -82,7 +83,7 @@ import com.subbrain.zerotouch.ui.QueryWebViewScreen
 import com.subbrain.zerotouch.ui.SettingsSheet
 import com.subbrain.zerotouch.ui.TimelineScreen
 import com.subbrain.zerotouch.ui.VoiceMemoScreen
-import com.subbrain.zerotouch.ui.WikiWebViewScreen
+import com.subbrain.zerotouch.ui.WikiScreen
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.filled.QuestionAnswer
@@ -145,6 +146,7 @@ import androidx.activity.SystemBarStyle
 
 private const val AMICAL_TEST_EMAIL = "amical-test@zerotouch.local"
 private const val AMICAL_TEST_PASSWORD = "AmicalTest123!"
+private const val AUTO_REFRESH_INTERVAL_MS = 10_000L
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -257,6 +259,13 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
             }
         }
 
+    val latestUiState by rememberUpdatedState(uiState)
+    val latestSelectedTab by rememberUpdatedState(selectedTab)
+    val latestAmbientEnabled by rememberUpdatedState(ambientEnabled)
+    val latestIsRecording by rememberUpdatedState(ambientState.isRecording)
+    val latestShowWorkspaceSelector by rememberUpdatedState(showWorkspaceSelector)
+    val latestShowContextOnboarding by rememberUpdatedState(showContextOnboarding)
+
     LaunchedEffect(Unit) {
         viewModel.loadAuthSession(context)
     }
@@ -271,8 +280,14 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         if (uiState.authSession == null) return@LaunchedEffect
         viewModel.loadSelection(context, force = true, loadDataAfter = true)
         while (true) {
-            delay(5000)
-            if (!uiState.isLoadingSelection) {
+            delay(AUTO_REFRESH_INTERVAL_MS)
+            val state = latestUiState
+            val shouldAutoRefresh = latestAmbientEnabled || latestIsRecording
+            if (!shouldAutoRefresh) continue
+            if (latestSelectedTab != 0) continue
+            if (state.isLoadingSelection || state.isLoading || state.isLoadingMore || state.isRefreshing) continue
+            if (latestShowWorkspaceSelector || latestShowContextOnboarding) continue
+            if (state.authSession != null) {
                 viewModel.refreshSessions(context, showIndicator = false)
             }
         }
@@ -545,7 +560,10 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
                                 onRetryTranscribe = { id -> viewModel.retryTranscribeSession(context, id) }
                             )
-                            2 -> WikiWebViewScreen(modifier = Modifier.fillMaxSize())
+                            2 -> WikiScreen(
+                                modifier = Modifier.fillMaxSize(),
+                                deviceId = uiState.selectedDeviceId
+                            )
                             3 -> QueryWebViewScreen(modifier = Modifier.fillMaxSize())
                             else -> VoiceMemoScreen(
                                 modifier = Modifier.fillMaxSize(),
@@ -804,8 +822,8 @@ private fun ZeroTouchSidebar(
                     .fillMaxSize()
                     .padding(horizontal = 8.dp, vertical = 14.dp)
             ) {
+                // ── Header (logo + collapse button) ─────────────────
                 if (isCollapsed) {
-                    // ZT logo mark — tap to expand
                     Box(
                         modifier = Modifier
                             .size(40.dp)
@@ -823,39 +841,7 @@ private fun ZeroTouchSidebar(
                             letterSpacing = (-0.5).sp
                         )
                     }
-                    Spacer(Modifier.height(10.dp))
-                    // Avatar
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .align(Alignment.CenterHorizontally)
-                            .clip(CircleShape)
-                            .background(Color(0xFF2A2A2A))
-                            .clickable { onOpenWorkspaceSelector() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (!accountAvatarUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(accountAvatarUrl).crossfade(true).build(),
-                                contentDescription = "Account avatar",
-                                modifier = Modifier.fillMaxSize().clip(CircleShape)
-                            )
-                        } else {
-                            val initial = accountLabel.trim().firstOrNull()?.toString() ?: "A"
-                            Text(
-                                text = initial.uppercase(),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                        Box(modifier = Modifier.align(Alignment.BottomEnd)) {
-                            AmbientDot(isEnabled = isAmbientLive, isRecording = isAmbientLive)
-                        }
-                    }
                 } else {
-                    // Expanded: logo + collapse button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -895,67 +881,11 @@ private fun ZeroTouchSidebar(
                             )
                         }
                     }
-
                     Spacer(Modifier.height(14.dp))
                     HorizontalDivider(color = ZtSidebarDivider, thickness = 1.dp)
-                    Spacer(Modifier.height(12.dp))
-
-                    // Avatar + account info row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onOpenWorkspaceSelector() }
-                            .padding(horizontal = 4.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2A2A2A)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (!accountAvatarUrl.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(accountAvatarUrl).crossfade(true).build(),
-                                    contentDescription = "Account avatar",
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                )
-                            } else {
-                                val initial = accountLabel.trim().firstOrNull()?.toString() ?: "A"
-                                Text(
-                                    text = initial.uppercase(),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-                            Box(modifier = Modifier.align(Alignment.BottomEnd)) {
-                                AmbientDot(isEnabled = isAmbientLive, isRecording = isAmbientLive)
-                            }
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = accountLabel.ifBlank { "未選択" },
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White,
-                                maxLines = 1
-                            )
-                            Text(
-                                text = workspaceLabel.ifBlank { "未選択" },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = ZtSidebarTextMuted,
-                                maxLines = 1
-                            )
-                        }
-                    }
                 }
 
-                Spacer(Modifier.size(16.dp))
+                Spacer(Modifier.size(14.dp))
 
                 if (!isCollapsed) {
                     Text(
@@ -1018,9 +948,98 @@ private fun ZeroTouchSidebar(
                     onClick = { onSelectTab(3) }
                 )
 
+                // ── Bottom: account avatar + settings ────────────────
                 Spacer(modifier = Modifier.weight(1f))
                 HorizontalDivider(color = ZtSidebarDivider, thickness = 1.dp)
                 Spacer(Modifier.size(8.dp))
+
+                // Avatar row
+                if (isCollapsed) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .align(Alignment.CenterHorizontally)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2A2A2A))
+                            .clickable { onOpenWorkspaceSelector() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!accountAvatarUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(accountAvatarUrl).crossfade(true).build(),
+                                contentDescription = "Account avatar",
+                                modifier = Modifier.fillMaxSize().clip(CircleShape)
+                            )
+                        } else {
+                            val initial = accountLabel.trim().firstOrNull()?.toString() ?: "A"
+                            Text(
+                                text = initial.uppercase(),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Box(modifier = Modifier.align(Alignment.BottomEnd)) {
+                            AmbientDot(isEnabled = isAmbientLive, isRecording = isAmbientLive)
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onOpenWorkspaceSelector() }
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF2A2A2A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (!accountAvatarUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(accountAvatarUrl).crossfade(true).build(),
+                                    contentDescription = "Account avatar",
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                )
+                            } else {
+                                val initial = accountLabel.trim().firstOrNull()?.toString() ?: "A"
+                                Text(
+                                    text = initial.uppercase(),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                            Box(modifier = Modifier.align(Alignment.BottomEnd)) {
+                                AmbientDot(isEnabled = isAmbientLive, isRecording = isAmbientLive)
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = accountLabel.ifBlank { "未選択" },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = workspaceLabel.ifBlank { "未選択" },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ZtSidebarTextMuted,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.size(4.dp))
                 SidebarDestination(
                     label = "設定",
                     selected = false,
@@ -1220,70 +1239,61 @@ private fun WorkspaceSelectorSheet(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
 
-            // ── Account header card ──────────────────────────────
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = ZtBlack
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    // Avatar
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF2A2A2A)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        val initial = (currentAccount?.display_name
-                            ?: uiState.authSession?.displayName
-                            ?: uiState.authSession?.email
-                            ?: "A").trim().firstOrNull()?.toString() ?: "A"
-                        Text(
-                            text = initial.uppercase(),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(
-                            text = currentAccount?.display_name
-                                ?: uiState.authSession?.displayName
-                                ?: "未設定",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = uiState.authSession?.email ?: "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF888888)
-                        )
+            // ── Organization ─────────────────────────────────────
+            SectionHeader("ORGANIZATION")
+            Spacer(Modifier.height(8.dp))
+            if (uiState.organizations.isEmpty()) {
+                EmptyHint("所属オーガニゼーションがありません")
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    uiState.organizations.forEach { org ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = ZtSurfaceVariant
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = org.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = ZtOnSurface
+                                    )
+                                    if (!org.slug.isNullOrBlank()) {
+                                        Text(
+                                            text = org.slug,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = ZtCaption
+                                        )
+                                    }
+                                }
+                                if (!org.role.isNullOrBlank()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = ZtBlack
+                                    ) {
+                                        Text(
+                                            text = org.role,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
-
-            // Sign out button
-            OutlinedButton(
-                onClick = onSignOut,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, ZtOutline),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZtError)
-            ) {
-                Text("ログアウト", style = MaterialTheme.typography.bodyMedium)
-            }
-
             Spacer(Modifier.height(20.dp))
 
-            // ── Workspace selection ──────────────────────────────
+            // ── Workspace ────────────────────────────────────────
             SectionHeader("WORKSPACE")
             Spacer(Modifier.height(8.dp))
             if (uiState.workspaces.isEmpty()) {
@@ -1303,7 +1313,7 @@ private fun WorkspaceSelectorSheet(
 
             Spacer(Modifier.height(16.dp))
 
-            // ── Device selection ─────────────────────────────────
+            // ── Device ───────────────────────────────────────────
             SectionHeader("DEVICE")
             Spacer(Modifier.height(8.dp))
             if (filteredDevices.isEmpty()) {
@@ -1330,12 +1340,86 @@ private fun WorkspaceSelectorSheet(
             HorizontalDivider(color = ZtOutline)
             Spacer(Modifier.height(20.dp))
 
-            // ── Context profile ──────────────────────────────────
+            // ── Account ──────────────────────────────────────────
+            SectionHeader("ACCOUNT")
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = ZtBlack
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2A2A2A)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val initial = (currentAccount?.display_name
+                            ?: uiState.authSession?.displayName
+                            ?: uiState.authSession?.email
+                            ?: "A").trim().firstOrNull()?.toString() ?: "A"
+                        Text(
+                            text = initial.uppercase(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = currentAccount?.display_name
+                                ?: uiState.authSession?.displayName
+                                ?: "未設定",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                        if (!uiState.authSession?.email.isNullOrBlank()) {
+                            Text(
+                                text = uiState.authSession?.email ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF888888)
+                            )
+                        }
+                        val orgRole = uiState.organizations.firstOrNull()?.role
+                        if (!orgRole.isNullOrBlank()) {
+                            Text(
+                                text = orgRole,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF999999)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onSignOut,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, ZtOutline),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZtError)
+            ) {
+                Text("ログアウト", style = MaterialTheme.typography.bodyMedium)
+            }
+
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = ZtOutline)
+            Spacer(Modifier.height(20.dp))
+
+            // ── Account Context ───────────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SectionHeader("CONTEXT", modifier = Modifier.weight(1f))
+                SectionHeader("ACCOUNT CONTEXT", modifier = Modifier.weight(1f))
                 if (!isEditing) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -1353,14 +1437,11 @@ private fun WorkspaceSelectorSheet(
                     }
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
 
             if (!isEditing) {
                 val profile = uiState.contextProfile
                 val accountCtx = profile?.account_context
-                val workspaceCtx = profile?.workspace_context
-                val analysisCtx = profile?.analysis_context
-
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
@@ -1372,10 +1453,44 @@ private fun WorkspaceSelectorSheet(
                     ) {
                         ProfileValueLine("あなたについて", accountCtx?.identity_summary ?: "未設定")
                         ProfileValueLine("役割", accountCtx?.primary_roles?.joinToString(" / ") ?: "未設定")
-                        HorizontalDivider(color = ZtOutline)
-                        ProfileValueLine("ワークスペース", workspaceCtx?.workspace_summary ?: "未設定")
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // ── Workspace Context ─────────────────────────────
+                SectionHeader("WORKSPACE CONTEXT")
+                Spacer(Modifier.height(8.dp))
+                val workspaceCtx = profile?.workspace_context
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = ZtSurfaceVariant
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        ProfileValueLine("ワークスペース概要", workspaceCtx?.workspace_summary ?: "未設定")
                         ProfileValueLine("プロジェクト", workspaceCtx?.key_projects?.joinToString(", ") { it.name } ?: "未設定")
-                        HorizontalDivider(color = ZtOutline)
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // ── Device Context ────────────────────────────────
+                SectionHeader("DEVICE CONTEXT")
+                Spacer(Modifier.height(8.dp))
+                val analysisCtx = profile?.analysis_context
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = ZtSurfaceVariant
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
                         ProfileValueLine("分析目標", analysisCtx?.analysis_objective ?: "未設定")
                         ProfileValueLine("注目トピック", analysisCtx?.focus_topics?.joinToString(", ") ?: "未設定")
                     }
@@ -1423,7 +1538,7 @@ private fun WorkspaceSelectorSheet(
                     }
 
                     Spacer(Modifier.height(4.dp))
-                    SectionHeader("コンテクスト")
+                    SectionHeader("アカウントコンテクスト")
                     OutlinedTextField(
                         value = draft.roleTitle,
                         onValueChange = { draft = draft.copy(roleTitle = it) },
@@ -1441,6 +1556,9 @@ private fun WorkspaceSelectorSheet(
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 3
                     )
+
+                    Spacer(Modifier.height(4.dp))
+                    SectionHeader("ワークスペースコンテクスト")
                     OutlinedTextField(
                         value = draft.workspaceSummary,
                         onValueChange = { draft = draft.copy(workspaceSummary = it) },
@@ -1450,6 +1568,9 @@ private fun WorkspaceSelectorSheet(
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 3
                     )
+
+                    Spacer(Modifier.height(4.dp))
+                    SectionHeader("デバイスコンテクスト")
                     OutlinedTextField(
                         value = draft.deviceSummary,
                         onValueChange = { draft = draft.copy(deviceSummary = it) },
@@ -1487,7 +1608,7 @@ private fun WorkspaceSelectorSheet(
                         minLines = 2
                     )
 
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(20.dp))
                     Button(
                         onClick = {
                             pendingSave = true

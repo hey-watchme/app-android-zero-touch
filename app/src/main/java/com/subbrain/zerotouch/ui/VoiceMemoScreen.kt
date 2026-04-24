@@ -31,11 +31,15 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -58,8 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import kotlinx.coroutines.delay
+import androidx.compose.ui.window.Dialog
 import com.subbrain.zerotouch.api.SessionSummary
 import com.subbrain.zerotouch.audio.ambient.AmbientRecordingEntry
 import com.subbrain.zerotouch.audio.ambient.AmbientPreferences
@@ -82,6 +85,7 @@ import androidx.compose.runtime.snapshotFlow
 import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -127,6 +131,16 @@ fun VoiceMemoScreen(
     )
     val mergedTopicCards = (topicCards + pendingTopicCards)
         .sortedByDescending { it.updatedAtEpochMs }
+    val today = LocalDate.now()
+    var selectedDate by remember { mutableStateOf(today) }
+    var showCalendarDialog by remember { mutableStateOf(false) }
+    var calendarMonth by remember { mutableStateOf(YearMonth.from(selectedDate)) }
+    val availableDates = remember(mergedTopicCards) {
+        mergedTopicCards.mapNotNull { topic -> dateFromEpoch(topic.updatedAtEpochMs) }.toSet()
+    }
+    val earliestLoadedDate = mergedTopicCards
+        .mapNotNull { topic -> dateFromEpoch(topic.updatedAtEpochMs) }
+        .minOrNull()
     val visibleTopicCards = if (showFavoritesOnly) {
         emptyList()
     } else {
@@ -135,10 +149,25 @@ fun VoiceMemoScreen(
             level in enabledLevels
         }
     }
+    val topicsForSelectedDate = visibleTopicCards.filter { topic ->
+        val date = dateFromEpoch(topic.updatedAtEpochMs) ?: return@filter false
+        date == selectedDate
+    }
 
     val listState = rememberLazyListState()
 
-    LaunchedEffect(listState, uiState.hasMore, uiState.isLoadingMore, uiState.isLoading, visibleTopicCards.size) {
+    LaunchedEffect(selectedDate, earliestLoadedDate, uiState.hasMore, uiState.isLoadingMore, uiState.isLoading) {
+        if (!uiState.hasMore || uiState.isLoadingMore || uiState.isLoading) return@LaunchedEffect
+        if (mergedTopicCards.isEmpty()) {
+            onLoadMore()
+            return@LaunchedEffect
+        }
+        if (earliestLoadedDate != null && selectedDate.isBefore(earliestLoadedDate)) {
+            onLoadMore()
+        }
+    }
+
+    LaunchedEffect(listState, uiState.hasMore, uiState.isLoadingMore, uiState.isLoading) {
         snapshotFlow {
             val layoutInfo = listState.layoutInfo
             val totalItems = layoutInfo.totalItemsCount
@@ -177,6 +206,10 @@ fun VoiceMemoScreen(
     val selectedTopic = selectedTopicId?.let { id ->
         mergedTopicCards.find { it.id == id }
     }
+    val openDatePicker = {
+        calendarMonth = YearMonth.from(selectedDate)
+        showCalendarDialog = true
+    }
 
     // --- Main UI ---
     Box(
@@ -197,6 +230,22 @@ fun VoiceMemoScreen(
             AmbientStatusBar(
                 ambientState = ambientState,
                 isEnabled = ambientEnabled
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            HomeDateHeader(
+                selectedDate = selectedDate,
+                onPrevious = { selectedDate = selectedDate.minusDays(1) },
+                onNext = {
+                    if (selectedDate.isBefore(today)) {
+                        selectedDate = selectedDate.plusDays(1)
+                    }
+                },
+                onOpenCalendar = openDatePicker,
+                canGoNext = selectedDate.isBefore(today),
+                topicCount = topicsForSelectedDate.size,
+                isAmbientOn = ambientState.isRecording || ambientState.speech
             )
 
             Spacer(Modifier.height(8.dp))
@@ -232,7 +281,8 @@ fun VoiceMemoScreen(
             val isRecording = ambientState.isRecording
 
             // Placeholder topic for live recording state
-            val liveRecordingTopic = if (isRecording) {
+            val showLiveRecordingTopic = isRecording && selectedDate == today
+            val liveRecordingTopic = if (showLiveRecordingTopic) {
                 TopicFeedCard(
                     id = "live_recording",
                     status = "recording",
@@ -259,23 +309,19 @@ fun VoiceMemoScreen(
                 )
             } else null
 
-            if (uiState.isLoading && visibleTopicCards.isEmpty() && !isRecording) {
+            if (uiState.isLoading && topicsForSelectedDate.isEmpty() && liveRecordingTopic == null) {
                 item(key = "shimmer") {
                     ShimmerCardList(count = 4)
                 }
-            } else if (visibleTopicCards.isEmpty() && !isRecording) {
+            } else if (topicsForSelectedDate.isEmpty() && liveRecordingTopic == null) {
                 item(key = "empty_state") {
-                    EmptyStateView(showFavoritesOnly = showFavoritesOnly)
+                    EmptyStateView(
+                        showFavoritesOnly = showFavoritesOnly,
+                        selectedDate = selectedDate
+                    )
                 }
             } else {
-                val groupedTopics = visibleTopicCards.groupBy { it.displayDate.ifEmpty { "不明" } }
-                val hasTodayGroup = groupedTopics.containsKey("今日")
-
-                // If recording but no "Today" group exists, create one with the live topic
-                if (isRecording && !hasTodayGroup && liveRecordingTopic != null) {
-                    item(key = "header_Today") {
-                        DateHeader("今日", 1)
-                    }
+                if (liveRecordingTopic != null) {
                     item(key = "live_recording") {
                         TopicGroupCard(
                             topic = liveRecordingTopic,
@@ -287,31 +333,14 @@ fun VoiceMemoScreen(
                     }
                 }
 
-                groupedTopics.forEach { (dateLabel, topics) ->
-                    item(key = "header_$dateLabel") {
-                        DateHeader(dateLabel, topics.size + if (dateLabel == "今日" && isRecording) 1 else 0)
-                    }
-                    // Insert live recording topic at the top of "Today" group
-                    if (dateLabel == "今日" && isRecording && liveRecordingTopic != null) {
-                        item(key = "live_recording") {
-                            TopicGroupCard(
-                                topic = liveRecordingTopic,
-                                favoriteIds = favoriteIds,
-                                onOpenTopic = { selectedTopicId = it.id },
-                                onSelectCard = {},
-                                onToggleFavorite = {}
-                            )
-                        }
-                    }
-                    items(topics, key = { it.id }) { topic ->
-                        TopicGroupCard(
-                            topic = topic,
-                            favoriteIds = favoriteIds,
-                            onOpenTopic = { selectedTopicId = it.id },
-                            onSelectCard = onSelectCard,
-                            onToggleFavorite = onToggleFavorite
-                        )
-                    }
+                items(topicsForSelectedDate, key = { it.id }) { topic ->
+                    TopicGroupCard(
+                        topic = topic,
+                        favoriteIds = favoriteIds,
+                        onOpenTopic = { selectedTopicId = it.id },
+                        onSelectCard = onSelectCard,
+                        onToggleFavorite = onToggleFavorite
+                    )
                 }
             }
 
@@ -339,6 +368,20 @@ fun VoiceMemoScreen(
             TopicDetailDrawer(
                 topic = selectedTopic,
                 onClose = { selectedTopicId = null }
+            )
+        }
+
+        if (showCalendarDialog) {
+            DataDateCalendarDialog(
+                selectedDate = selectedDate,
+                currentMonth = calendarMonth,
+                availableDates = availableDates,
+                onMonthChange = { calendarMonth = it },
+                onDismiss = { showCalendarDialog = false },
+                onSelectDate = { picked ->
+                    selectedDate = picked
+                    showCalendarDialog = false
+                }
             )
         }
     }
@@ -442,61 +485,64 @@ private fun TopicGroupCard(
                     }
                 }
 
-                // Summary area
-                when {
-                    isLiveTopic -> {
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp)
-                                .padding(bottom = 8.dp)
-                                .fillMaxWidth(0.55f)
-                                .height(10.dp)
-                                .background(
-                                    ZtCaption.copy(alpha = shimmerAlpha * 0.6f),
-                                    RoundedCornerShape(3.dp)
-                                )
-                        )
-                    }
-                    (topic.status == "cooling" || topic.status == "processing") && topic.summary.isBlank() -> {
-                        TopicAnalyzingLabel(
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp)
-                                .padding(bottom = 8.dp)
-                        )
-                    }
-                    topic.summary.isNotBlank() -> {
-                        Text(
-                            text = topic.summary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ZtCaption,
-                            maxLines = if (isUnintelligibleTopic) 1 else 3,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp)
-                                .padding(bottom = 8.dp)
-                        )
-                    }
-                }
-
-                // Expanded: child cards
-                Column {
-                    HorizontalDivider(
-                        color = ZtCardRowDivider,
-                        thickness = 0.5.dp,
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                    )
-                    Column(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(1.dp)
-                    ) {
-                        topic.utterances.forEach { utterance ->
-                            TranscriptCardView(
-                                card = utterance,
-                                isFavorite = favoriteIds.contains(utterance.id),
-                                onClick = { onSelectCard(utterance.id) },
-                                onToggleFavorite = { onToggleFavorite(utterance.id) },
-                                compact = true
+                // Keep unintelligible topics compact (single-line row).
+                if (!isUnintelligibleTopic) {
+                    // Summary area
+                    when {
+                        isLiveTopic -> {
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp)
+                                    .padding(bottom = 8.dp)
+                                    .fillMaxWidth(0.55f)
+                                    .height(10.dp)
+                                    .background(
+                                        ZtCaption.copy(alpha = shimmerAlpha * 0.6f),
+                                        RoundedCornerShape(3.dp)
+                                    )
                             )
+                        }
+                        (topic.status == "cooling" || topic.status == "processing") && topic.summary.isBlank() -> {
+                            TopicAnalyzingLabel(
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp)
+                                    .padding(bottom = 8.dp)
+                            )
+                        }
+                        topic.summary.isNotBlank() -> {
+                            Text(
+                                text = topic.summary,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ZtCaption,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .padding(horizontal = 12.dp)
+                                    .padding(bottom = 8.dp)
+                            )
+                        }
+                    }
+
+                    // Expanded: child cards
+                    Column {
+                        HorizontalDivider(
+                            color = ZtCardRowDivider,
+                            thickness = 0.5.dp,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                        Column(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                        ) {
+                            topic.utterances.forEach { utterance ->
+                                TranscriptCardView(
+                                    card = utterance,
+                                    isFavorite = favoriteIds.contains(utterance.id),
+                                    onClick = { onSelectCard(utterance.id) },
+                                    onToggleFavorite = { onToggleFavorite(utterance.id) },
+                                    compact = true
+                                )
+                            }
                         }
                     }
                 }
@@ -700,29 +746,30 @@ private fun buildPendingTopicCards(
         status: String
     ) {
         if (sessionId != null && topicChildIds.contains(sessionId)) return
+        val effectiveStatus = resolveStuckPendingStatus(status, createdAtEpochMs)
 
         val existingCard = sessionId?.let { loadedCardById[it] }
         val cardId = sessionId ?: "pending_${createdAtEpochMs}"
         val fallbackDisplayTitle = formatEpochTime(createdAtEpochMs)
         val fallbackDisplayDate = formatEpochDate(createdAtEpochMs)
         val card = existingCard ?: run {
-            val displayStatus = when (status) {
+            val displayStatus = when (effectiveStatus) {
                 "pending", "uploaded", "transcribing", "generating" -> "データ取得中"
                 "transcribed", "completed" -> "判別不可"
                 "failed" -> "失敗"
                 else -> "データ取得中"
             }
-            val isProcessing = status in setOf("pending", "uploaded", "transcribing", "generating")
-            val isUnintelligible = status in setOf("transcribed", "completed")
-            val displayText = when (status) {
+            val isProcessing = effectiveStatus in setOf("pending", "uploaded", "transcribing", "generating")
+            val isUnintelligible = effectiveStatus in setOf("transcribed", "completed")
+            val displayText = when (effectiveStatus) {
                 "transcribed", "completed" -> UNINTELLIGIBLE_CARD_TEXT
                 "failed" -> "処理に失敗しました"
                 else -> "データ取得中..."
             }
-            val visualStatus = when (status) {
+            val visualStatus = when (effectiveStatus) {
                 "failed" -> "failed"
                 "transcribed", "completed" -> "transcribed"
-                "uploaded", "transcribing", "generating" -> status
+                "uploaded", "transcribing", "generating" -> effectiveStatus
                 else -> "transcribing"
             }
 
@@ -782,6 +829,7 @@ private fun buildPendingTopicCards(
     recordings.forEach { entry ->
         val sessionId = entry.sessionId
         val summary = sessionId?.let { sessionById[it] }
+        if (sessionId != null && summary == null) return@forEach
         val status = summary?.status ?: if (sessionId == null) "pending" else "uploaded"
         val epochFromSummary = parseIsoEpochMillis(summary?.recorded_at ?: summary?.created_at)
         val createdAtEpoch = epochFromSummary ?: entry.createdAt
@@ -902,29 +950,277 @@ private fun ImportanceFilterRow(
 
 // --- Sub-composables ---
 
-
 @Composable
-private fun DateHeader(label: String, count: Int) {
-    Row(
-        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
+private fun HomeDateHeader(
+    selectedDate: LocalDate,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onOpenCalendar: () -> Unit,
+    canGoNext: Boolean,
+    topicCount: Int,
+    isAmbientOn: Boolean
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-            color = ZtOnSurfaceVariant
-        )
-        Text(
-            text = "$count",
-            style = MaterialTheme.typography.labelSmall,
-            color = ZtCaption
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onPrevious, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.Outlined.ChevronLeft,
+                    contentDescription = "前日",
+                    tint = ZtOnSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onOpenCalendar,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.CalendarToday,
+                            contentDescription = "カレンダーを開く",
+                            tint = ZtOnSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Text(
+                        text = formatHomeDateLabel(selectedDate),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = formatHomeSubDate(selectedDate),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtCaption
+                    )
+                    Text(
+                        text = "トピック ${topicCount}件",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtCaption
+                    )
+                    if (isAmbientOn) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(ZtRecording, CircleShape)
+                            )
+                            Text(
+                                text = "Live",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ZtCaption
+                            )
+                        }
+                    }
+                }
+            }
+
+            IconButton(onClick = onNext, enabled = canGoNext, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.Outlined.ChevronRight,
+                    contentDescription = "翌日",
+                    tint = if (canGoNext) ZtOnSurfaceVariant else ZtCaption.copy(alpha = 0.3f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun EmptyStateView(showFavoritesOnly: Boolean) {
+private fun DataDateCalendarDialog(
+    selectedDate: LocalDate,
+    currentMonth: YearMonth,
+    availableDates: Set<LocalDate>,
+    onMonthChange: (YearMonth) -> Unit,
+    onDismiss: () -> Unit,
+    onSelectDate: (LocalDate) -> Unit
+) {
+    val today = LocalDate.now()
+    val monthCells = remember(currentMonth) { buildMonthCells(currentMonth) }
+    val earliestAvailable = availableDates.minOrNull()
+    val minMonth = earliestAvailable?.let { YearMonth.from(it) } ?: YearMonth.from(today.minusYears(1))
+    val maxMonth = YearMonth.from(today)
+    val canGoPrev = currentMonth.isAfter(minMonth)
+    val canGoNext = currentMonth.isBefore(maxMonth)
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { onMonthChange(currentMonth.minusMonths(1)) },
+                        enabled = canGoPrev,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.ChevronLeft,
+                            contentDescription = "前の月",
+                            tint = if (canGoPrev) ZtOnSurfaceVariant else ZtCaption.copy(alpha = 0.3f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Text(
+                        text = currentMonth.format(DateTimeFormatter.ofPattern("yyyy年 M月", Locale.JAPAN)),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    IconButton(
+                        onClick = { onMonthChange(currentMonth.plusMonths(1)) },
+                        enabled = canGoNext,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.ChevronRight,
+                            contentDescription = "次の月",
+                            tint = if (canGoNext) ZtOnSurfaceVariant else ZtCaption.copy(alpha = 0.3f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    listOf("日", "月", "火", "水", "木", "金", "土").forEach { label ->
+                        Box(
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ZtCaption
+                            )
+                        }
+                    }
+                }
+
+                monthCells.chunked(7).forEach { week ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        week.forEach { date ->
+                            CalendarDateCell(
+                                date = date,
+                                selectedDate = selectedDate,
+                                today = today,
+                                hasData = date != null && availableDates.contains(date),
+                                onSelectDate = onSelectDate
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(
+                            text = "閉じる",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.CalendarDateCell(
+    date: LocalDate?,
+    selectedDate: LocalDate,
+    today: LocalDate,
+    hasData: Boolean,
+    onSelectDate: (LocalDate) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .height(44.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (date == null) return
+
+        val isSelected = date == selectedDate
+        val isFuture = date.isAfter(today)
+        val dayTextColor = when {
+            isSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+            isFuture -> ZtCaption.copy(alpha = 0.35f)
+            else -> MaterialTheme.colorScheme.onSurface
+        }
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .then(
+                    if (isSelected) {
+                        Modifier.background(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                    } else {
+                        Modifier
+                    }
+                )
+                .clickable(enabled = !isFuture) { onSelectDate(date) }
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = date.dayOfMonth.toString(),
+                style = MaterialTheme.typography.labelLarge,
+                color = dayTextColor
+            )
+            Box(
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .size(4.dp)
+                    .background(
+                        color = when {
+                            !hasData || isFuture -> MaterialTheme.colorScheme.surface
+                            isSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+                            else -> ZtRecording
+                        },
+                        shape = CircleShape
+                    )
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyStateView(showFavoritesOnly: Boolean, selectedDate: LocalDate) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -941,10 +1237,12 @@ private fun EmptyStateView(showFavoritesOnly: Boolean) {
                 color = ZtOnSurfaceVariant
             )
             Text(
-                text = if (showFavoritesOnly) {
+                text = if (showFavoritesOnly && selectedDate == LocalDate.now()) {
                     "ブックマークするとここに表示されます"
+                } else if (showFavoritesOnly) {
+                    "${formatHomeDateLabel(selectedDate)} の保存項目はありません"
                 } else {
-                    "アンビエントをオンにして会話を記録してください"
+                    "${formatHomeDateLabel(selectedDate)} の会話記録はありません"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = ZtCaption
@@ -955,6 +1253,40 @@ private fun EmptyStateView(showFavoritesOnly: Boolean) {
 
 // --- Utility functions ---
 
+private fun dateFromEpoch(epochMs: Long): LocalDate? {
+    if (epochMs <= 0L) return null
+    return Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()).toLocalDate()
+}
+
+private fun formatHomeDateLabel(date: LocalDate): String {
+    val today = LocalDate.now()
+    return when (date) {
+        today -> "今日"
+        today.minusDays(1) -> "昨日"
+        else -> date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN))
+    }
+}
+
+private fun formatHomeSubDate(date: LocalDate): String {
+    return date.format(DateTimeFormatter.ofPattern("yyyy/MM/dd", Locale.JAPAN))
+}
+
+private fun buildMonthCells(month: YearMonth): List<LocalDate?> {
+    val firstDay = month.atDay(1)
+    val firstOffset = firstDay.dayOfWeek.value % 7 // Sunday = 0
+    val totalDays = month.lengthOfMonth()
+    val cells = mutableListOf<LocalDate?>()
+
+    repeat(firstOffset) { cells.add(null) }
+    for (day in 1..totalDays) {
+        cells.add(month.atDay(day))
+    }
+    while (cells.size % 7 != 0) {
+        cells.add(null)
+    }
+    return cells
+}
+
 private fun parseIsoEpochMillis(timestamp: String?): Long? {
     if (timestamp.isNullOrBlank()) return null
     return try {
@@ -962,6 +1294,17 @@ private fun parseIsoEpochMillis(timestamp: String?): Long? {
     } catch (_: Exception) {
         null
     }
+}
+
+private const val STUCK_PENDING_TIMEOUT_MS = 20 * 60_000L
+
+private fun resolveStuckPendingStatus(status: String, createdAtEpochMs: Long): String {
+    if (status !in setOf("pending", "uploaded", "transcribing", "generating")) {
+        return status
+    }
+    if (createdAtEpochMs <= 0L) return status
+    val ageMs = System.currentTimeMillis() - createdAtEpochMs
+    return if (ageMs >= STUCK_PENDING_TIMEOUT_MS) "failed" else status
 }
 
 private fun formatEpochTime(epochMs: Long): String {

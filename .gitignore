@@ -27,3 +27,6 @@ backend/services/asr_providers/__pycache__/
 
 # Amical experiments
 experiments/amical/artifacts/
+
+# Design mockup files
+design/

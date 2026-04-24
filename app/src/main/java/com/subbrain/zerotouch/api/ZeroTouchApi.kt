@@ -232,6 +232,30 @@ data class ContextProfileRequest(
     val prompt_preamble: String? = null
 )
 
+data class OrganizationSummary(
+    val id: String,
+    val name: String,
+    val slug: String? = null,
+    val role: String? = null
+)
+
+data class OrganizationListResponse(
+    val organizations: List<OrganizationSummary>,
+    val count: Int
+)
+
+data class OrganizationMemberSummary(
+    val id: String,
+    val organization_id: String,
+    val account_id: String,
+    val role: String
+)
+
+data class OrganizationMembersResponse(
+    val members: List<OrganizationMemberSummary>,
+    val count: Int
+)
+
 data class AccountSummary(
     val id: String,
     val display_name: String,
@@ -298,6 +322,30 @@ data class Card(
     val urgency: String? = null,
     val mentioned_by: String? = null,
     val context: String? = null
+)
+
+data class WikiPage(
+    val id: String,
+    val title: String,
+    val body: String,
+    val project_id: String? = null,
+    val project_key: String? = null,
+    val project_name: String? = null,
+    val category: String? = null,
+    val page_key: String? = null,
+    val kind: String? = null,
+    val status: String? = null,
+    val version: Int? = null,
+    val source_fact_ids: List<String>? = null,
+    val last_ingest_at: String? = null,
+    val created_at: String,
+    val updated_at: String
+)
+
+data class WikiPagesResponse(
+    val device_id: String,
+    val pages: List<WikiPage>,
+    val wiki_available: Boolean = true
 )
 
 class ZeroTouchApi(
@@ -682,6 +730,35 @@ class ZeroTouchApi(
         envelope.account ?: throw Exception("Account missing in update response")
     }
 
+    suspend fun listOrganizations(accountId: String? = null): OrganizationListResponse = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append("$baseUrl/zerotouch/api/organizations")
+            if (!accountId.isNullOrBlank()) append("?account_id=$accountId")
+        }
+        Log.d(TAG, "GET $url")
+        val request = Request.Builder().url(url).get().build()
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "GET $url failed: ${response.code} body=$body")
+            throw Exception("List organizations failed: ${response.code}")
+        }
+        gson.fromJson(body, OrganizationListResponse::class.java)
+    }
+
+    suspend fun listOrganizationMembers(organizationId: String): OrganizationMembersResponse = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/organizations/$organizationId/members"
+        Log.d(TAG, "GET $url")
+        val request = Request.Builder().url(url).get().build()
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "GET $url failed: ${response.code} body=$body")
+            throw Exception("List org members failed: ${response.code}")
+        }
+        gson.fromJson(body, OrganizationMembersResponse::class.java)
+    }
+
     suspend fun listWorkspaces(accountId: String? = null): WorkspaceListResponse = withContext(Dispatchers.IO) {
         val url = buildString {
             append("$baseUrl/zerotouch/api/workspaces")
@@ -777,6 +854,22 @@ class ZeroTouchApi(
         }
         val envelope = gson.fromJson(body, DeviceMutationResponse::class.java)
         envelope.device ?: throw Exception("Device missing in update response")
+    }
+
+    suspend fun listWikiPages(deviceId: String? = null): WikiPagesResponse = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append("$baseUrl/zerotouch/api/wiki-pages")
+            if (!deviceId.isNullOrBlank()) append("?device_id=$deviceId")
+        }
+        Log.d(TAG, "GET $url")
+        val request = Request.Builder().url(url).get().build()
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "GET $url failed: ${response.code} body=$body")
+            throw Exception("List wiki pages failed: ${response.code}")
+        }
+        gson.fromJson(body, WikiPagesResponse::class.java)
     }
 
     suspend fun getContextProfile(workspaceId: String): ContextProfileEnvelope = withContext(Dispatchers.IO) {

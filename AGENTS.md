@@ -44,5 +44,11 @@ python3 ../experiments/amical/import_amical_db.py \
 ## Current DB Notes
 
 - Project ref: `qvtlwotzuzbavrzqhyvt` (`WatchMe`)
-- `zerotouch_wiki_pages` does **not** exist yet as of `2026-04-15`
-- `Ingest / Wiki` viewer tabs therefore show "not generated yet" state
+- Wiki tables are now present as of `2026-04-19`:
+  - `zerotouch_wiki_pages`
+  - `zerotouch_wiki_index`
+  - `zerotouch_wiki_log`
+- Query + filing-back is implemented in the backend and viewer stack
+- For current long-term memory status and next steps, prefer:
+  - `docs/amical-longterm-memory-handoff.md`
+  - `docs/knowledge-pipeline-v2.md`

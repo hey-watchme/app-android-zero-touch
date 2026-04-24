@@ -8,6 +8,7 @@ import com.subbrain.zerotouch.api.DeviceIdProvider
 import com.subbrain.zerotouch.api.DeviceSummary
 import com.subbrain.zerotouch.api.FactSummary
 import com.subbrain.zerotouch.api.AccountSummary
+import com.subbrain.zerotouch.api.OrganizationSummary
 import com.subbrain.zerotouch.api.AuthPreferences
 import com.subbrain.zerotouch.api.AuthSession
 import com.subbrain.zerotouch.api.ContextProfile
@@ -31,6 +32,11 @@ import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.io.File
 
 const val UNINTELLIGIBLE_CARD_TEXT = "音声は検出されましたが、内容を判別できませんでした"
@@ -96,6 +102,8 @@ data class ZeroTouchUiState(
     val topicCards: List<TopicFeedCard> = emptyList(),
     val factsByTopic: Map<String, List<FactSummary>> = emptyMap(),
     val accounts: List<AccountSummary> = emptyList(),
+    val organizations: List<OrganizationSummary> = emptyList(),
+    val currentOrgRole: String? = null,
     val workspaces: List<WorkspaceSummary> = emptyList(),
     val devices: List<DeviceSummary> = emptyList(),
     val selectedAccountId: String? = null,
@@ -124,8 +132,11 @@ class ZeroTouchViewModel : ViewModel() {
     companion object {
         private const val TAG = "ZeroTouchVM"
         private const val PAGE_SIZE = 10
+        private const val SESSION_DETAIL_PARALLELISM = 4
         private const val OPTIMISTIC_TIMEOUT_MS = 60_000L
+        private const val PROCESSING_TIMEOUT_MS = 20 * 60_000L
         private const val TOPIC_IDLE_SECONDS = 30
+        private const val TOPIC_EVALUATE_COOLDOWN_MS = 60_000L
     }
 
     private val api = ZeroTouchApi()
@@ -141,6 +152,8 @@ class ZeroTouchViewModel : ViewModel() {
     private var hasMoreSessions = true
     private var currentTopicOffset = 0
     private var hasMoreTopics = true
+    private var topicEvaluateInFlight = false
+    private var lastTopicEvaluateAtMs = 0L
     private val optimisticTranscribing = mutableMapOf<String, Long>()
     private var isLoadingFacts = false
     private var isLoadingSelection = false
@@ -344,6 +357,17 @@ class ZeroTouchViewModel : ViewModel() {
                 val accounts = listOfNotNull(currentAccount)
                 val resolvedAccountId = currentAccount?.id
 
+                val organizations = if (resolvedAccountId != null) {
+                    try {
+                        api.listOrganizations(accountId = resolvedAccountId).organizations
+                    } catch (e: Exception) {
+                        Log.w(TAG, "listOrganizations failed", e)
+                        emptyList()
+                    }
+                } else {
+                    emptyList()
+                }
+
                 val workspaces = if (resolvedAccountId != null) {
                     api.listWorkspaces(accountId = resolvedAccountId).workspaces
                 } else {
@@ -383,6 +407,7 @@ class ZeroTouchViewModel : ViewModel() {
 
                 _uiState.value = _uiState.value.copy(
                     accounts = accounts,
+                    organizations = organizations,
                     workspaces = workspaces,
                     devices = devices,
                     selectedAccountId = resolvedAccountId,
@@ -606,13 +631,12 @@ class ZeroTouchViewModel : ViewModel() {
                     offset = 0
                 )
                 val sorted = response.sessions.sortedByDescending { it.created_at }
-                val cards = sorted.mapNotNull { summary -> buildTranscriptCard(summary) }
+                val cards = buildTranscriptCards(sorted)
                 val filteredCards = filterDismissed(cards)
                 val topicPage = loadTopicCards(
                     deviceId = viewScope.deviceId,
                     workspaceId = viewScope.workspaceId,
-                    offset = 0,
-                    allowEvaluate = viewScope.allowEvaluate
+                    offset = 0
                 )
                 Log.d(TAG, "loadSessions success: device=${viewScope.deviceId} sessions=${sorted.size}")
                 currentOffset = response.sessions.size
@@ -628,6 +652,10 @@ class ZeroTouchViewModel : ViewModel() {
                     dismissedIds = dismissedIds.toSet(),
                     favoriteIds = favoriteIds.toSet()
                 )
+                triggerTopicEvaluatePendingInBackground(
+                    deviceId = viewScope.deviceId,
+                    allowEvaluate = viewScope.allowEvaluate
+                )
             } catch (e: Exception) {
                 Log.e(TAG, "loadSessions failed", e)
                 _uiState.value = _uiState.value.copy(
@@ -641,14 +669,16 @@ class ZeroTouchViewModel : ViewModel() {
     fun refreshSessions(context: Context, showIndicator: Boolean = true) {
         if (isRefreshing) return
         isRefreshing = true
+        val lightweightRefresh = !showIndicator
         if (showIndicator) {
             _uiState.value = _uiState.value.copy(isRefreshing = true)
         }
         viewModelScope.launch {
             try {
+                val currentState = _uiState.value
                 val viewScope = resolveViewScope(context)
-                val requestedSessionLimit = max(currentOffset, PAGE_SIZE)
-                val requestedTopicLimit = max(currentTopicOffset, PAGE_SIZE)
+                val requestedSessionLimit = if (lightweightRefresh) PAGE_SIZE else max(currentOffset, PAGE_SIZE)
+                val requestedTopicLimit = if (lightweightRefresh) PAGE_SIZE else max(currentTopicOffset, PAGE_SIZE)
                 val response = api.listSessions(
                     deviceId = viewScope.deviceId,
                     workspaceId = viewScope.workspaceId,
@@ -656,31 +686,59 @@ class ZeroTouchViewModel : ViewModel() {
                     offset = 0
                 )
                 val fresh = response.sessions.sortedByDescending { it.created_at }
-                val freshCards = fresh.mapNotNull { summary -> buildTranscriptCard(summary) }
+                val freshCards = buildTranscriptCards(fresh)
                 val filteredCards = filterDismissed(freshCards)
                 val topicPage = loadTopicCards(
                     deviceId = viewScope.deviceId,
                     workspaceId = viewScope.workspaceId,
                     offset = 0,
-                    limit = requestedTopicLimit,
-                    allowEvaluate = viewScope.allowEvaluate
+                    limit = requestedTopicLimit
                 )
-                currentOffset = fresh.size
-                hasMoreSessions = response.count == requestedSessionLimit
-                currentTopicOffset = topicPage.rawCount
-                hasMoreTopics = topicPage.hasMore
                 Log.d(
                     TAG,
-                    "refreshSessions success: device=${viewScope.deviceId} sessions=${fresh.size} topics=${topicPage.cards.size}"
+                    "refreshSessions success: device=${viewScope.deviceId} sessions=${fresh.size} topics=${topicPage.cards.size} lightweight=$lightweightRefresh"
                 )
-                _uiState.value = _uiState.value.copy(
-                    sessions = fresh,
-                    feedCards = filteredCards,
-                    topicCards = topicPage.cards,
-                    isRefreshing = false,
-                    hasMore = hasMoreSessions || hasMoreTopics,
-                    dismissedIds = dismissedIds.toSet(),
-                    favoriteIds = favoriteIds.toSet()
+                if (lightweightRefresh) {
+                    val mergedSessions = mergeSessions(currentState.sessions, fresh)
+                    val mergedCards = mergeCards(currentState.feedCards, filteredCards, mergedSessions)
+                    val mergedTopicCards = mergeTopicCards(currentState.topicCards, topicPage.cards)
+
+                    if (currentOffset == 0) {
+                        currentOffset = fresh.size
+                        hasMoreSessions = response.count == PAGE_SIZE
+                    }
+                    if (currentTopicOffset == 0) {
+                        currentTopicOffset = topicPage.rawCount
+                        hasMoreTopics = topicPage.hasMore
+                    }
+
+                    _uiState.value = _uiState.value.copy(
+                        sessions = mergedSessions,
+                        feedCards = mergedCards,
+                        topicCards = mergedTopicCards,
+                        isRefreshing = false,
+                        hasMore = hasMoreSessions || hasMoreTopics,
+                        dismissedIds = dismissedIds.toSet(),
+                        favoriteIds = favoriteIds.toSet()
+                    )
+                } else {
+                    currentOffset = fresh.size
+                    hasMoreSessions = response.count == requestedSessionLimit
+                    currentTopicOffset = topicPage.rawCount
+                    hasMoreTopics = topicPage.hasMore
+                    _uiState.value = _uiState.value.copy(
+                        sessions = fresh,
+                        feedCards = filteredCards,
+                        topicCards = topicPage.cards,
+                        isRefreshing = false,
+                        hasMore = hasMoreSessions || hasMoreTopics,
+                        dismissedIds = dismissedIds.toSet(),
+                        favoriteIds = favoriteIds.toSet()
+                    )
+                }
+                triggerTopicEvaluatePendingInBackground(
+                    deviceId = viewScope.deviceId,
+                    allowEvaluate = viewScope.allowEvaluate
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "refreshSessions failed", e)
@@ -754,15 +812,14 @@ class ZeroTouchViewModel : ViewModel() {
                 }
                 val nextSessions = response.sessions.sortedByDescending { it.created_at }
                 val mergedSessions = mergeSessions(_uiState.value.sessions, nextSessions)
-                val nextCards = nextSessions.mapNotNull { summary -> buildTranscriptCard(summary) }
+                val nextCards = buildTranscriptCards(nextSessions)
                 val mergedCards = mergeCards(_uiState.value.feedCards, nextCards, mergedSessions)
                 val filteredCards = filterDismissed(mergedCards)
                 val topicPage = if (hasMoreTopics) {
                     loadTopicCards(
                         deviceId = viewScope.deviceId,
                         workspaceId = viewScope.workspaceId,
-                        offset = currentTopicOffset,
-                        allowEvaluate = viewScope.allowEvaluate
+                        offset = currentTopicOffset
                     )
                 } else {
                     TopicPageResult(cards = emptyList(), rawCount = 0, hasMore = false)
@@ -940,7 +997,11 @@ class ZeroTouchViewModel : ViewModel() {
         return try {
             val detail = api.getSession(summary.id)
             val text = detail.transcription?.trim().orEmpty()
-            val status = resolveOptimisticStatus(summary.id, detail.status)
+            val status = resolveProcessingStatus(
+                id = summary.id,
+                rawStatus = resolveOptimisticStatus(summary.id, detail.status),
+                backendTimestamp = detail.updated_at
+            )
             val isUnintelligible = text.isEmpty() && status in listOf("transcribed", "completed")
             val (baseDisplayStatus, isProcessing) = mapStatus(status)
             val displayStatus = if (isUnintelligible) "判別不可" else baseDisplayStatus
@@ -1004,28 +1065,27 @@ class ZeroTouchViewModel : ViewModel() {
         }
     }
 
+    private suspend fun buildTranscriptCards(summaries: List<SessionSummary>): List<TranscriptCard> =
+        coroutineScope {
+            if (summaries.isEmpty()) return@coroutineScope emptyList()
+
+            val limiter = Semaphore(SESSION_DETAIL_PARALLELISM)
+            summaries.map { summary ->
+                async {
+                    limiter.withPermit {
+                        buildTranscriptCard(summary)
+                    }
+                }
+            }.awaitAll().mapNotNull { it }
+        }
+
     private suspend fun loadTopicCards(
         deviceId: String?,
         workspaceId: String?,
         offset: Int,
-        limit: Int = PAGE_SIZE,
-        allowEvaluate: Boolean = false
+        limit: Int = PAGE_SIZE
     ): TopicPageResult {
         return try {
-            if (offset == 0 && allowEvaluate && !deviceId.isNullOrBlank()) {
-                try {
-                    val eval = api.evaluatePendingTopics(
-                        deviceId = deviceId,
-                        force = false,
-                        idleSeconds = TOPIC_IDLE_SECONDS,
-                        maxSessions = 200
-                    )
-                    Log.d(TAG, "topic evaluate-pending: device=$deviceId result=${eval.result}")
-                } catch (e: Exception) {
-                    Log.w(TAG, "topic evaluate-pending failed: device=$deviceId", e)
-                }
-            }
-
             val response = api.listTopics(
                 deviceId = deviceId,
                 workspaceId = workspaceId,
@@ -1045,6 +1105,36 @@ class ZeroTouchViewModel : ViewModel() {
         } catch (e: Exception) {
             Log.e(TAG, "loadTopicCards failed: device=$deviceId offset=$offset", e)
             TopicPageResult(cards = emptyList(), rawCount = 0, hasMore = false)
+        }
+    }
+
+    private fun triggerTopicEvaluatePendingInBackground(
+        deviceId: String?,
+        allowEvaluate: Boolean
+    ) {
+        if (!allowEvaluate || deviceId.isNullOrBlank()) return
+        if (topicEvaluateInFlight) return
+
+        val now = System.currentTimeMillis()
+        if ((now - lastTopicEvaluateAtMs) < TOPIC_EVALUATE_COOLDOWN_MS) return
+
+        topicEvaluateInFlight = true
+        lastTopicEvaluateAtMs = now
+
+        viewModelScope.launch {
+            try {
+                val eval = api.evaluatePendingTopics(
+                    deviceId = deviceId,
+                    force = false,
+                    idleSeconds = TOPIC_IDLE_SECONDS,
+                    maxSessions = 200
+                )
+                Log.d(TAG, "topic evaluate-pending (bg): device=$deviceId result=${eval.result}")
+            } catch (e: Exception) {
+                Log.w(TAG, "topic evaluate-pending (bg) failed: device=$deviceId", e)
+            } finally {
+                topicEvaluateInFlight = false
+            }
         }
     }
 
@@ -1119,7 +1209,11 @@ class ZeroTouchViewModel : ViewModel() {
     }
 
     private fun buildTranscriptCardFromTopicUtterance(utterance: TopicUtteranceSummary): TranscriptCard {
-        val status = resolveOptimisticStatus(utterance.id, utterance.status)
+        val status = resolveProcessingStatus(
+            id = utterance.id,
+            rawStatus = resolveOptimisticStatus(utterance.id, utterance.status),
+            backendTimestamp = utterance.updated_at
+        )
         val text = utterance.transcription?.trim().orEmpty()
         val isUnintelligible = text.isEmpty() && status in listOf("transcribed", "completed")
         val (baseDisplayStatus, isProcessing) = mapStatus(status)
@@ -1299,6 +1393,23 @@ class ZeroTouchViewModel : ViewModel() {
             return status
         }
         return if (status == "failed") "transcribing" else status
+    }
+
+    private fun resolveProcessingStatus(
+        id: String,
+        rawStatus: String,
+        backendTimestamp: String?
+    ): String {
+        if (rawStatus !in setOf("pending", "uploaded", "transcribing", "generating")) {
+            return rawStatus
+        }
+        val now = System.currentTimeMillis()
+        val referenceEpoch = optimisticTranscribing[id] ?: parseEpochMillis(backendTimestamp)
+        if (referenceEpoch <= 0L) {
+            return rawStatus
+        }
+        val ageMs = now - referenceEpoch
+        return if (ageMs >= PROCESSING_TIMEOUT_MS) "failed" else rawStatus
     }
 
     private fun markCardAsTranscribing(sessionId: String) {
