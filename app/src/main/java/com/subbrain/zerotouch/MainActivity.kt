@@ -82,6 +82,7 @@ import com.subbrain.zerotouch.audio.ambient.AmbientStatus
 import com.subbrain.zerotouch.ui.QueryWebViewScreen
 import com.subbrain.zerotouch.ui.SettingsSheet
 import com.subbrain.zerotouch.ui.TimelineScreen
+import com.subbrain.zerotouch.ui.HomeDashboardScreen
 import com.subbrain.zerotouch.ui.VoiceMemoScreen
 import com.subbrain.zerotouch.ui.WikiScreen
 import androidx.compose.material.icons.filled.MenuBook
@@ -519,14 +520,16 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 color = Color.White
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    WorkspaceHeader(
-                        title = currentPageTitle,
-                        subtitle = currentPageSubtitle,
-                        ambientStatusLabel = ambientStatusLabel,
-                        isAmbientLive = ambientState.isRecording || ambientState.speech,
-                        ambientEnabled = ambientEnabled,
-                        onToggleAmbient = handleAmbientToggle
-                    )
+                    if (selectedTab != 0) {
+                        WorkspaceHeader(
+                            title = currentPageTitle,
+                            subtitle = currentPageSubtitle,
+                            ambientStatusLabel = ambientStatusLabel,
+                            isAmbientLive = ambientState.isRecording || ambientState.speech,
+                            ambientEnabled = ambientEnabled,
+                            onToggleAmbient = handleAmbientToggle
+                        )
+                    }
 
                     Box(
                         modifier = Modifier
@@ -534,19 +537,17 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                             .background(MaterialTheme.colorScheme.background)
                     ) {
                         when (selectedTab) {
-                            0 -> VoiceMemoScreen(
+                            0 -> HomeDashboardScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 uiState = uiState,
-                                showFavoritesOnly = false,
                                 ambientEnabled = ambientEnabled,
+                                workspaceLabel = workspaceLabel,
+                                deviceLabel = deviceLabel,
+                                onToggleAmbient = handleAmbientToggle,
                                 onDeleteCard = { id -> viewModel.deleteCard(context, id) },
                                 onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
                                 onSelectCard = { id -> viewModel.selectCard(id) },
-                                onDismissDetail = { viewModel.clearSelection() },
-                                onRefresh = { viewModel.refreshSessions(context) },
-                                onLoadMore = { viewModel.loadMoreSessions(context) },
-                                onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
-                                onRetryTranscribe = { id -> viewModel.retryTranscribeSession(context, id) }
+                                onDismissDetail = { viewModel.clearSelection() }
                             )
                             1 -> TimelineScreen(
                                 modifier = Modifier.fillMaxSize(),

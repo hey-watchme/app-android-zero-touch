@@ -1,8 +1,14 @@
 # ZeroTouch Knowledge Pipeline v2
 
-**この文書は長期記憶パイプラインの設計正本です。**
+**この文書は Wiki / 長期記憶レイヤーの設計正本です。**
 
-更新日: `2026-04-11`
+更新日: `2026-04-25`
+
+ZeroTouch 全体の最上位設計は
+[`conversation-action-platform.md`](./conversation-action-platform.md) を参照してください。
+
+このレイヤーは、プロダクトの最終ゴールではなく、Action Candidate / Draft を生成するための
+根拠、文脈、SOP、長期記憶として使います。
 
 現在の作業再開や運用上の最新状態は
 [`amical-longterm-memory-handoff.md`](./amical-longterm-memory-handoff.md) を参照してください。
@@ -48,6 +54,27 @@ Wiki（LLM がコンパイルした Markdown / 構造化データ）
     ▼  Query
 回答 → wiki に filing back → 蓄積
 ```
+
+Action 変換との関係:
+
+```text
+Raw sources / Topic / Fact
+    │
+    ├── Wiki / SOP / Context memory
+    │
+    ▼
+ZeroTouch Converter
+    │
+    ▼
+Action Candidate / Connector Draft
+```
+
+Wiki は、Action Candidate の作成時に以下のために参照する。
+
+- 現場固有のルール、SOP、例外処理
+- 過去の判断や顧客メモ
+- 業界・workspace 固有の語彙
+- 同じ種類の会話から過去に作った draft
 
 ### Raw sources
 
@@ -256,11 +283,11 @@ analysis_context:
 
 | 優先 | アクション |
 |-----|----------|
-| 1 | コンテキストを入力する（上記）|
-| 2 | wiki schema（3軸の具体的なカテゴリ）を確定する |
-| 3 | 既存 Amical データ（28日・29日）を試験 Ingest して wiki 初版を生成する |
-| 4 | Phase 3 backend 実装を Ingest / Lint に切り替える |
-| 5 | Web viewer で wiki を表示できるようにする |
+| 1 | Wiki / Context Profile を Action Candidate 生成の根拠として使えるようにする |
+| 2 | domain schema と Wiki schema の対応を整理する |
+| 3 | 飲食店の参照ケースで、Action Candidate 生成時に関連 Wiki を注入する |
+| 4 | Review Queue で根拠 Wiki / 根拠会話を確認できるようにする |
+| 5 | Query / filing-back で得た知識を次回の Action 生成に反映する |
 
 ---
 
@@ -268,7 +295,7 @@ analysis_context:
 
 | ドキュメント | 役割 | 状態 |
 |-----------|------|------|
-| このドキュメント | 知識パイプラインの正本 | ✅ 最新 |
+| `conversation-action-platform.md` | ZeroTouch 全体の最上位設計 | ✅ 最新 |
+| このドキュメント | Wiki / 長期記憶レイヤーの正本 | ✅ 最新 |
 | `context-enrichment-project.md` | コンテキスト軸の詳細設計 | ✅ 現在も有効 |
 | `amical-longterm-memory-handoff.md` | 現在の作業引き継ぎ | ✅ 随時更新 |
-| `amical-validation-wrapup.md` | Amical 実験の価値検証まとめ | 📦 参照用 |
