@@ -389,16 +389,10 @@ class ZeroTouchViewModel : ViewModel() {
                     else -> null
                 }
 
-                val savedDeviceId = SelectionPreferences.getSelectedDeviceId(context)
-                var resolvedDeviceId = when {
-                    !savedDeviceId.isNullOrBlank() && devices.any { it.device_id == savedDeviceId } -> savedDeviceId
-                    physicalDeviceRow != null -> physicalDeviceRow.device_id
-                    else -> null
-                }
+                val resolvedDeviceId = physicalDeviceId
 
-                if (resolvedDeviceId != null) {
-                    val deviceRow = devices.firstOrNull { it.device_id == resolvedDeviceId }
-                    resolvedWorkspaceId = deviceRow?.workspace_id ?: resolvedWorkspaceId
+                if (physicalDeviceRow != null) {
+                    resolvedWorkspaceId = physicalDeviceRow.workspace_id ?: resolvedWorkspaceId
                 }
 
                 SelectionPreferences.setSelectedAccountId(context, resolvedAccountId)
@@ -428,32 +422,12 @@ class ZeroTouchViewModel : ViewModel() {
     }
 
     fun selectWorkspace(context: Context, workspaceId: String) {
-        val devices = _uiState.value.devices
-        val workspaceDevices = devices.filter { it.workspace_id == workspaceId }
-        val currentDeviceId = _uiState.value.selectedDeviceId
-        val resolvedDeviceId = when {
-            !currentDeviceId.isNullOrBlank() && workspaceDevices.any { it.device_id == currentDeviceId } -> currentDeviceId
-            workspaceDevices.isNotEmpty() -> workspaceDevices.first().device_id
-            else -> null
-        }
+        val resolvedDeviceId = DeviceIdProvider.getDeviceId(context)
         SelectionPreferences.setSelectedWorkspaceId(context, workspaceId)
         SelectionPreferences.setSelectedDeviceId(context, resolvedDeviceId)
         _uiState.value = _uiState.value.copy(
             selectedWorkspaceId = workspaceId,
             selectedDeviceId = resolvedDeviceId
-        )
-    }
-
-    fun selectDevice(context: Context, deviceId: String) {
-        val deviceRow = _uiState.value.devices.firstOrNull { it.device_id == deviceId }
-        val workspaceId = deviceRow?.workspace_id
-        SelectionPreferences.setSelectedDeviceId(context, deviceId)
-        if (workspaceId != null) {
-            SelectionPreferences.setSelectedWorkspaceId(context, workspaceId)
-        }
-        _uiState.value = _uiState.value.copy(
-            selectedWorkspaceId = workspaceId ?: _uiState.value.selectedWorkspaceId,
-            selectedDeviceId = deviceId
         )
     }
 

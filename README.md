@@ -115,15 +115,19 @@ Android 側の Topic / Card を Web で閲覧できる読み取り専用 MVP を
 
 ## 所有モデル
 
-ZeroTouch は今後 `account -> workspace -> device` の多層モデルで運用します。
+ZeroTouch は `account -> workspace -> device` の多層モデルで運用します。
 
 - `account`: Google サインイン等で識別されるユーザー
 - `workspace`: 家庭、店舗、検証環境などの論理単位
-- `device`: Android 本体、または Amical などを投入する仮想デバイス
+- `device`: 録音主体である物理端末。Android では端末内で生成された `device_id` が正本
 - `context profile`: その workspace の利用者、現場、目的、補足資料、語彙
 
-既存パイプラインは引き続き `device_id` で動作しますが、`workspace_id` を併せて持つことで、
-複数デバイスや仮想デバイスを 1 つのナレッジ単位に束ねられるようにします。
+Android アプリでは、ユーザーが device を選択しません。録音、Home、Timeline、Wiki の
+対象は常にその Android 端末の `device_id` です。`zerotouch_devices.display_name` は
+端末を見分けやすくするためのニックネームであり、ID の代替ではありません。
+
+`workspace_id` は、複数の物理端末を 1 つの現場ナレッジへ束ねるために使います。
+Amical import などの検証データは、Android で選択する device ではなく、検証用の外部データソースとして扱います。
 
 ## Context Enrichment
 
@@ -264,7 +268,7 @@ SaaS / ERP / 業務システム Connector
   - `zerotouch_accounts`（ユーザーアカウント）
   - `zerotouch_workspaces`（家庭 / 店舗 / 検証環境）
   - `zerotouch_workspace_members`（workspace メンバー）
-  - `zerotouch_devices`（物理デバイス / 仮想デバイス）
+  - `zerotouch_devices`（物理端末IDとニックネーム。Android では物理端末IDが正本）
   - `zerotouch_context_profiles`（workspace の前提情報）
   - `zerotouch_sessions`（Card / 発言単位）
   - `zerotouch_conversation_topics`（Topic / Card を束ねる会話区間）

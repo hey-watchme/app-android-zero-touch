@@ -294,6 +294,13 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         }
     }
 
+    LaunchedEffect(ambientState.lastEvent) {
+        val event = ambientState.lastEvent ?: return@LaunchedEffect
+        if (event.startsWith("Upload completed")) {
+            viewModel.refreshSessions(context, showIndicator = false)
+        }
+    }
+
     LaunchedEffect(uiState.selectedWorkspaceId, uiState.isLoadingSelection) {
         val workspaceId = uiState.selectedWorkspaceId
         if (!uiState.isLoadingSelection && !workspaceId.isNullOrBlank()) {
@@ -314,6 +321,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
             stopAmbientService(context)
             return@LaunchedEffect
         }
+        viewModel.loadSessions(context)
         startAmbientService(context)
     }
 
@@ -350,16 +358,17 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     }
 
     val activeTopicCount = uiState.topicCards.count { it.status == "active" }
+    val physicalDeviceId = DeviceIdProvider.getDeviceId(context)
     val selectedAccount = uiState.accounts.firstOrNull { it.id == uiState.selectedAccountId }
     val selectedWorkspace = uiState.workspaces.firstOrNull { it.id == uiState.selectedWorkspaceId }
-    val selectedDevice = uiState.devices.firstOrNull { it.device_id == uiState.selectedDeviceId }
+    val selectedDevice = uiState.devices.firstOrNull { it.device_id == physicalDeviceId }
     val selectedWorkspaceId = uiState.selectedWorkspaceId
     val accountLabel = selectedAccount?.display_name
         ?: uiState.authSession?.displayName
         ?: uiState.authSession?.email
         ?: "未選択"
     val workspaceLabel = selectedWorkspace?.name ?: "未選択"
-    val deviceLabel = selectedDevice?.display_name ?: "未選択"
+    val deviceLabel = selectedDevice?.display_name?.takeIf { it.isNotBlank() } ?: physicalDeviceId
     val contextDraft = ContextProfileDraft.fromProfile(
         profile = uiState.contextProfile,
         workspaceName = workspaceLabel,
@@ -396,11 +405,6 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
             },
             onSelectWorkspace = { workspaceId ->
                 viewModel.selectWorkspace(context, workspaceId)
-                viewModel.loadSessions(context)
-                viewModel.loadFacts(context, force = true)
-            },
-            onSelectDevice = { deviceId ->
-                viewModel.selectDevice(context, deviceId)
                 viewModel.loadSessions(context)
                 viewModel.loadFacts(context, force = true)
             },
@@ -468,6 +472,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         if (enabled) {
             ambientEnabled = true
             AmbientPreferences.setAmbientEnabled(context, true)
+            viewModel.loadSessions(context)
             if (!hasRecordPermission) {
                 requestRecordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission) {
@@ -1182,18 +1187,14 @@ private fun WorkspaceSelectorSheet(
     onClose: () -> Unit,
     onSignOut: () -> Unit,
     onSelectWorkspace: (String) -> Unit,
-    onSelectDevice: (String) -> Unit,
     onSaveProfile: (String, String, String, String, ContextProfileDraft) -> Unit
 ) {
+    val context = LocalContext.current
+    val physicalDeviceId = DeviceIdProvider.getDeviceId(context)
     val selectedWorkspaceId = uiState.selectedWorkspaceId
     val currentAccount = uiState.accounts.firstOrNull { it.id == uiState.selectedAccountId }
     val currentWorkspace = uiState.workspaces.firstOrNull { it.id == selectedWorkspaceId }
-    val currentDevice = uiState.devices.firstOrNull { it.device_id == uiState.selectedDeviceId }
-    val filteredDevices = if (!selectedWorkspaceId.isNullOrBlank()) {
-        uiState.devices.filter { it.workspace_id == selectedWorkspaceId }
-    } else {
-        uiState.devices
-    }
+    val currentDevice = uiState.devices.firstOrNull { it.device_id == physicalDeviceId }
     var isEditing by remember { mutableStateOf(false) }
     var accountName by remember { mutableStateOf(currentAccount?.display_name.orEmpty()) }
     var workspaceName by remember { mutableStateOf(currentWorkspace?.name.orEmpty()) }
@@ -1317,21 +1318,32 @@ private fun WorkspaceSelectorSheet(
             // ── Device ───────────────────────────────────────────
             SectionHeader("DEVICE")
             Spacer(Modifier.height(8.dp))
-            if (filteredDevices.isEmpty()) {
-                EmptyHint("対象デバイスがありません")
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    filteredDevices.forEach { device ->
-                        val subtitle = listOfNotNull(
-                            device.source_type?.takeIf { it.isNotBlank() },
-                            device.device_kind?.takeIf { it.isNotBlank() },
-                            if (device.is_virtual) "virtual" else null
-                        ).joinToString(" · ").ifBlank { null }
-                        SelectionRow(
-                            title = device.display_name,
-                            subtitle = subtitle,
-                            selected = device.device_id == uiState.selectedDeviceId,
-                            onClick = { onSelectDevice(device.device_id) }
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = ZtSurfaceVariant
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = physicalDeviceId,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ZtOnSurface
+                    )
+                    val nickname = currentDevice?.display_name?.takeIf { it.isNotBlank() }
+                    Text(
+                        text = if (nickname.isNullOrBlank()) "ニックネーム未設定" else "ニックネーム: $nickname",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtCaption
+                    )
+                    if (currentDevice == null) {
+                        Text(
+                            text = "この物理端末のdevice rowがまだ登録されていません。録音と表示はこのIDで行います。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZtCaption
                         )
                     }
                 }
@@ -1532,7 +1544,7 @@ private fun WorkspaceSelectorSheet(
                             value = deviceName,
                             onValueChange = { deviceName = it },
                             enabled = !isSaving,
-                            label = { Text("デバイス名") },
+                            label = { Text("デバイスのニックネーム") },
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         )

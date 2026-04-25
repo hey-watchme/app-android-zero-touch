@@ -1,4 +1,4 @@
-# Account / Workspace / Organization 設計
+# Account / Workspace / Organization / Device 設計
 
 作成日: 2026-04-24  
 対象: ZeroTouch バックエンド（`backend/app.py` + migration 009, 014）
@@ -13,16 +13,30 @@ Organization（組織）
   └─ Workspace（1店舗 / 1現場 など）
       ├─ workspace_members（account ↔ workspace の紐付け、role: admin / editor / viewer）
       ├─ workspace_invitations（招待トークン）
-      └─ Device（録音デバイス）
+      └─ Device（録音主体の物理端末）
             ├─ Sessions（カード）
             ├─ Topics（トピック）
             ├─ Facts（事実）
             └─ WikiPages（ナレッジ）
 ```
 
-- **データの所有者はデバイス**。カード・トピック・Fact はすべてデバイスに紐づく
+- **データの所有者は物理端末IDとしてのデバイス**。カード・トピック・Fact はすべて `device_id` に紐づく
 - **WikiPage はワークスペース単位で集約**。配下の全デバイスのトピックから生成される
 - **アカウントはデバイスを直接持たない**。Org → Workspace → Device の経路でアクセスする
+
+## Device 方針
+
+Android アプリにおける `device` は、ユーザーが選ぶデータソースではない。
+その Android 端末が保持する `DeviceIdProvider.getDeviceId()` の値が正本であり、
+録音、Home、Timeline、Wiki は常にこの物理端末IDを対象にする。
+
+- `device_id`: 物理端末ID。録音データの主キー的な識別子で、表示名では置き換えない
+- `display_name`: 人間が見分けるためのニックネーム。例: `redmi-001`
+- Android UI: device 一覧選択はしない。現在端末のIDを表示し、必要ならニックネームだけ編集する
+- `workspace_id`: 物理端末をどの現場・検証環境に属させるかを表す
+
+Amical import などの検証データは、Android 録音端末として選ばせない。
+必要な場合は検証用データソースとして別途扱い、Android の通常録音導線とは混ぜない。
 
 ---
 
@@ -130,7 +144,7 @@ account_id が渡されたとき:
 
 | 優先度 | 内容 |
 |--------|------|
-| 🟡 | Phase 2b: Android ViewModel を Org→WS→Device の3段階選択に変更 |
+| ✅ | Android: device 選択を廃止し、物理端末ID固定 + ニックネーム編集へ整理 |
 | 🟡 | Phase 2a-②: 招待 API 実装（token 発行・受諾フロー） |
 | 🟡 | Phase 2a-③: `_check_workspace_permission()` 権限チェックヘルパー追加 |
 | 🟢 | Phase 4: Android 招待受諾画面・WS メンバー管理 UI |

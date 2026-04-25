@@ -174,14 +174,16 @@ class AmbientRecordingService : Service() {
             try {
                 val api = ZeroTouchApi()
                 val upload = api.uploadAudio(file, deviceId)
-                // Once upload succeeds, rely on backend sessions/topics for rendering state.
-                // Keeping local entries indefinitely causes stale "processing" placeholders.
-                val uploaded = AmbientStatus.state.value.recordings.filterNot { item ->
-                    item.path == file.absolutePath
+                val uploaded = AmbientStatus.state.value.recordings.map { item ->
+                    if (item.path == file.absolutePath) {
+                        item.copy(sessionId = upload.session_id)
+                    } else {
+                        item
+                    }
                 }
                 AmbientStatus.update(
-                    recordings = uploaded,
-                    lastEvent = "Upload completed"
+                    recordings = uploaded.take(MAX_RECORDINGS),
+                    lastEvent = "Upload completed:${upload.session_id}"
                 )
                 val asrProvider = AmbientPreferences.getAsrProvider(this@AmbientRecordingService)
                 api.transcribe(upload.session_id, autoChain = false, provider = asrProvider)
