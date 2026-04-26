@@ -280,6 +280,18 @@ data class WorkspaceMutationResponse(
     val workspace: WorkspaceSummary? = null
 )
 
+data class WorkspaceMemberSummary(
+    val workspace_id: String,
+    val account_id: String,
+    val role: String? = null,
+    val account: AccountSummary? = null
+)
+
+data class WorkspaceMembersResponse(
+    val members: List<WorkspaceMemberSummary>,
+    val count: Int = 0
+)
+
 data class WorkspaceSummary(
     val id: String,
     val owner_account_id: String? = null,
@@ -803,6 +815,21 @@ class ZeroTouchApi(
         val envelope = gson.fromJson(body, WorkspaceMutationResponse::class.java)
         envelope.workspace ?: throw Exception("Workspace missing in update response")
     }
+
+    suspend fun listWorkspaceMembers(workspaceId: String): WorkspaceMembersResponse =
+        withContext(Dispatchers.IO) {
+            val url = "$baseUrl/zerotouch/api/workspaces/$workspaceId/members"
+            val response = client.newCall(
+                Request.Builder().url(url).get().build()
+            ).execute()
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                Log.e(TAG, "GET $url failed: ${response.code}")
+                return@withContext WorkspaceMembersResponse(emptyList())
+            }
+            gson.fromJson(body, WorkspaceMembersResponse::class.java)
+                ?: WorkspaceMembersResponse(emptyList())
+        }
 
     suspend fun listDevices(
         workspaceId: String? = null,

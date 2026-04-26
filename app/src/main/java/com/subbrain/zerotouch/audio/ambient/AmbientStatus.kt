@@ -14,14 +14,17 @@ data class AmbientUiState(
     val recordingElapsedMs: Long = 0,
     val recordingHeartbeatAt: Long = 0,
     val recordings: List<AmbientRecordingEntry> = emptyList(),
-    val lastEvent: String? = null
+    val lastEvent: String? = null,
+    val eventSeq: Long = 0
 )
 
 data class AmbientRecordingEntry(
     val path: String,
     val durationMs: Long,
     val createdAt: Long,
-    val sessionId: String? = null
+    val sessionId: String? = null,
+    val status: String = "pending",
+    val errorMessage: String? = null
 )
 
 object AmbientStatus {
@@ -42,6 +45,7 @@ object AmbientStatus {
         lastEvent: String? = null
     ) {
         val current = _state.value
+        val nextEventSeq = if (lastEvent != null) current.eventSeq + 1 else current.eventSeq
         _state.value = current.copy(
             status = status ?: current.status,
             ambientLevel = ambientLevel ?: current.ambientLevel,
@@ -53,7 +57,8 @@ object AmbientStatus {
             recordingElapsedMs = recordingElapsedMs ?: current.recordingElapsedMs,
             recordingHeartbeatAt = recordingHeartbeatAt ?: current.recordingHeartbeatAt,
             recordings = recordings ?: current.recordings,
-            lastEvent = lastEvent ?: current.lastEvent
+            lastEvent = lastEvent ?: current.lastEvent,
+            eventSeq = nextEventSeq
         )
     }
 }

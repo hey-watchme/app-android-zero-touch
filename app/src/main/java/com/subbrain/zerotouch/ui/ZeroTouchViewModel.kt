@@ -17,13 +17,16 @@ import com.subbrain.zerotouch.api.SessionListResponse
 import com.subbrain.zerotouch.api.SessionSummary
 import com.subbrain.zerotouch.api.TopicSummary
 import com.subbrain.zerotouch.api.TopicUtteranceSummary
+import com.subbrain.zerotouch.api.WorkspaceMemberSummary
 import com.subbrain.zerotouch.api.WorkspaceSummary
 import com.subbrain.zerotouch.api.ZeroTouchApi
 import com.subbrain.zerotouch.api.SelectionPreferences
 import com.subbrain.zerotouch.api.SupabaseAuthApi
 import com.subbrain.zerotouch.audio.ambient.AmbientPreferences
+import com.subbrain.zerotouch.audio.ambient.AmbientUiState
 import com.subbrain.zerotouch.audio.ambient.AmbientStatus
 import kotlin.math.max
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -31,6 +34,9 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -100,9 +106,11 @@ data class ZeroTouchUiState(
     val sessions: List<SessionSummary> = emptyList(),
     val feedCards: List<TranscriptCard> = emptyList(),
     val topicCards: List<TopicFeedCard> = emptyList(),
+    val homeLiveTopics: List<TopicFeedCard> = emptyList(),
     val factsByTopic: Map<String, List<FactSummary>> = emptyMap(),
     val accounts: List<AccountSummary> = emptyList(),
     val organizations: List<OrganizationSummary> = emptyList(),
+    val workspaceMembers: List<WorkspaceMemberSummary> = emptyList(),
     val currentOrgRole: String? = null,
     val workspaces: List<WorkspaceSummary> = emptyList(),
     val devices: List<DeviceSummary> = emptyList(),
@@ -135,6 +143,7 @@ class ZeroTouchViewModel : ViewModel() {
         private const val SESSION_DETAIL_PARALLELISM = 4
         private const val OPTIMISTIC_TIMEOUT_MS = 60_000L
         private const val PROCESSING_TIMEOUT_MS = 20 * 60_000L
+        private const val PROCESSING_MONITOR_INTERVAL_MS = 2_000L
         private const val TOPIC_IDLE_SECONDS = 30
         private const val TOPIC_EVALUATE_COOLDOWN_MS = 60_000L
     }
@@ -155,8 +164,23 @@ class ZeroTouchViewModel : ViewModel() {
     private var topicEvaluateInFlight = false
     private var lastTopicEvaluateAtMs = 0L
     private val optimisticTranscribing = mutableMapOf<String, Long>()
+    private val processingMonitors = mutableMapOf<String, Job>()
     private var isLoadingFacts = false
     private var isLoadingSelection = false
+
+    fun updateHomeLiveInput(ambientState: AmbientUiState) {
+        _uiState.update { state ->
+            val homeLiveTopics = buildHomeLiveTopics(ambientState, state)
+            Log.d(
+                TAG,
+                "home physical feed updated: liveTopics=${homeLiveTopics.size} " +
+                    "ambientRecording=${ambientState.isRecording} speech=${ambientState.speech} " +
+                    "recordings=${ambientState.recordings.size} sessions=${state.feedCards.size} topics=${state.topicCards.size} " +
+                    "eventSeq=${ambientState.eventSeq} lastEvent=${ambientState.lastEvent}"
+            )
+            state.copy(homeLiveTopics = homeLiveTopics)
+        }
+    }
 
     private fun resetForAuthSession(session: AuthSession?) {
         dismissedIds.clear()
@@ -175,6 +199,7 @@ class ZeroTouchViewModel : ViewModel() {
             isLoadingSelection = session != null,
             isLoading = session != null
         )
+        rebuildHomeLiveInputFromAmbient()
     }
 
     private fun resolveViewScope(context: Context): ViewScope {
@@ -409,6 +434,14 @@ class ZeroTouchViewModel : ViewModel() {
                     selectedDeviceId = resolvedDeviceId,
                     isLoadingSelection = false
                 )
+
+                // Load workspace members as a non-blocking side effect after selection is committed
+                if (!resolvedWorkspaceId.isNullOrBlank()) {
+                    val wsId = resolvedWorkspaceId
+                    val members = runCatching { api.listWorkspaceMembers(wsId).members }
+                        .getOrDefault(emptyList())
+                    _uiState.value = _uiState.value.copy(workspaceMembers = members)
+                }
                 if (loadDataAfter && resolvedAccountId != null) {
                     loadSessions(context)
                 }
@@ -429,6 +462,11 @@ class ZeroTouchViewModel : ViewModel() {
             selectedWorkspaceId = workspaceId,
             selectedDeviceId = resolvedDeviceId
         )
+        viewModelScope.launch {
+            val newMembers = runCatching { api.listWorkspaceMembers(workspaceId).members }
+                .getOrDefault(emptyList())
+            _uiState.value = _uiState.value.copy(workspaceMembers = newMembers)
+        }
     }
 
     fun loadContextProfile(workspaceId: String) {
@@ -626,6 +664,7 @@ class ZeroTouchViewModel : ViewModel() {
                     dismissedIds = dismissedIds.toSet(),
                     favoriteIds = favoriteIds.toSet()
                 )
+                rebuildHomeLiveInputFromAmbient()
                 triggerTopicEvaluatePendingInBackground(
                     deviceId = viewScope.deviceId,
                     allowEvaluate = viewScope.allowEvaluate
@@ -695,6 +734,7 @@ class ZeroTouchViewModel : ViewModel() {
                         dismissedIds = dismissedIds.toSet(),
                         favoriteIds = favoriteIds.toSet()
                     )
+                    rebuildHomeLiveInputFromAmbient()
                 } else {
                     currentOffset = fresh.size
                     hasMoreSessions = response.count == requestedSessionLimit
@@ -709,6 +749,7 @@ class ZeroTouchViewModel : ViewModel() {
                         dismissedIds = dismissedIds.toSet(),
                         favoriteIds = favoriteIds.toSet()
                     )
+                    rebuildHomeLiveInputFromAmbient()
                 }
                 triggerTopicEvaluatePendingInBackground(
                     deviceId = viewScope.deviceId,
@@ -814,6 +855,7 @@ class ZeroTouchViewModel : ViewModel() {
                     dismissedIds = dismissedIds.toSet(),
                     favoriteIds = favoriteIds.toSet()
                 )
+                rebuildHomeLiveInputFromAmbient()
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoadingMore = false)
             }
@@ -835,7 +877,7 @@ class ZeroTouchViewModel : ViewModel() {
                 Log.d(TAG, "Transcribe triggered for session=${uploadResult.session_id}")
 
                 _uiState.value = _uiState.value.copy(isUploading = false)
-                loadSessions(context)
+                startProcessingMonitor(context, uploadResult.session_id)
 
             } catch (e: Exception) {
                 Log.e(TAG, "Upload failed", e)
@@ -843,6 +885,70 @@ class ZeroTouchViewModel : ViewModel() {
                     isUploading = false,
                     error = "アップロードに失敗しました: ${e.message}"
                 )
+            }
+        }
+    }
+
+    fun handleAmbientEvent(context: Context, event: String) {
+        Log.d(TAG, "ambient event received: $event")
+        when {
+            event.startsWith("Upload completed:") -> {
+                val sessionId = event.substringAfter("Upload completed:").trim()
+                if (sessionId.isNotBlank()) {
+                    startProcessingMonitor(context, sessionId)
+                }
+            }
+
+            event.startsWith("Transcribe started:") -> {
+                val sessionId = event.substringAfter("Transcribe started:").trim()
+                if (sessionId.isNotBlank()) {
+                    markCardAsTranscribing(sessionId)
+                    startProcessingMonitor(context, sessionId)
+                }
+            }
+
+            event.startsWith("Transcribe failed:") -> {
+                val sessionId = event.substringAfter("Transcribe failed:").trim()
+                if (sessionId.isNotBlank()) {
+                    refreshSessions(context, showIndicator = false)
+                }
+            }
+        }
+    }
+
+    private fun rebuildHomeLiveInputFromAmbient() {
+        updateHomeLiveInput(AmbientStatus.state.value)
+    }
+
+    private fun startProcessingMonitor(context: Context, sessionId: String) {
+        if (sessionId.isBlank()) return
+        if (processingMonitors[sessionId]?.isActive == true) return
+
+        Log.d(TAG, "processing monitor start: session=$sessionId")
+        processingMonitors[sessionId] = viewModelScope.launch {
+            try {
+                val startedAt = System.currentTimeMillis()
+                while (System.currentTimeMillis() - startedAt < PROCESSING_TIMEOUT_MS) {
+                    refreshSessions(context, showIndicator = false)
+                    rebuildHomeLiveInputFromAmbient()
+                    delay(PROCESSING_MONITOR_INTERVAL_MS)
+
+                    val state = _uiState.value
+                    val isInsideTopic = state.topicCards.any { topic ->
+                        topic.utterances.any { card -> card.id == sessionId }
+                    }
+                    val sessionStatus = state.sessions.firstOrNull { it.id == sessionId }?.status
+                    Log.d(
+                        TAG,
+                        "processing monitor tick: session=$sessionId status=$sessionStatus insideTopic=$isInsideTopic"
+                    )
+                    if (isInsideTopic || sessionStatus == "failed") {
+                        break
+                    }
+                }
+            } finally {
+                processingMonitors.remove(sessionId)
+                Log.d(TAG, "processing monitor stop: session=$sessionId")
             }
         }
     }
@@ -863,7 +969,7 @@ class ZeroTouchViewModel : ViewModel() {
                     language = language
                 )
                 Log.d(TAG, "Re-transcribe triggered: session=$sessionId provider=$asrProvider language=$language")
-                refreshSessions(context)
+                startProcessingMonitor(context, sessionId)
             } catch (e: Exception) {
                 Log.e(TAG, "Re-transcribe failed: session=$sessionId language=$language", e)
                 _uiState.value = _uiState.value.copy(
@@ -884,7 +990,7 @@ class ZeroTouchViewModel : ViewModel() {
                     provider = asrProvider
                 )
                 Log.d(TAG, "Retry transcribe triggered: session=$sessionId provider=$asrProvider")
-                refreshSessions(context)
+                startProcessingMonitor(context, sessionId)
             } catch (e: Exception) {
                 Log.e(TAG, "Retry transcribe failed: session=$sessionId", e)
                 _uiState.value = _uiState.value.copy(
@@ -983,7 +1089,7 @@ class ZeroTouchViewModel : ViewModel() {
                 text.isNotEmpty() -> text
                 isUnintelligible -> UNINTELLIGIBLE_CARD_TEXT
                 status == "failed" -> "処理に失敗しました"
-                else -> "データ取得中..."
+                else -> processingTextForStatus(status)
             }
             val sourceTimestamp = detail.recorded_at ?: detail.created_at
             val createdAtEpoch = parseEpochMillis(sourceTimestamp)
@@ -1182,6 +1288,191 @@ class ZeroTouchViewModel : ViewModel() {
         )
     }
 
+    private fun buildHomeLiveTopics(
+        ambientState: AmbientUiState,
+        state: ZeroTouchUiState
+    ): List<TopicFeedCard> {
+        val topicChildIds = state.topicCards.flatMap { topic -> topic.utterances }.map { it.id }.toSet()
+        val sessionById = state.sessions.associateBy { it.id }
+        val cardById = state.feedCards.associateBy { it.id }
+        val items = mutableListOf<TopicFeedCard>()
+
+        if (ambientState.isRecording || ambientState.speech) {
+            val now = System.currentTimeMillis()
+            val status = if (ambientState.isRecording) "recording" else "speech_detected"
+            val label = if (ambientState.isRecording) "録音中" else "音声検出"
+            val text = if (ambientState.isRecording) "録音中..." else "音声を検出しています..."
+            items += TopicFeedCard(
+                id = "home_live_input",
+                status = status,
+                title = label,
+                summary = if (ambientState.isRecording) {
+                    "発話を取り込んでいます。発話が終わるとアップロードと文字起こしに進みます。"
+                } else {
+                    "音声を検出しています。発話として確定すると録音カードになります。"
+                },
+                utteranceCount = 1,
+                updatedAtEpochMs = now,
+                displayDate = buildDisplayDateFromEpoch(now),
+                utterances = listOf(
+                    TranscriptCard(
+                        id = "home_live_input_card",
+                        createdAt = "",
+                        createdAtEpochMs = now,
+                        status = status,
+                        displayStatus = label,
+                        isProcessing = true,
+                        text = text,
+                        displayTitle = buildTitleFromEpoch(now),
+                        durationSeconds = (ambientState.recordingElapsedMs / 1000L).toInt(),
+                        displayDate = buildDisplayDateFromEpoch(now)
+                    )
+                )
+            )
+        }
+
+        ambientState.recordings.forEach { entry ->
+            val sessionId = entry.sessionId
+            if (sessionId != null && sessionId in topicChildIds) return@forEach
+
+            val summary = sessionId?.let { sessionById[it] }
+            val existingCard = sessionId?.let { cardById[it] }
+            val status = summary?.status ?: entry.status
+            val epoch = parseEpochMillis(summary?.recorded_at ?: summary?.created_at)
+                .takeIf { it > 0L }
+                ?: entry.createdAt
+            val effectiveStatus = when {
+                status in setOf("transcribed", "completed") &&
+                    existingCard?.text?.isNotBlank() == true &&
+                    !existingCard.isUnintelligible -> "generating"
+                else -> resolveProcessingStatus(
+                    id = sessionId ?: entry.path,
+                    rawStatus = status,
+                    backendTimestamp = summary?.updated_at
+                )
+            }
+            val card = existingCard?.let {
+                if (effectiveStatus == "generating" && !it.isProcessing) {
+                    it.copy(
+                        status = "generating",
+                        displayStatus = "解析中",
+                        isProcessing = true,
+                        text = it.text.ifBlank { processingTextForStatus("generating") }
+                    )
+                } else {
+                    it
+                }
+            } ?: buildHomeProcessingCard(
+                id = sessionId ?: "local_${entry.createdAt}",
+                epoch = epoch,
+                durationSeconds = summary?.duration_seconds ?: (entry.durationMs / 1000L).toInt(),
+                status = effectiveStatus,
+                errorMessage = summary?.error_message ?: entry.errorMessage
+            )
+
+            items += TopicFeedCard(
+                id = "home_live_${card.id}",
+                status = if (card.status == "failed") "failed" else "processing",
+                title = when (card.status) {
+                    "failed" -> "処理に失敗しました"
+                    "uploaded" -> "文字起こし待ちの録音"
+                    "transcribing" -> "文字起こし中の録音"
+                    "generating" -> "解析中の録音"
+                    else -> "アップロード中の録音"
+                },
+                summary = when (card.status) {
+                    "failed" -> card.text
+                    "uploaded" -> "アップロードが完了し、文字起こし開始を待っています。"
+                    "transcribing" -> "音声を文字起こししています。完了次第ここに反映されます。"
+                    "generating" -> "発話内容をTopicとして整理しています。"
+                    else -> "音声をサーバーへアップロードしています。"
+                },
+                utteranceCount = 1,
+                updatedAtEpochMs = card.createdAtEpochMs.takeIf { it > 0L } ?: epoch,
+                displayDate = card.displayDate.ifBlank { buildDisplayDateFromEpoch(epoch) },
+                utterances = listOf(card),
+                isUnintelligible = card.isUnintelligible
+            )
+        }
+
+        val liveSessionIds = ambientState.recordings.mapNotNull { it.sessionId }.toSet()
+        state.feedCards
+            .asSequence()
+            .filter { card -> card.id !in topicChildIds }
+            .filter { card -> card.id !in liveSessionIds }
+            .filter { card -> card.isProcessing || isRecentHomeSession(card.createdAtEpochMs) }
+            .take(6)
+            .forEach { card ->
+                items += TopicFeedCard(
+                    id = "home_session_${card.id}",
+                    status = if (card.isProcessing) "processing" else "active",
+                    title = when {
+                        card.isProcessing -> "${card.displayStatus.ifBlank { "処理中" }}の録音"
+                        card.isUnintelligible -> UNINTELLIGIBLE_TOPIC_TITLE
+                        card.text.isNotBlank() -> card.text.take(28)
+                        else -> "録音"
+                    },
+                    summary = when {
+                        card.isProcessing -> card.text.ifBlank { processingTextForStatus(card.status) }
+                        card.isUnintelligible -> UNINTELLIGIBLE_TOPIC_SUMMARY
+                        else -> card.text.take(120)
+                    },
+                    utteranceCount = 1,
+                    updatedAtEpochMs = card.createdAtEpochMs,
+                    displayDate = card.displayDate,
+                    utterances = listOf(card),
+                    isUnintelligible = card.isUnintelligible
+                )
+            }
+
+        return items.distinctBy { it.id }.sortedByDescending { it.updatedAtEpochMs }.take(12)
+    }
+
+    private fun isRecentHomeSession(epochMs: Long): Boolean {
+        if (epochMs <= 0L) return false
+        val ageMs = System.currentTimeMillis() - epochMs
+        return ageMs in 0L..(2 * 60 * 60 * 1000L)
+    }
+
+    private fun buildHomeProcessingCard(
+        id: String,
+        epoch: Long,
+        durationSeconds: Int,
+        status: String,
+        errorMessage: String?
+    ): TranscriptCard {
+        val visualStatus = when (status) {
+            "failed" -> "failed"
+            "uploaded", "transcribing", "generating" -> status
+            else -> "pending"
+        }
+        val displayStatus = when (visualStatus) {
+            "pending" -> "アップロード中"
+            "uploaded" -> "文字起こし待ち"
+            "transcribing" -> "文字起こし中"
+            "generating" -> "解析中"
+            "failed" -> "失敗"
+            else -> "処理中"
+        }
+        val displayText = when (visualStatus) {
+            "pending" -> "音声をサーバーに送信しています…"
+            "failed" -> errorMessage?.takeIf { it.isNotBlank() } ?: "処理に失敗しました"
+            else -> processingTextForStatus(visualStatus)
+        }
+        return TranscriptCard(
+            id = id,
+            createdAt = "",
+            createdAtEpochMs = epoch,
+            status = visualStatus,
+            displayStatus = displayStatus,
+            isProcessing = visualStatus in setOf("pending", "uploaded", "transcribing", "generating"),
+            text = displayText,
+            displayTitle = buildTitleFromEpoch(epoch),
+            durationSeconds = durationSeconds,
+            displayDate = buildDisplayDateFromEpoch(epoch)
+        )
+    }
+
     private fun buildTranscriptCardFromTopicUtterance(utterance: TopicUtteranceSummary): TranscriptCard {
         val status = resolveProcessingStatus(
             id = utterance.id,
@@ -1204,7 +1495,7 @@ class ZeroTouchViewModel : ViewModel() {
             text.isNotEmpty() -> text
             isUnintelligible -> UNINTELLIGIBLE_CARD_TEXT
             status == "failed" -> "処理に失敗しました"
-            else -> "データ取得中..."
+            else -> processingTextForStatus(status)
         }
 
         return TranscriptCard(
@@ -1340,12 +1631,12 @@ class ZeroTouchViewModel : ViewModel() {
 
     private fun mapStatus(status: String): Pair<String, Boolean> {
         val displayStatus = when (status) {
-            "uploaded" -> "キュー待ち"
+            "uploaded" -> "文字起こし待ち"
             "transcribing" -> "文字起こし中"
             "transcribed" -> "文字起こし済み"
             "completed" -> "完了"
             "failed" -> "失敗"
-            "generating" -> "分析中"
+            "generating" -> "解析中"
             "active" -> "ライブ"
             "cooling" -> "整理中"
             "finalized" -> "完了"
@@ -1353,6 +1644,13 @@ class ZeroTouchViewModel : ViewModel() {
         }
         val isProcessing = status in listOf("uploaded", "transcribing", "generating")
         return displayStatus to isProcessing
+    }
+
+    private fun processingTextForStatus(status: String): String = when (status) {
+        "uploaded" -> "アップロード完了 - 文字起こし開始を待機中"
+        "transcribing" -> "音声を文字起こししています…"
+        "generating" -> "発話内容を解析しています…"
+        else -> "データ取得中..."
     }
 
     private fun resolveOptimisticStatus(id: String, status: String): String {
@@ -1402,9 +1700,9 @@ class ZeroTouchViewModel : ViewModel() {
             } else {
                 card.copy(
                     status = "transcribing",
-                    displayStatus = "データ取得中",
+                    displayStatus = "文字起こし中",
                     isProcessing = true,
-                    text = "データ取得中..."
+                    text = "音声を文字起こししています…"
                 )
             }
         }
@@ -1415,9 +1713,9 @@ class ZeroTouchViewModel : ViewModel() {
                 } else {
                     card.copy(
                         status = "transcribing",
-                        displayStatus = "データ取得中",
+                        displayStatus = "文字起こし中",
                         isProcessing = true,
-                        text = "データ取得中..."
+                        text = "音声を文字起こししています…"
                     )
                 }
             }
@@ -1479,6 +1777,12 @@ class ZeroTouchViewModel : ViewModel() {
         }
     }
 
+    private fun buildTitleFromEpoch(epochMs: Long): String {
+        return DateTimeFormatter.ofPattern("HH:mm")
+            .withZone(ZoneId.systemDefault())
+            .format(Instant.ofEpochMilli(epochMs))
+    }
+
     private fun buildDisplayDate(timestamp: String?): String {
         if (timestamp.isNullOrBlank()) return ""
         return try {
@@ -1492,6 +1796,18 @@ class ZeroTouchViewModel : ViewModel() {
             }
         } catch (_: Exception) {
             ""
+        }
+    }
+
+    private fun buildDisplayDateFromEpoch(epochMs: Long): String {
+        val localDate = Instant.ofEpochMilli(epochMs)
+            .atZone(ZoneId.systemDefault())
+            .toLocalDate()
+        val today = LocalDate.now()
+        return when (localDate) {
+            today -> "今日"
+            today.minusDays(1) -> "昨日"
+            else -> localDate.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.JAPAN))
         }
     }
 

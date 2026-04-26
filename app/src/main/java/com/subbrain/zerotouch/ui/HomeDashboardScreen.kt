@@ -3,7 +3,6 @@ package com.subbrain.zerotouch.ui
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -29,12 +28,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -51,12 +49,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,8 +70,10 @@ import com.subbrain.zerotouch.api.ZeroTouchApi
 import com.subbrain.zerotouch.audio.ambient.AmbientRecordingEntry
 import com.subbrain.zerotouch.audio.ambient.AmbientStatus
 import com.subbrain.zerotouch.ui.components.CardDetailSheet
-import com.subbrain.zerotouch.ui.theme.ZtBackground
 import com.subbrain.zerotouch.ui.theme.ZtBlack
+import com.subbrain.zerotouch.ui.theme.ZtCanvasLeft
+import com.subbrain.zerotouch.ui.theme.ZtCanvasMid
+import com.subbrain.zerotouch.ui.theme.ZtCanvasRight
 import com.subbrain.zerotouch.ui.theme.ZtCaption
 import com.subbrain.zerotouch.ui.theme.ZtError
 import com.subbrain.zerotouch.ui.theme.ZtOnBackground
@@ -78,6 +82,12 @@ import com.subbrain.zerotouch.ui.theme.ZtOutline
 import com.subbrain.zerotouch.ui.theme.ZtPrimary
 import com.subbrain.zerotouch.ui.theme.ZtPrimaryContainer
 import com.subbrain.zerotouch.ui.theme.ZtRecording
+import com.subbrain.zerotouch.ui.theme.ZtStageConvert
+import com.subbrain.zerotouch.ui.theme.ZtStageConvertSoft
+import com.subbrain.zerotouch.ui.theme.ZtStageDigital
+import com.subbrain.zerotouch.ui.theme.ZtStageDigitalSoft
+import com.subbrain.zerotouch.ui.theme.ZtStagePhysical
+import com.subbrain.zerotouch.ui.theme.ZtStagePhysicalSoft
 import com.subbrain.zerotouch.ui.theme.ZtSurface
 import com.subbrain.zerotouch.ui.theme.ZtSurfaceVariant
 import java.time.Instant
@@ -87,6 +97,40 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private val homeApi = ZeroTouchApi()
+
+private enum class Stage(
+    val number: String,
+    val code: String,
+    val title: String,
+    val subtitle: String,
+    val accent: Color,
+    val accentSoft: Color
+) {
+    Physical(
+        number = "01",
+        code = "PHYSICAL",
+        title = "現場の会話",
+        subtitle = "非構造データ",
+        accent = ZtStagePhysical,
+        accentSoft = ZtStagePhysicalSoft
+    ),
+    Convert(
+        number = "02",
+        code = "CONVERT",
+        title = "ZeroTouch Converter",
+        subtitle = "意味のある単位へ抽出・分類",
+        accent = ZtStageConvert,
+        accentSoft = ZtStageConvertSoft
+    ),
+    Digital(
+        number = "03",
+        code = "DIGITAL",
+        title = "デジタル成果物",
+        subtitle = "業務システム下書き / 長期記憶",
+        accent = ZtStageDigital,
+        accentSoft = ZtStageDigitalSoft
+    )
+}
 
 @Composable
 fun HomeDashboardScreen(
@@ -103,52 +147,12 @@ fun HomeDashboardScreen(
 ) {
     val ambientState by AmbientStatus.state.collectAsState()
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
-    val topicChildIds = remember(uiState.topicCards) {
-        uiState.topicCards.flatMap { it.utterances }.map { it.id }.toSet()
-    }
-    val pendingTopicCards = remember(
-        ambientState.recordings,
-        uiState.sessions,
-        uiState.feedCards,
-        topicChildIds
-    ) {
-        buildHomePendingTopicCards(
-            recordings = ambientState.recordings,
-            sessions = uiState.sessions,
-            loadedCards = uiState.feedCards,
-            topicChildIds = topicChildIds
-        )
-    }
-    val liveRecordingTopic = remember(ambientState.isRecording, ambientState.recordingElapsedMs) {
-        if (!ambientState.isRecording) null
-        else TopicFeedCard(
-            id = "live_recording",
-            status = "recording",
-            title = "録音中",
-            summary = "音声を取得しています。発話が終わるとアップロードと文字起こしに進みます。",
-            utteranceCount = 1,
-            updatedAtEpochMs = System.currentTimeMillis(),
-            displayDate = "今日",
-            utterances = listOf(
-                TranscriptCard(
-                    id = "live_recording_card",
-                    createdAt = "",
-                    createdAtEpochMs = System.currentTimeMillis(),
-                    status = "recording",
-                    displayStatus = "録音中",
-                    isProcessing = true,
-                    text = "録音中...",
-                    displayTitle = "--:--",
-                    durationSeconds = (ambientState.recordingElapsedMs / 1000L).toInt(),
-                    displayDate = "今日"
-                )
-            )
-        )
-    }
-    val displayTopics = remember(liveRecordingTopic, uiState.topicCards, pendingTopicCards) {
-        (listOfNotNull(liveRecordingTopic) + uiState.topicCards + pendingTopicCards)
-            .distinctBy { it.id }
-            .sortedByDescending { it.updatedAtEpochMs }
+    val displayTopics = remember(uiState.homeLiveTopics, uiState.topicCards) {
+        val liveIds = uiState.homeLiveTopics.map { it.id }.toSet()
+        uiState.homeLiveTopics.sortedByDescending { it.updatedAtEpochMs } +
+            uiState.topicCards
+                .filterNot { it.id in liveIds }
+                .sortedByDescending { it.updatedAtEpochMs }
     }
 
     var selectedTopicId by remember(displayTopics) {
@@ -162,7 +166,7 @@ fun HomeDashboardScreen(
     } ?: displayTopics.firstOrNull()
 
     val selectedCard = uiState.selectedCardId?.let { id ->
-        uiState.topicCards.flatMap { it.utterances }.find { it.id == id }
+        (uiState.homeLiveTopics + uiState.topicCards).flatMap { it.utterances }.find { it.id == id }
             ?: uiState.feedCards.find { it.id == id }
     }
     if (selectedCard != null) {
@@ -178,10 +182,16 @@ fun HomeDashboardScreen(
         )
     }
 
+    val canvasBrush = Brush.horizontalGradient(
+        0f to ZtCanvasLeft,
+        0.55f to ZtCanvasMid,
+        1f to ZtCanvasRight
+    )
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(ZtBackground)
+            .background(canvasBrush)
     ) {
         AmbientPerformanceStrip(
             ambientEnabled = ambientEnabled,
@@ -199,37 +209,47 @@ fun HomeDashboardScreen(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            ConversationColumn(
-                modifier = Modifier.weight(1.05f).fillMaxHeight(),
+            PhysicalColumn(
+                modifier = Modifier.weight(1.0f).fillMaxHeight(),
                 topics = displayTopics,
                 selectedTopicId = selectedTopic?.id,
                 favoriteIds = uiState.favoriteIds,
                 isLoading = uiState.isLoading && displayTopics.isEmpty(),
+                ambientEnabled = ambientEnabled,
+                isRecording = ambientState.isRecording,
+                isSpeech = ambientState.speech,
+                voiceLevel = ambientState.voiceLevel,
+                ambientLevel = ambientState.ambientLevel,
+                recordingElapsedMs = ambientState.recordingElapsedMs,
                 onSelectTopic = { selectedTopicId = it },
                 onSelectCard = onSelectCard,
                 onToggleFavorite = onToggleFavorite
             )
-
-            IntakeColumn(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
+            FlowGutter(active = displayTopics.isNotEmpty())
+            ConvertColumn(
+                modifier = Modifier.weight(1.05f).fillMaxHeight(),
                 topic = selectedTopic,
-                facts = selectedTopic?.let { uiState.factsByTopic[it.id] }.orEmpty(),
-                topics = displayTopics,
-                factsByTopic = uiState.factsByTopic,
-                onSelectTopic = { selectedTopicId = it }
+                facts = selectedTopic?.let { uiState.factsByTopic[it.id] }.orEmpty()
             )
-
-            WikiCompactColumn(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
+            FlowGutter(
+                active = selectedTopic?.let { uiState.factsByTopic[it.id]?.isNotEmpty() } == true
+            )
+            DigitalColumn(
+                modifier = Modifier.weight(1.0f).fillMaxHeight(),
                 deviceId = uiState.selectedDeviceId,
                 selectedFacts = selectedTopic?.let { uiState.factsByTopic[it.id] }.orEmpty()
             )
         }
     }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// Top: Ambient performance strip
+// ════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun AmbientPerformanceStrip(
@@ -244,111 +264,866 @@ private fun AmbientPerformanceStrip(
     deviceLabel: String,
     onToggleAmbient: (Boolean) -> Unit
 ) {
-    val label = when {
-        isRecording -> "録音中 ${formatElapsed(elapsedMs)}"
+    val statusLabel = when {
+        isRecording -> "録音中 · ${formatElapsed(elapsedMs)}"
         ambientEnabled -> "聞き取り中"
-        else -> "停止中"
+        else -> "待機中"
     }
     val liveText = latestText?.takeIf { it.isNotBlank() } ?: "会話を待機しています"
+    val level = maxOf(ambientLevel, voiceLevel).coerceIn(0f, 1f)
+    val dbLabel = if (ambientEnabled) "−${(60 - (level * 38).toInt())} dB" else "—— dB"
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = ZtSurface,
-        shadowElevation = 1.dp
+        color = ZtSurface.copy(alpha = 0.92f),
+        shadowElevation = 0.dp
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            LiveDot(active = ambientEnabled, recording = isRecording || isSpeech)
-            Column(modifier = Modifier.width(128.dp)) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (isRecording) ZtRecording else ZtOnBackground,
-                    fontWeight = FontWeight.SemiBold
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                StatusPill(
+                    label = statusLabel,
+                    active = ambientEnabled,
+                    recording = isRecording || isSpeech
                 )
+                MonoLabel("LIVE TRANSCRIPT")
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "「$liveText」",
+                        style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
+                        color = ZtOnSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (ambientEnabled) BlinkingCaret()
+                }
+                AudioLevelBars(level = level, active = ambientEnabled && (isSpeech || isRecording))
                 Text(
-                    text = listOf(workspaceLabel, deviceLabel).filter { it.isNotBlank() }.joinToString(" / "),
+                    text = dbLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = ZtCaption,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.4.sp,
+                    modifier = Modifier.width(48.dp)
                 )
+                ContextSummary(workspaceLabel = workspaceLabel, deviceLabel = deviceLabel)
+                OutlinedButton(
+                    onClick = { onToggleAmbient(!ambientEnabled) },
+                    shape = RoundedCornerShape(7.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    border = BorderStroke(1.dp, ZtOutline)
+                ) {
+                    Icon(
+                        imageVector = if (ambientEnabled) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = if (ambientEnabled) "停止" else "再開",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = ZtOnBackground
+                    )
+                }
             }
+            HorizontalDivider(color = ZtOutline)
+        }
+    }
+}
+
+@Composable
+private fun StatusPill(label: String, active: Boolean, recording: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = ZtSurface,
+        border = BorderStroke(1.dp, ZtOutline)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            LiveDot(active = active, recording = recording)
             Text(
-                text = "Live transcript",
-                style = MaterialTheme.typography.labelSmall,
-                color = ZtCaption,
-                letterSpacing = 0.8.sp
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (recording) ZtRecording else ZtOnBackground,
+                fontWeight = FontWeight.Medium
             )
-            Text(
-                text = "「$liveText」",
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                color = ZtOnSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            AudioLevelBars(
-                level = maxOf(ambientLevel, voiceLevel),
-                active = ambientEnabled && (isSpeech || isRecording)
-            )
-            OutlinedButton(
-                onClick = { onToggleAmbient(!ambientEnabled) },
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+        }
+    }
+}
+
+@Composable
+private fun ContextSummary(workspaceLabel: String, deviceLabel: String) {
+    val combined = listOf(workspaceLabel, deviceLabel).filter { it.isNotBlank() }.joinToString(" · ")
+    if (combined.isBlank()) return
+    Text(
+        text = combined,
+        style = MaterialTheme.typography.labelSmall,
+        color = ZtCaption,
+        letterSpacing = 0.3.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.width(180.dp)
+    )
+}
+
+@Composable
+private fun BlinkingCaret() {
+    val transition = rememberInfiniteTransition(label = "caret")
+    val alpha by transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 540, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "caret_alpha"
+    )
+    Box(
+        modifier = Modifier
+            .width(6.dp)
+            .height(13.dp)
+            .alpha(alpha)
+            .background(ZtOnSurfaceVariant)
+    )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 01 / PHYSICAL — utterance-centric column
+// ════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun PhysicalColumn(
+    modifier: Modifier,
+    topics: List<TopicFeedCard>,
+    selectedTopicId: String?,
+    favoriteIds: Set<String>,
+    isLoading: Boolean,
+    ambientEnabled: Boolean,
+    isRecording: Boolean,
+    isSpeech: Boolean,
+    voiceLevel: Float,
+    ambientLevel: Float,
+    recordingElapsedMs: Long,
+    onSelectTopic: (String) -> Unit,
+    onSelectCard: (String) -> Unit,
+    onToggleFavorite: (String) -> Unit
+) {
+    StagePanel(modifier = modifier, stage = Stage.Physical) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 12.dp)
+        ) {
+            if (ambientEnabled) {
+                item {
+                    LiveCaptureBanner(
+                        isRecording = isRecording,
+                        isSpeech = isSpeech,
+                        voiceLevel = voiceLevel,
+                        ambientLevel = ambientLevel,
+                        elapsedMs = recordingElapsedMs
+                    )
+                }
+            }
+            when {
+                isLoading && topics.isEmpty() -> item { LoadingBox("会話を読み込み中") }
+                topics.isEmpty() && !ambientEnabled -> item { EmptyBox("まだ発話がありません") }
+                else -> {
+                    items(topics.take(8), key = { it.id }) { topic ->
+                        PhysicalTopicGroup(
+                            topic = topic,
+                            selected = topic.id == selectedTopicId,
+                            voiceLevel = voiceLevel,
+                            favoriteIds = favoriteIds,
+                            onSelect = { onSelectTopic(topic.id) },
+                            onSelectCard = onSelectCard,
+                            onToggleFavorite = onToggleFavorite
+                        )
+                    }
+                    item { ContextNote() }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Persistent banner at top of Physical column showing capture state.
+ * Visible whenever ambient is enabled — gives can't-miss feedback that the
+ * mic is hot, voice is detected, or a recording session is in progress.
+ */
+@Composable
+private fun LiveCaptureBanner(
+    isRecording: Boolean,
+    isSpeech: Boolean,
+    voiceLevel: Float,
+    ambientLevel: Float,
+    elapsedMs: Long
+) {
+    val accent = when {
+        isRecording -> ZtRecording
+        isSpeech -> ZtStagePhysical
+        else -> ZtCaption
+    }
+    val label = when {
+        isRecording -> "録音中 · ${formatElapsed(elapsedMs)}"
+        isSpeech -> "音声検出"
+        else -> "聞き取り中"
+    }
+    val detail = when {
+        isRecording -> "現在の発話を取り込んでいます"
+        isSpeech -> "発話を検出 — 録音を準備中"
+        else -> "次の発話を待機しています"
+    }
+    val transition = rememberInfiniteTransition(label = "live_banner")
+    val pulse by transition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 950, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "live_banner_pulse"
+    )
+    val borderColor = if (isRecording || isSpeech) accent.copy(alpha = pulse) else ZtOutline
+    val borderWidth = if (isRecording || isSpeech) 1.5.dp else 1.dp
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(11.dp),
+        color = ZtSurface,
+        border = BorderStroke(borderWidth, borderColor)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = if (ambientEnabled) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(15.dp)
+                PulsingRingDot(color = accent, active = isRecording || isSpeech, size = 11.dp)
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isRecording) ZtRecording else ZtOnBackground,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.2.sp
                 )
-                Spacer(Modifier.width(6.dp))
-                Text(if (ambientEnabled) "停止" else "再開")
+                Spacer(Modifier.weight(1f))
+                MonoLabel("AMBIENT")
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                AudioLevelBars(
+                    level = maxOf(voiceLevel, ambientLevel),
+                    active = isRecording || isSpeech
+                )
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtOnSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ConversationColumn(
-    modifier: Modifier,
-    topics: List<TopicFeedCard>,
-    selectedTopicId: String?,
+private fun PulsingRingDot(color: Color, active: Boolean, size: androidx.compose.ui.unit.Dp) {
+    val transition = rememberInfiniteTransition(label = "ring_dot")
+    val ring by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "ring"
+    )
+    Box(modifier = Modifier.size(size + 6.dp), contentAlignment = Alignment.Center) {
+        if (active) {
+            Box(
+                modifier = Modifier
+                    .size(size + (10.dp * ring))
+                    .alpha((1f - ring) * 0.55f)
+                    .background(color, CircleShape)
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(size)
+                .background(color, CircleShape)
+        )
+    }
+}
+
+@Composable
+private fun PhysicalTopicGroup(
+    topic: TopicFeedCard,
+    selected: Boolean,
+    voiceLevel: Float,
     favoriteIds: Set<String>,
-    isLoading: Boolean,
-    onSelectTopic: (String) -> Unit,
+    onSelect: () -> Unit,
     onSelectCard: (String) -> Unit,
     onToggleFavorite: (String) -> Unit
 ) {
-    DashboardPanel(
-        modifier = modifier,
-        eyebrow = "01 / CONVERSATION",
-        title = "Cards / Topics",
-        subtitle = "現在の会話構造"
+    val isLive = topic.id == "home_live_input" ||
+        topic.id == "live_recording" ||
+        topic.status == "recording" ||
+        topic.status == "speech_detected"
+    val isProcessing = topic.status == "processing"
+
+    if (isLive || isProcessing) {
+        ActiveTopicCard(
+            topic = topic,
+            selected = selected,
+            isLive = isLive,
+            voiceLevel = voiceLevel,
+            onSelect = onSelect,
+            onSelectCard = onSelectCard
+        )
+        return
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Topic label header (compact)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onSelect)
+                .padding(horizontal = 2.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(if (selected) 7.dp else 5.dp)
+                    .background(
+                        color = when (topic.status) {
+                            "active" -> ZtStagePhysical
+                            "cooling" -> ZtStageConvert
+                            else -> ZtCaption
+                        },
+                        shape = CircleShape
+                    )
+            )
+            Text(
+                text = topic.title.ifBlank { "Untitled topic" },
+                style = MaterialTheme.typography.labelMedium,
+                color = if (selected) ZtOnBackground else ZtOnSurfaceVariant,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = topicStatusLabel(topic.status),
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.6.sp),
+                color = ZtCaption,
+                fontWeight = FontWeight.Medium
+            )
+        }
+
+        // Utterance cards
+        topic.utterances.take(4).forEach { card ->
+            UtteranceCard(
+                card = card,
+                topicSelected = selected,
+                isFavorite = favoriteIds.contains(card.id),
+                onSelect = { onSelectCard(card.id) },
+                onToggleFavorite = { onToggleFavorite(card.id) }
+            )
+        }
+    }
+}
+
+/**
+ * Prominent card for live-recording or just-completed-uploading topics.
+ * Red border + pulse for recording, amber + spinner for processing.
+ */
+@Composable
+private fun ActiveTopicCard(
+    topic: TopicFeedCard,
+    selected: Boolean,
+    isLive: Boolean,
+    voiceLevel: Float,
+    onSelect: () -> Unit,
+    onSelectCard: (String) -> Unit
+) {
+    val accent = if (isLive) ZtRecording else ZtStageDigital
+    val transition = rememberInfiniteTransition(label = "active_topic")
+    val pulse by transition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 950, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "active_pulse"
+    )
+    val firstUtterance = topic.utterances.firstOrNull()
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect),
+        shape = RoundedCornerShape(11.dp),
+        color = ZtSurface,
+        border = BorderStroke(1.5.dp, accent.copy(alpha = pulse))
     ) {
-        if (isLoading && topics.isEmpty()) {
-            LoadingBox("会話を読み込み中")
-        } else if (topics.isEmpty()) {
-            EmptyBox("まだトピックがありません")
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 12.dp)
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(topics.take(12), key = { it.id }) { topic ->
-                    CompactTopicCard(
-                        topic = topic,
-                        selected = topic.id == selectedTopicId,
-                        favoriteIds = favoriteIds,
-                        onSelect = { onSelectTopic(topic.id) },
-                        onSelectCard = onSelectCard,
-                        onToggleFavorite = onToggleFavorite
+                if (isLive) {
+                    PulsingRingDot(color = accent, active = true, size = 9.dp)
+                } else {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(13.dp),
+                        color = accent,
+                        strokeWidth = 1.8.dp
+                    )
+                }
+                Text(
+                    text = if (isLive) "録音中" else (firstUtterance?.displayStatus?.takeIf { it.isNotBlank() } ?: "処理中"),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = accent,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.4.sp
+                )
+                Spacer(Modifier.weight(1f))
+                ActiveBadge(text = if (isLive) "REC" else "PROCESSING", accent = accent)
+            }
+            if (isLive) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    AudioLevelBars(level = voiceLevel, active = true)
+                    Text(
+                        text = "現在の発話を取り込んでいます",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtOnSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    firstUtterance?.let {
+                        Text(
+                            text = formatDurationSec(it.durationSeconds),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZtOnBackground,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.2.sp
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = topic.summary.ifBlank {
+                            firstUtterance?.text?.takeIf { it.isNotBlank() } ?: "アップロード / 文字起こし中…"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtOnSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    firstUtterance?.let {
+                        if (it.durationSeconds > 0) {
+                            Text(
+                                text = formatDurationSec(it.durationSeconds),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ZtCaption,
+                                letterSpacing = 0.2.sp
+                            )
+                        }
+                    }
+                }
+            }
+            // Show transcript preview only when actual text exists (not status placeholders)
+            firstUtterance?.let { card ->
+                val isStatusText = card.text.isBlank() ||
+                    card.text == "録音中..." ||
+                    card.text.startsWith("音声をサーバー") ||
+                    card.text.startsWith("アップロード") ||
+                    card.text.startsWith("音声を文字起こし") ||
+                    card.text.startsWith("発話内容を解析")
+                if (!isStatusText) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectCard(card.id) },
+                        shape = RoundedCornerShape(8.dp),
+                        color = accent.copy(alpha = 0.06f)
+                    ) {
+                        Text(
+                            text = "「${card.text}」",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ZtOnBackground,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveBadge(text: String, accent: Color) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = accent.copy(alpha = 0.12f)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = accent,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.7.sp,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+private fun formatDurationSec(durationSeconds: Int): String {
+    val s = durationSeconds.coerceAtLeast(0)
+    val minutes = s / 60
+    val seconds = s % 60
+    return "%d:%02d".format(minutes, seconds)
+}
+
+@Composable
+private fun UtteranceCard(
+    card: TranscriptCard,
+    topicSelected: Boolean,
+    isFavorite: Boolean,
+    onSelect: () -> Unit,
+    onToggleFavorite: () -> Unit
+) {
+    val borderColor = when {
+        topicSelected -> ZtStagePhysical.copy(alpha = 0.3f)
+        else -> ZtOutline
+    }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect),
+        shape = RoundedCornerShape(9.dp),
+        color = ZtSurface,
+        border = BorderStroke(1.dp, borderColor)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                SpeakerAvatar(label = inferSpeakerLabel(card))
+                Text(
+                    text = inferSpeakerName(card),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ZtOnBackground,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = card.displayTitle.ifBlank { "--:--" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtCaption,
+                    letterSpacing = 0.3.sp
+                )
+                Text(
+                    text = if (isFavorite) "★" else "☆",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isFavorite) ZtOnBackground else ZtCaption,
+                    modifier = Modifier.clickable(onClick = onToggleFavorite)
+                )
+            }
+            Text(
+                text = if (card.text.isBlank()) card.displayStatus else "「${card.text}」",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (card.text.isBlank()) ZtCaption else ZtOnBackground,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpeakerAvatar(label: String) {
+    Box(
+        modifier = Modifier
+            .size(18.dp)
+            .background(ZtStagePhysical, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = ZtSurface,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun ContextNote() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, ZtOutline)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            MonoLabel("CONTEXT")
+            Text(
+                text = "現場のスタッフ・お客様の発話がそのまま入力されます。",
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtOnSurfaceVariant
+            )
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 02 / CONVERT — Intent nodes derived from Facts
+// ════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun ConvertColumn(
+    modifier: Modifier,
+    topic: TopicFeedCard?,
+    facts: List<FactSummary>
+) {
+    StagePanel(modifier = modifier, stage = Stage.Convert) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 12.dp)
+        ) {
+            item { ConverterMetaStrip(active = topic != null) }
+            if (topic == null) {
+                item { EmptyConverter("対象のトピックを選択してください") }
+                return@LazyColumn
+            }
+
+            item { TopicSnapshot(topic = topic, factCount = facts.size) }
+
+            if (facts.isEmpty()) {
+                item { ConverterPipelineSkeleton(topic = topic) }
+            } else {
+                items(facts.take(10), key = { it.id }) { fact ->
+                    IntentNodeCard(fact = fact)
+                }
+            }
+
+            item { ConverterFooter() }
+        }
+    }
+}
+
+@Composable
+private fun ConverterMetaStrip(active: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(9.dp),
+        color = ZtSurface,
+        border = BorderStroke(1.dp, ZtStageConvert.copy(alpha = 0.18f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 11.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(11.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .background(ZtStageConvertSoft, RoundedCornerShape(7.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.AutoAwesome,
+                    contentDescription = null,
+                    tint = ZtStageConvert,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (active) "リアルタイム処理中" else "待機中",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ZtOnBackground,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "classify · extract · route",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtCaption,
+                    letterSpacing = 0.4.sp
+                )
+            }
+            if (active) PulseDots(color = ZtStageConvert)
+        }
+    }
+}
+
+@Composable
+private fun TopicSnapshot(topic: TopicFeedCard, factCount: Int) {
+    Surface(
+        shape = RoundedCornerShape(9.dp),
+        color = ZtSurfaceVariant,
+        border = BorderStroke(1.dp, ZtOutline)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 11.dp, vertical = 9.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                StageMicroChip(text = topicStatusLabel(topic.status), accent = Stage.Convert.accent)
+                Text(
+                    text = "${topic.utteranceCount} cards",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtCaption
+                )
+                Spacer(Modifier.weight(1f))
+                topic.importanceLevel?.let {
+                    StageMicroChip(text = "Lv.$it", accent = ZtCaption)
+                }
+            }
+            Text(
+                text = topic.title.ifBlank { "Untitled topic" },
+                style = MaterialTheme.typography.titleSmall,
+                color = ZtOnBackground,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (topic.summary.isNotBlank()) {
+                Text(
+                    text = topic.summary,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtOnSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text(
+                text = "→ $factCount intent / fact",
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtStageConvert,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.3.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun IntentNodeCard(fact: FactSummary) {
+    val intentLabel = fact.intents.firstOrNull()?.takeIf { it.isNotBlank() }
+        ?: fact.categories.firstOrNull()?.takeIf { it.isNotBlank() }
+        ?: "fact"
+    val confidence = (fact.importance_level ?: 0).coerceIn(0, 5) / 5f
+    val entityPairs = remember(fact.entities) {
+        fact.entities.orEmpty().take(4).mapNotNull { entity ->
+            val name = entity["name"]?.toString()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val type = entity["type"]?.toString()?.takeIf { it.isNotBlank() } ?: "entity"
+            type to name
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(11.dp),
+        color = ZtSurface,
+        border = BorderStroke(1.5.dp, ZtStageConvert.copy(alpha = 0.22f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 11.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                IntentBadge(label = intentLabel)
+                Spacer(Modifier.weight(1f))
+                DoneBadge()
+            }
+            Text(
+                text = fact.fact_text,
+                style = MaterialTheme.typography.bodySmall,
+                color = ZtOnBackground,
+                fontWeight = FontWeight.Medium,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (entityPairs.isNotEmpty()) {
+                EntityFieldGrid(pairs = entityPairs)
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "重要度",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtCaption,
+                    letterSpacing = 0.3.sp
+                )
+                ConfidenceBar(progress = confidence)
+                Text(
+                    text = "Lv.${fact.importance_level ?: 0}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtOnSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.weight(1f))
+                fact.categories.firstOrNull()?.let { category ->
+                    Text(
+                        text = "→ $category",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtStageConvert,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -357,117 +1132,78 @@ private fun ConversationColumn(
 }
 
 @Composable
-private fun IntakeColumn(
-    modifier: Modifier,
-    topic: TopicFeedCard?,
-    facts: List<FactSummary>,
-    topics: List<TopicFeedCard>,
-    factsByTopic: Map<String, List<FactSummary>>,
-    onSelectTopic: (String) -> Unit
-) {
-    DashboardPanel(
-        modifier = modifier,
-        eyebrow = "02 / INTAKE",
-        title = "Processing",
-        subtitle = "構造化の現在地"
+private fun IntentBadge(label: String) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = ZtStageConvertSoft,
+        border = BorderStroke(0.dp, Color.Transparent)
     ) {
-        if (topic == null) {
-            EmptyBox("処理対象のトピックがありません")
-            return@DashboardPanel
-        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = ZtStageConvert,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.3.sp,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = 12.dp)
+@Composable
+private fun DoneBadge() {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = ZtStagePhysicalSoft
+    ) {
+        Text(
+            text = "DONE",
+            style = MaterialTheme.typography.labelSmall,
+            color = ZtOnBackground,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.6.sp,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun EntityFieldGrid(pairs: List<Pair<String, String>>) {
+    Surface(
+        shape = RoundedCornerShape(7.dp),
+        color = ZtStageConvertSoft.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, ZtStageConvert.copy(alpha = 0.10f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 9.dp, vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            item {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = ZtSurfaceVariant
+            pairs.forEach { (key, value) ->
+                Row(
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            StatusChip(topicStatusLabel(topic.status))
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = "${topic.utteranceCount} cards",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = ZtCaption
-                            )
-                            Spacer(Modifier.weight(1f))
-                            topic.importanceLevel?.let { StatusChip("Lv.$it") }
-                        }
-                        Text(
-                            text = topic.title.ifBlank { "Untitled topic" },
-                            style = MaterialTheme.typography.titleMedium,
-                            color = ZtOnBackground,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (topic.summary.isNotBlank()) {
-                            Text(
-                                text = topic.summary,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = ZtOnSurfaceVariant,
-                                maxLines = 4,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
-
-            item {
-                SectionTitle("Pipeline Flow", topics.size)
-            }
-
-            items(topics.take(8), key = { "flow_${it.id}" }) { flowTopic ->
-                PipelineFlowRow(
-                    topic = flowTopic,
-                    facts = factsByTopic[flowTopic.id].orEmpty(),
-                    selected = flowTopic.id == topic.id,
-                    onClick = { onSelectTopic(flowTopic.id) }
-                )
-            }
-
-            item {
-                SectionTitle("Selected Topic Steps", 6)
-            }
-
-            item {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = ZtSurface,
-                    border = BorderStroke(1.dp, ZtOutline)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        ProcessingStep("Capture", "音声を取得", done = topic.utterances.isNotEmpty())
-                        ProcessingStep("ASR", "発話テキスト化", done = topic.utterances.any { it.text.isNotBlank() && !it.isProcessing })
-                        ProcessingStep("Topic", "会話単位へ集約", done = true)
-                        ProcessingStep("Fact", "重要情報の抽出", done = facts.isNotEmpty())
-                        ProcessingStep("Wiki", "長期記憶へ反映", done = facts.isNotEmpty(), pendingText = "候補")
-                        ProcessingStep("Action", "業務アクション候補", done = false, pendingText = "未実装")
-                    }
-                }
-            }
-
-            item {
-                SectionTitle("Extracted Facts", facts.size)
-            }
-
-            if (facts.isEmpty()) {
-                item { EmptyBox("このトピックのFactはまだありません") }
-            } else {
-                items(facts.take(8), key = { it.id }) { fact ->
-                    FactRow(fact)
+                    Text(
+                        text = key,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtCaption,
+                        letterSpacing = 0.3.sp,
+                        modifier = Modifier.width(64.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = value,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtOnBackground,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
@@ -475,7 +1211,225 @@ private fun IntakeColumn(
 }
 
 @Composable
-private fun WikiCompactColumn(
+private fun ConfidenceBar(progress: Float) {
+    Box(
+        modifier = Modifier
+            .width(60.dp)
+            .height(4.dp)
+            .background(ZtStageConvertSoft, RoundedCornerShape(2.dp))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                .height(4.dp)
+                .background(ZtStageConvert.copy(alpha = 0.7f), RoundedCornerShape(2.dp))
+        )
+    }
+}
+
+@Composable
+private fun PulseDots(color: Color) {
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        repeat(4) { index ->
+            val transition = rememberInfiniteTransition(label = "dot$index")
+            val alpha by transition.animateFloat(
+                initialValue = 0.25f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 900, delayMillis = index * 110, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "dot_alpha$index"
+            )
+            Box(
+                modifier = Modifier
+                    .size(width = 4.dp, height = 4.dp)
+                    .alpha(alpha)
+                    .background(color, RoundedCornerShape(2.dp))
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConverterPipelineSkeleton(topic: TopicFeedCard) {
+    val asrDone = topic.utterances.any { it.text.isNotBlank() && !it.isProcessing }
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = ZtSurface,
+        border = BorderStroke(1.dp, ZtOutline)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 11.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            MonoLabel("PIPELINE")
+            Text(
+                text = "ASR → 意図分類 → フィールド抽出 → ルーティング",
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtOnSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StepDot(label = "ASR", done = asrDone)
+                StepBar(active = asrDone)
+                StepDot(label = "Intent", done = false, pulsing = asrDone)
+                StepBar(active = false)
+                StepDot(label = "Field", done = false)
+                StepBar(active = false)
+                StepDot(label = "Route", done = false)
+            }
+            Text(
+                text = if (asrDone) "Intent 分類待ちです。Fact が抽出されるとここに Intent カードが並びます。"
+                else "ASR を待機しています。",
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtCaption,
+                maxLines = 2
+            )
+        }
+    }
+}
+
+@Composable
+private fun StepDot(label: String, done: Boolean, pulsing: Boolean = false) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        val pulseAlpha = if (pulsing) {
+            val t = rememberInfiniteTransition(label = "pulse_$label")
+            t.animateFloat(
+                initialValue = 0.4f, targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    tween(700, easing = LinearEasing), RepeatMode.Reverse
+                ),
+                label = "pulse_alpha"
+            ).value
+        } else 1f
+        Box(
+            modifier = Modifier
+                .size(11.dp)
+                .alpha(pulseAlpha)
+                .background(
+                    color = if (done) ZtStageConvert else ZtStageConvertSoft,
+                    shape = CircleShape
+                )
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (done) ZtOnBackground else ZtCaption,
+            letterSpacing = 0.2.sp
+        )
+    }
+}
+
+@Composable
+private fun StepBar(active: Boolean) {
+    Box(
+        modifier = Modifier
+            .height(2.dp)
+            .width(20.dp)
+            .background(
+                color = if (active) ZtStageConvert.copy(alpha = 0.6f) else ZtOutline,
+                shape = RoundedCornerShape(1.dp)
+            )
+    )
+}
+
+@Composable
+private fun ConverterFooter() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        MonoLabel("AVG · 2.4s")
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = "→ デジタル成果物へ",
+            style = MaterialTheme.typography.labelSmall,
+            color = ZtStageDigital,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 0.3.sp
+        )
+    }
+}
+
+@Composable
+private fun EmptyConverter(message: String) {
+    Surface(
+        shape = RoundedCornerShape(9.dp),
+        color = ZtSurface,
+        border = BorderStroke(1.dp, ZtOutline)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.AutoAwesome,
+                contentDescription = null,
+                tint = ZtCaption,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtCaption
+            )
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 03 / DIGITAL — SaaS draft slots + Wiki
+// ════════════════════════════════════════════════════════════════════════════
+
+private data class SaasSlot(
+    val name: String,
+    val brand: String,
+    val tag: String,
+    val tile: Color,
+    val placeholder: String
+)
+
+private val SAAS_SLOTS = listOf(
+    SaasSlot(
+        name = "トレタ",
+        brand = "予約台帳",
+        tag = "T",
+        tile = Color(0xFFD93636),
+        placeholder = "予約・人数変更が抽出されると下書きが生成されます"
+    ),
+    SaasSlot(
+        name = "アスクル",
+        brand = "発注システム",
+        tag = "A",
+        tile = Color(0xFF2F58B5),
+        placeholder = "在庫・補充の発言から発注下書きが生成されます"
+    ),
+    SaasSlot(
+        name = "Notion",
+        brand = "顧客メモ / SOP",
+        tag = "N",
+        tile = ZtBlack,
+        placeholder = "顧客フィードバック・運用メモから記録下書きが生成されます"
+    )
+)
+
+@Composable
+private fun DigitalColumn(
     modifier: Modifier,
     deviceId: String?,
     selectedFacts: List<FactSummary>
@@ -483,7 +1437,6 @@ private fun WikiCompactColumn(
     var pages by remember { mutableStateOf<List<WikiPage>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var selectedPageId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(deviceId) {
         isLoading = true
@@ -491,7 +1444,6 @@ private fun WikiCompactColumn(
         try {
             val response = homeApi.listWikiPages(deviceId)
             pages = response.pages
-            selectedPageId = response.pages.firstOrNull()?.id
         } catch (e: Exception) {
             error = e.message
         } finally {
@@ -501,7 +1453,10 @@ private fun WikiCompactColumn(
 
     val relatedPages = remember(pages, selectedFacts) {
         val tokens = selectedFacts
-            .flatMap { fact -> fact.categories + fact.intents + fact.entities.orEmpty().mapNotNull { it["name"]?.toString() } }
+            .flatMap { fact ->
+                fact.categories + fact.intents +
+                    fact.entities.orEmpty().mapNotNull { it["name"]?.toString() }
+            }
             .map { it.lowercase() }
             .filter { it.length >= 2 }
             .toSet()
@@ -513,35 +1468,38 @@ private fun WikiCompactColumn(
             tokens.count { haystack.contains(it) }
         }
     }
-    val selectedPage = relatedPages.find { it.id == selectedPageId } ?: relatedPages.firstOrNull()
 
-    DashboardPanel(
-        modifier = modifier,
-        eyebrow = "03 / WIKI",
-        title = "Knowledge",
-        subtitle = "蓄積された現場知識"
-    ) {
-        when {
-            isLoading -> LoadingBox("Wikiを読み込み中")
-            !error.isNullOrBlank() -> ErrorBox(error ?: "Wikiの読み込みに失敗しました")
-            pages.isEmpty() -> EmptyBox("Wikiページがありません")
-            else -> Column(modifier = Modifier.fillMaxSize()) {
-                LazyColumn(
-                    modifier = Modifier.weight(0.48f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(bottom = 8.dp)
-                ) {
-                    items(relatedPages.take(8), key = { it.id }) { page ->
-                        WikiListRow(
-                            page = page,
-                            selected = page.id == selectedPage?.id,
-                            onClick = { selectedPageId = page.id }
-                        )
-                    }
-                }
-                HorizontalDivider(color = ZtOutline)
-                if (selectedPage != null) {
-                    WikiPreview(page = selectedPage, modifier = Modifier.weight(0.52f))
+    StagePanel(modifier = modifier, stage = Stage.Digital) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 12.dp)
+        ) {
+            item {
+                SectionLabel(
+                    text = "業務システム連携",
+                    suffix = "準備中",
+                    accent = ZtStageDigital
+                )
+            }
+            items(SAAS_SLOTS) { slot ->
+                SaasDraftSlot(slot = slot)
+            }
+
+            item { Spacer(Modifier.height(2.dp)) }
+            item {
+                SectionLabel(
+                    text = "Wiki / 長期記憶",
+                    suffix = "稼働中",
+                    accent = ZtStagePhysical
+                )
+            }
+            when {
+                isLoading -> item { LoadingBox("Wikiを読み込み中") }
+                !error.isNullOrBlank() -> item { ErrorBox(error ?: "Wikiの読み込みに失敗しました") }
+                relatedPages.isEmpty() -> item { EmptyBox("まだWikiがありません") }
+                else -> items(relatedPages.take(8), key = { it.id }) { page ->
+                    WikiCompactRow(page = page)
                 }
             }
         }
@@ -549,48 +1507,183 @@ private fun WikiCompactColumn(
 }
 
 @Composable
-private fun DashboardPanel(
+private fun SaasDraftSlot(slot: SaasSlot) {
+    val dashedBorder = remember {
+        PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
+    }
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = ZtSurface.copy(alpha = 0.65f)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(2.dp)
+        ) {
+            Canvas(modifier = Modifier.fillMaxWidth().height(86.dp)) {
+                val cornerRadius = 10.dp.toPx()
+                drawRoundRect(
+                    color = ZtStageDigital.copy(alpha = 0.30f),
+                    topLeft = Offset.Zero,
+                    size = size,
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadius, cornerRadius),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = 1.dp.toPx(),
+                        pathEffect = dashedBorder
+                    )
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 11.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .background(slot.tile, RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = slot.tag,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = slot.name,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = ZtOnBackground,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "· ${slot.brand}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZtCaption,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        ComingSoonChip()
+                    }
+                    Text(
+                        text = slot.placeholder,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtOnSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComingSoonChip() {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = ZtStageDigitalSoft
+    ) {
+        Text(
+            text = "Coming",
+            style = MaterialTheme.typography.labelSmall,
+            color = ZtStageDigital,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun WikiCompactRow(page: WikiPage) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = ZtSurface,
+        border = BorderStroke(1.dp, ZtOutline)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .background(ZtStageDigitalSoft, RoundedCornerShape(5.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.MenuBook,
+                    contentDescription = null,
+                    tint = ZtStageDigital,
+                    modifier = Modifier.size(13.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = page.title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ZtOnBackground,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = listOfNotNull(page.project_name, page.category, page.kind)
+                        .filter { it.isNotBlank() }
+                        .joinToString(" / ")
+                        .ifBlank { "—" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtCaption,
+                    letterSpacing = 0.3.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
+                contentDescription = null,
+                tint = ZtCaption,
+                modifier = Modifier.size(13.dp)
+            )
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Shared: stage panel scaffold + flow gutter
+// ════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun StagePanel(
     modifier: Modifier,
-    eyebrow: String,
-    title: String,
-    subtitle: String,
+    stage: Stage,
     content: @Composable () -> Unit
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(10.dp),
-        color = ZtSurface,
+        shape = RoundedCornerShape(12.dp),
+        color = ZtSurface.copy(alpha = 0.96f),
         border = BorderStroke(1.dp, ZtOutline)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp)
-            ) {
-                Text(
-                    text = eyebrow,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ZtCaption,
-                    letterSpacing = 0.8.sp
-                )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = ZtOnBackground,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ZtCaption
-                )
-            }
+            StageHeader(stage = stage)
             HorizontalDivider(color = ZtOutline)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(10.dp)
+                    .padding(horizontal = 11.dp, vertical = 11.dp)
             ) {
                 content()
             }
@@ -599,521 +1692,232 @@ private fun DashboardPanel(
 }
 
 @Composable
-private fun CompactTopicCard(
-    topic: TopicFeedCard,
-    selected: Boolean,
-    favoriteIds: Set<String>,
-    onSelect: () -> Unit,
-    onSelectCard: (String) -> Unit,
-    onToggleFavorite: (String) -> Unit
-) {
-    Surface(
+private fun StageHeader(stage: Stage) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onSelect),
-        shape = RoundedCornerShape(9.dp),
-        color = if (selected) ZtPrimaryContainer else ZtSurface,
-        border = BorderStroke(1.dp, if (selected) ZtBlack else ZtOutline)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusChip(topicStatusLabel(topic.status))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "${topic.utteranceCount}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ZtCaption
-                )
-                Spacer(Modifier.weight(1f))
-                topic.importanceLevel?.let { StatusChip("Lv.$it") }
-            }
+        StageBadge(stage = stage)
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = topic.title.ifBlank { "Processing topic" },
-                style = MaterialTheme.typography.bodyMedium,
+                text = stage.title,
+                style = MaterialTheme.typography.titleSmall,
                 color = ZtOnBackground,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = stage.subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtCaption,
+                letterSpacing = 0.3.sp,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            if (topic.summary.isNotBlank()) {
-                Text(
-                    text = topic.summary,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ZtOnSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            topic.utterances.take(3).forEach { card ->
-                CompactUtteranceRow(
-                    card = card,
-                    isFavorite = favoriteIds.contains(card.id),
-                    onSelect = { onSelectCard(card.id) },
-                    onToggleFavorite = { onToggleFavorite(card.id) }
-                )
-            }
         }
-    }
-}
-
-@Composable
-private fun CompactUtteranceRow(
-    card: TranscriptCard,
-    isFavorite: Boolean,
-    onSelect: () -> Unit,
-    onToggleFavorite: () -> Unit
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onSelect),
-        shape = RoundedCornerShape(7.dp),
-        color = Color.White.copy(alpha = 0.76f)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = card.displayTitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = ZtCaption,
-                modifier = Modifier.width(42.dp),
-                maxLines = 1
-            )
-            Text(
-                text = card.text.ifBlank { card.displayStatus },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (card.text.isBlank()) ZtCaption else ZtOnBackground,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = if (isFavorite) "★" else "☆",
-                style = MaterialTheme.typography.labelSmall,
-                color = ZtCaption,
-                modifier = Modifier.clickable(onClick = onToggleFavorite)
-            )
-        }
-    }
-}
-
-@Composable
-private fun ProcessingStep(
-    title: String,
-    detail: String,
-    done: Boolean,
-    pendingText: String = "待機"
-) {
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = if (done) ZtSurfaceVariant else Color.White,
-        border = BorderStroke(1.dp, ZtOutline)
-    ) {
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp)
+                .size(6.dp)
+                .background(stage.accent, CircleShape)
+        )
+    }
+}
+
+@Composable
+private fun StageBadge(stage: Stage) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = stage.accent
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = if (done) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = if (done) ZtPrimary else ZtCaption
+            Text(
+                text = stage.number,
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtSurface,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.6.sp
             )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyMedium, color = ZtOnBackground, fontWeight = FontWeight.SemiBold)
-                Text(detail, style = MaterialTheme.typography.labelSmall, color = ZtCaption)
-            }
-            StatusChip(if (done) "DONE" else pendingText)
+            Text(
+                text = "·",
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtSurface.copy(alpha = 0.5f)
+            )
+            Text(
+                text = stage.code,
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtSurface,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.8.sp
+            )
         }
     }
 }
 
 @Composable
-private fun PipelineFlowRow(
-    topic: TopicFeedCard,
-    facts: List<FactSummary>,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    val asrDone = topic.utterances.any { it.text.isNotBlank() && !it.isProcessing }
-    val factDone = facts.isNotEmpty()
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(10.dp),
-        color = if (selected) ZtPrimaryContainer else ZtSurface,
-        border = BorderStroke(1.dp, if (selected) ZtBlack else ZtOutline)
-    ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = topic.title.ifBlank { "Processing topic" },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ZtOnBackground,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                StatusChip(topicStatusLabel(topic.status))
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                FlowNode(
-                    label = "Cards",
-                    value = "${topic.utteranceCount}",
-                    done = topic.utterances.isNotEmpty(),
-                    active = topic.status in setOf("recording", "processing", "active"),
-                    modifier = Modifier.weight(1f)
-                )
-                FlowConnector(done = asrDone, active = topic.utterances.isNotEmpty())
-                FlowNode(
-                    label = "Intake",
-                    value = if (factDone) "${facts.size} facts" else if (asrDone) "structuring" else "ASR",
-                    done = factDone,
-                    active = asrDone,
-                    modifier = Modifier.weight(1.1f)
-                )
-                FlowConnector(done = factDone, active = asrDone)
-                FlowNode(
-                    label = "Wiki",
-                    value = if (factDone) "candidate" else "waiting",
-                    done = factDone,
-                    active = factDone,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            val topFact = facts.firstOrNull()?.fact_text
-            if (!topFact.isNullOrBlank()) {
-                Text(
-                    text = topFact,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ZtOnSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun FlowNode(
-    label: String,
-    value: String,
-    done: Boolean,
-    active: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val lineProgress by animateFloatAsState(
-        targetValue = when {
-            done -> 1f
-            active -> 0.55f
-            else -> 0.12f
-        },
-        animationSpec = tween(durationMillis = 420, easing = LinearEasing),
-        label = "node_progress"
-    )
-    Surface(
-        modifier = modifier.height(48.dp),
-        shape = RoundedCornerShape(8.dp),
-        color = when {
-            done -> ZtSurfaceVariant
-            active -> Color.White
-            else -> Color.White
-        },
-        border = BorderStroke(1.dp, if (active || done) ZtPrimary.copy(alpha = 0.35f) else ZtOutline)
-    ) {
-        Box {
-            Column(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ZtCaption,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (done || active) ZtOnBackground else ZtOnSurfaceVariant,
-                    fontWeight = if (done || active) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Canvas(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .height(3.dp)
-            ) {
-                drawLine(
-                    color = ZtPrimary.copy(alpha = if (active || done) 0.75f else 0.16f),
-                    start = Offset(0f, size.height / 2f),
-                    end = Offset(size.width * lineProgress, size.height / 2f),
-                    strokeWidth = size.height,
-                    cap = StrokeCap.Round
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun FlowConnector(
-    done: Boolean,
-    active: Boolean
-) {
-    val progress by animateFloatAsState(
-        targetValue = if (done) 1f else if (active) 0.68f else 0.2f,
-        animationSpec = tween(durationMillis = 520, easing = LinearEasing),
-        label = "connector_progress"
-    )
-    val transition = rememberInfiniteTransition(label = "connector_flow")
+private fun FlowGutter(active: Boolean) {
+    val transition = rememberInfiniteTransition(label = "gutter")
     val particle by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1400, easing = LinearEasing),
+            animation = tween(durationMillis = 1800, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "connector_particle"
+        label = "gutter_particle"
     )
     Canvas(
         modifier = Modifier
-            .width(28.dp)
-            .height(48.dp)
+            .width(20.dp)
+            .fillMaxHeight()
     ) {
-        val y = size.height / 2f
+        val centerY = size.height / 2f
+        val lineColor = if (active) ZtStageConvert.copy(alpha = 0.45f)
+        else ZtCaption.copy(alpha = 0.30f)
+        // Subtle horizontal connecting line
         drawLine(
-            color = ZtOutline,
-            start = Offset(0f, y),
-            end = Offset(size.width, y),
-            strokeWidth = 2.dp.toPx(),
+            color = lineColor,
+            start = Offset(0f, centerY),
+            end = Offset(size.width, centerY),
+            strokeWidth = 1.6.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+        // Arrow head
+        val arrowSize = 4.dp.toPx()
+        drawLine(
+            color = lineColor,
+            start = Offset(size.width - arrowSize, centerY - arrowSize),
+            end = Offset(size.width, centerY),
+            strokeWidth = 1.6.dp.toPx(),
             cap = StrokeCap.Round
         )
         drawLine(
-            color = ZtPrimary.copy(alpha = if (active || done) 0.82f else 0.18f),
-            start = Offset(0f, y),
-            end = Offset(size.width * progress, y),
-            strokeWidth = 2.dp.toPx(),
+            color = lineColor,
+            start = Offset(size.width - arrowSize, centerY + arrowSize),
+            end = Offset(size.width, centerY),
+            strokeWidth = 1.6.dp.toPx(),
             cap = StrokeCap.Round
         )
-        if (active || done) {
-            val x = size.width * particle
+        // Animated traveling particle
+        if (active) {
+            val px = size.width * particle
             drawCircle(
-                color = ZtPrimary,
-                radius = 3.2.dp.toPx(),
-                center = Offset(x, y)
+                color = ZtStageConvert,
+                radius = 2.4.dp.toPx(),
+                center = Offset(px, centerY)
             )
-        }
-        drawLine(
-            color = if (active || done) ZtPrimary else ZtCaption,
-            start = Offset(size.width - 5.dp.toPx(), y - 4.dp.toPx()),
-            end = Offset(size.width, y),
-            strokeWidth = 1.6.dp.toPx(),
-            cap = StrokeCap.Round
-        )
-        drawLine(
-            color = if (active || done) ZtPrimary else ZtCaption,
-            start = Offset(size.width - 5.dp.toPx(), y + 4.dp.toPx()),
-            end = Offset(size.width, y),
-            strokeWidth = 1.6.dp.toPx(),
-            cap = StrokeCap.Round
-        )
-    }
-}
-
-@Composable
-private fun FactRow(fact: FactSummary) {
-    Surface(
-        shape = RoundedCornerShape(9.dp),
-        color = ZtSurface,
-        border = BorderStroke(1.dp, ZtOutline)
-    ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(
-                text = fact.fact_text,
-                style = MaterialTheme.typography.bodySmall,
-                color = ZtOnBackground,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                fact.categories.take(2).forEach { StatusChip(it) }
-                fact.intents.take(2).forEach { StatusChip(it) }
-                fact.importance_level?.let { StatusChip("Lv.$it") }
-            }
         }
     }
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// Shared: small primitives
+// ════════════════════════════════════════════════════════════════════════════
+
 @Composable
-private fun WikiListRow(
-    page: WikiPage,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Surface(
+private fun SectionLabel(text: String, suffix: String?, accent: Color) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        color = if (selected) ZtPrimaryContainer else ZtSurface,
-        border = BorderStroke(1.dp, if (selected) ZtBlack else ZtOutline)
+            .padding(horizontal = 2.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(Icons.Outlined.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp), tint = ZtCaption)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = page.title,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ZtOnBackground,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = listOfNotNull(page.project_name, page.category, page.kind).joinToString(" / "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ZtCaption,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun WikiPreview(page: WikiPage, modifier: Modifier) {
-    Column(
-        modifier = modifier.padding(top = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp), tint = ZtCaption)
-            Spacer(Modifier.width(6.dp))
+        Box(modifier = Modifier.size(width = 3.dp, height = 11.dp).background(accent, RoundedCornerShape(1.dp)))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = ZtOnBackground,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.4.sp
+        )
+        Spacer(Modifier.weight(1f))
+        if (suffix != null) {
             Text(
-                text = "Preview",
+                text = suffix,
                 style = MaterialTheme.typography.labelSmall,
                 color = ZtCaption,
                 letterSpacing = 0.6.sp
             )
         }
-        Text(
-            text = page.title,
-            style = MaterialTheme.typography.titleSmall,
-            color = ZtOnBackground,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = page.body.trim().ifBlank { "No content" },
-            style = MaterialTheme.typography.bodySmall,
-            color = ZtOnSurfaceVariant,
-            maxLines = 9,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 
 @Composable
-private fun SectionTitle(label: String, count: Int) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = ZtOnBackground,
-            fontWeight = FontWeight.SemiBold
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(count.toString(), style = MaterialTheme.typography.labelSmall, color = ZtCaption)
-    }
-}
-
-@Composable
-private fun StatusChip(text: String) {
+private fun StageMicroChip(text: String, accent: Color) {
     Surface(
-        shape = RoundedCornerShape(5.dp),
-        color = ZtSurfaceVariant,
-        border = BorderStroke(1.dp, ZtOutline)
+        shape = RoundedCornerShape(3.dp),
+        color = accent.copy(alpha = 0.10f)
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
-            color = ZtOnSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            color = accent,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
         )
     }
 }
 
 @Composable
+private fun MonoLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = ZtCaption,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 1.0.sp
+    )
+}
+
+@Composable
 private fun LiveDot(active: Boolean, recording: Boolean) {
+    val transition = rememberInfiniteTransition(label = "live_dot")
+    val pulse by transition.animateFloat(
+        initialValue = 0.55f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 950, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "live_dot_pulse"
+    )
+    val color = when {
+        recording -> ZtRecording
+        active -> ZtPrimary
+        else -> ZtCaption
+    }
     Box(
         modifier = Modifier
-            .size(9.dp)
-            .background(
-                color = when {
-                    recording -> ZtRecording
-                    active -> ZtPrimary
-                    else -> ZtCaption
-                },
-                shape = CircleShape
-            )
+            .size(8.dp)
+            .alpha(if (active || recording) pulse else 1f)
+            .background(color, CircleShape)
     )
 }
 
 @Composable
 private fun AudioLevelBars(level: Float, active: Boolean) {
     Row(
-        modifier = Modifier.height(18.dp),
+        modifier = Modifier.height(16.dp),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        val weights = listOf(0.25f, 0.5f, 0.85f, 1f, 0.7f, 0.45f, 0.65f, 0.35f)
+        val weights = listOf(0.25f, 0.55f, 0.85f, 1f, 0.75f, 0.45f, 0.65f, 0.30f)
         weights.forEach { weight ->
-            val height = 3.dp + (14f * level.coerceIn(0f, 1f) * weight).dp
+            val height = 2.dp + (12f * level.coerceIn(0f, 1f) * weight).dp
             Box(
                 modifier = Modifier
-                    .width(3.dp)
+                    .width(2.5.dp)
                     .height(height)
                     .background(
-                        color = ZtOnSurfaceVariant.copy(alpha = if (active) 0.75f else 0.2f),
-                        shape = RoundedCornerShape(2.dp)
+                        color = ZtOnSurfaceVariant.copy(alpha = if (active) 0.75f else 0.18f),
+                        shape = RoundedCornerShape(1.dp)
                     )
             )
         }
@@ -1122,26 +1926,43 @@ private fun AudioLevelBars(level: Float, active: Boolean) {
 
 @Composable
 private fun LoadingBox(text: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = ZtBlack, strokeWidth = 2.dp)
-            Text(text, style = MaterialTheme.typography.bodySmall, color = ZtCaption)
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = ZtBlack, strokeWidth = 2.dp)
+            Text(text, style = MaterialTheme.typography.labelSmall, color = ZtCaption)
         }
     }
 }
 
 @Composable
 private fun EmptyBox(text: String) {
-    Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-        Text(text, style = MaterialTheme.typography.bodySmall, color = ZtCaption)
+    Box(modifier = Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+        Text(text, style = MaterialTheme.typography.labelSmall, color = ZtCaption)
     }
 }
 
 @Composable
 private fun ErrorBox(text: String) {
-    Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-        Text(text, style = MaterialTheme.typography.bodySmall, color = ZtError)
+    Box(modifier = Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+        Text(text, style = MaterialTheme.typography.labelSmall, color = ZtError)
     }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Helpers: speaker / status / time / pending topics
+// ════════════════════════════════════════════════════════════════════════════
+
+private fun inferSpeakerName(card: TranscriptCard): String {
+    val first = card.speakerLabels.firstOrNull()
+    if (!first.isNullOrBlank()) return first
+    val seg = card.speakerSegments.firstOrNull()?.speakerLabel
+    if (!seg.isNullOrBlank()) return seg
+    return "話者"
+}
+
+private fun inferSpeakerLabel(card: TranscriptCard): String {
+    val name = inferSpeakerName(card)
+    return name.firstOrNull()?.toString() ?: "?"
 }
 
 private fun formatElapsed(durationMs: Long): String {
@@ -1159,6 +1980,42 @@ private fun topicStatusLabel(status: String): String = when (status) {
     "finalized" -> "DONE"
     "failed" -> "FAILED"
     else -> status.ifBlank { "UNKNOWN" }.uppercase()
+}
+
+// Per-step status text shown on the pending card so the user can see exactly
+// which stage the recording is in (instead of a vague "処理中" for everything).
+private fun pendingDisplayStatus(effectiveStatus: String): String = when (effectiveStatus) {
+    "pending" -> "アップロード中"
+    "uploaded" -> "文字起こし待ち"
+    "transcribing" -> "文字起こし中"
+    "generating" -> "解析中"
+    "transcribed", "completed" -> "判別不可"
+    "failed" -> "失敗"
+    else -> "処理中"
+}
+
+private fun pendingProgressText(effectiveStatus: String): String = when (effectiveStatus) {
+    "pending" -> "音声をサーバーに送信しています…"
+    "uploaded" -> "アップロード完了 — 文字起こし開始を待機中"
+    "transcribing" -> "音声を文字起こししています…"
+    "generating" -> "発話内容を解析しています…"
+    else -> "アップロード / 文字起こし中…"
+}
+
+private fun pendingTopicTitle(effectiveStatus: String): String = when (effectiveStatus) {
+    "pending" -> "アップロード中の録音"
+    "uploaded" -> "文字起こし待ちの録音"
+    "transcribing" -> "文字起こし中の録音"
+    "generating" -> "解析中の録音"
+    else -> "処理中の録音"
+}
+
+private fun pendingTopicSummary(effectiveStatus: String): String = when (effectiveStatus) {
+    "pending" -> "録音をサーバーへアップロードしています。"
+    "uploaded" -> "アップロードが完了し、文字起こしの開始を待っています。"
+    "transcribing" -> "音声を文字起こししています。完了次第ここに反映されます。"
+    "generating" -> "発話内容を解析し、Topic として整理しています。"
+    else -> "録音がアップロードされ、文字起こしと Topic 化を待っています。"
 }
 
 private fun buildHomePendingTopicCards(
@@ -1181,12 +2038,31 @@ private fun buildHomePendingTopicCards(
         status: String
     ) {
         if (sessionId != null && topicChildIds.contains(sessionId)) return
-        val effectiveStatus = resolveHomePendingStatus(status, createdAtEpochMs)
         val existingCard = sessionId?.let { loadedCardById[it] }
+        val effectiveStatus = resolveHomePendingStatus(
+            status = when {
+                status in setOf("transcribed", "completed") &&
+                    existingCard?.text?.isNotBlank() == true &&
+                    !existingCard.isUnintelligible -> "generating"
+                else -> status
+            },
+            createdAtEpochMs = createdAtEpochMs
+        )
         val cardId = sessionId ?: "pending_${createdAtEpochMs}"
         val displayTitle = formatHomeEpochTime(createdAtEpochMs)
         val displayDate = formatHomeEpochDate(createdAtEpochMs)
-        val card = existingCard ?: TranscriptCard(
+        val card = existingCard?.let {
+            if (effectiveStatus == "generating" && !it.isProcessing) {
+                it.copy(
+                    status = "generating",
+                    displayStatus = pendingDisplayStatus("generating"),
+                    isProcessing = true,
+                    text = it.text.ifBlank { pendingProgressText("generating") }
+                )
+            } else {
+                it
+            }
+        } ?: TranscriptCard(
             id = cardId,
             createdAt = "",
             createdAtEpochMs = createdAtEpochMs,
@@ -1196,17 +2072,12 @@ private fun buildHomePendingTopicCards(
                 "uploaded", "transcribing", "generating" -> effectiveStatus
                 else -> "transcribing"
             },
-            displayStatus = when (effectiveStatus) {
-                "pending", "uploaded", "transcribing", "generating" -> "処理中"
-                "transcribed", "completed" -> "判別不可"
-                "failed" -> "失敗"
-                else -> "処理中"
-            },
+            displayStatus = pendingDisplayStatus(effectiveStatus),
             isProcessing = effectiveStatus in setOf("pending", "uploaded", "transcribing", "generating"),
             text = when (effectiveStatus) {
                 "transcribed", "completed" -> UNINTELLIGIBLE_CARD_TEXT
                 "failed" -> "処理に失敗しました"
-                else -> "アップロード / 文字起こし中..."
+                else -> pendingProgressText(effectiveStatus)
             },
             displayTitle = displayTitle,
             durationSeconds = durationSeconds,
@@ -1225,13 +2096,13 @@ private fun buildHomePendingTopicCards(
                 status = topicStatus,
                 title = when {
                     card.status == "failed" -> "処理に失敗しました"
-                    card.isProcessing -> "処理中の録音"
+                    card.isProcessing -> pendingTopicTitle(effectiveStatus)
                     card.isUnintelligible -> UNINTELLIGIBLE_TOPIC_TITLE
                     card.text.isNotBlank() -> card.text.take(24)
                     else -> "録音"
                 },
                 summary = when {
-                    card.isProcessing -> "録音がアップロードされ、文字起こしとTopic化を待っています。"
+                    card.isProcessing -> pendingTopicSummary(effectiveStatus)
                     card.isUnintelligible -> UNINTELLIGIBLE_TOPIC_SUMMARY
                     card.text.isNotBlank() && card.text != "処理に失敗しました" -> card.text.take(120)
                     else -> ""
@@ -1248,8 +2119,11 @@ private fun buildHomePendingTopicCards(
     recordings.forEach { entry ->
         val sessionId = entry.sessionId
         val summary = sessionId?.let { sessionById[it] }
-        if (sessionId != null && summary == null) return@forEach
-        val status = summary?.status ?: if (sessionId == null) "pending" else "uploaded"
+        // Note: do NOT skip when sessionId is set but summary is missing.
+        // That happens during the upload-complete → next-refreshSessions window
+        // and would make the pending card visibly disappear. Fall back to
+        // "uploaded" status so the card stays continuous through the gap.
+        val status = summary?.status ?: entry.status
         val createdAtEpoch = parseHomeIsoEpochMillis(summary?.recorded_at ?: summary?.created_at)
             ?: entry.createdAt
         val durationSeconds = summary?.duration_seconds ?: (entry.durationMs / 1000L).toInt()
