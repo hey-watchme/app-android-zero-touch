@@ -1,6 +1,31 @@
 # Current Handoff
 
-更新日: `2026-04-27`（Slice 1 デプロイ完了）
+更新日: `2026-04-27`（左レーンリアルタイム問題 未解決）
+
+## 🔴 最優先バグ：左レーン（01現場の会話）がリアルタイム更新されない
+
+**次のセッションで最初に取り組むこと。これが解決するまで他のことはしない。**
+
+### 症状
+- 録音が始まった瞬間、**中央レーン（02コンバート）にはリアルタイムで即座に表示される**
+- 同じことが**左レーン（01現場の会話）では起きない**
+- 左レーンは画面遷移（他の画面へ行って戻る）をして初めて更新される
+- これを100回以上試して一度も自動更新が成功したことがない
+
+### 期待する動作
+録音開始 → 左レーンに「録音中」が即座に出る → 文字起こし中 → 完了と左レーンで状態が変わる → その後に中央レーンでコンバート処理が始まる → 右レーンに成果物。左→中央→右の順のパイプライン。
+
+### 技術的な手がかり
+- 中央レーンは `ambientState` の変化（`AmbientStatus.state`）で即座に更新される
+- 左レーンの `displayTopics` = `homeLiveTopics + topicCards` で、`homeLiveTopics` は `uiState` 経由で更新されるはずだが、実際にはリアルタイムで反映されていない
+- `PhysicalColumn(topics = displayTopics, ...)` が正しく再コンポーズされているかどうかが鍵
+- `updateHomeLiveInput` → `_uiState.update { copy(homeLiveTopics = ...) }` → `HomeDashboardScreen` 再コンポーズ の流れのどこかで止まっている
+- Android Logcat で `home physical feed updated` ログが録音中に出ているかどうかを確認するのが最初のデバッグ手順
+
+### 今日適用した修正（別件）
+- migration 015（`local_recording_id` カラム）: Supabase に手動適用済み → upload 500 エラー解消
+- action-candidates UUID バリデーション: デプロイ済み（c83d556）
+- Azure ASR diarization パーサー修正: デプロイ済み（c301655）+ diarization 再有効化（c0789ed）
 
 この文書は、次のセッションで ZeroTouch 開発を再開するための最新メモです。
 
