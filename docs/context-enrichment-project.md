@@ -9,19 +9,20 @@
 
 - このアカウントが何者か
 - この workspace がどんな現場か
-- この device がどこに置かれ何を収録しているか
+- この物理 device がどこに置かれ何を収録しているか
 - この分析で何を知りたいか
 
 を、会話ログとは別に保持する情報である。
 
 主な狙いは次の 3 つ。
 
-- stateful / stateless どちらの分析でも「何について話しているのか」を読みやすくする
-- task / decision / knowledge 抽出時の前提不足を減らす
-- 将来の業種別運用で、時間帯や環境文脈を分析軸として使えるようにする
+- 会話がどの現場・業務・役割の文脈で発生したかを読みやすくする
+- Action Candidate / task / decision / knowledge 抽出時の前提不足を減らす
+- 業種別運用で、時間帯、環境、業務ルールを Converter の判断材料として使えるようにする
 
 関連文書:
 
+- [conversation-action-platform.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/conversation-action-platform.md)
 - [knowledge-pipeline-v2.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/knowledge-pipeline-v2.md)
 - [amical-longterm-memory-handoff.md](/Users/kaya.matsumoto/projects/watchme/app/android-zero-touch/docs/amical-longterm-memory-handoff.md)
 
@@ -37,6 +38,10 @@
    1 つの論理スキーマとして定義する
 4. Android 側では、初回オンボーディングと後編集可能なマイページで入力する
 5. 分析時は `context bundle` と prompt に常時注入する
+
+補足: Android アプリの `device` は選択式のデータソースではない。
+その端末が持つ物理 `device_id` が正本であり、表示名はニックネームとして扱う。
+Amical import などの検証データは Android 録音端末とは分けて扱う。
 
 つまり、最初にやるべきことは
 **複雑な推論機構ではなく、前提情報の正本を定義して入力可能にすること**
@@ -132,12 +137,14 @@ ZeroTouch の次段では、
 
 ### 3. Device Context
 
-その device がどこに置かれ、どう使われるか。
+その物理 device がどこに置かれ、どう使われるか。
+Android では `device_id` は端末内で生成・保持されるIDで、ユーザーが選択するものではない。
+`device_name` は人間向けのニックネームである。
 
 最小項目:
 
 - `device_id`
-- `device_name`
+- `device_name`（ニックネーム）
 - `device_kind`
 - `placement`
   例: `デスク右上`, `レジ横`, `厨房入口`
@@ -203,7 +210,7 @@ ZeroTouch の次段では、
 - `zerotouch_workspaces`
   workspace の基本情報
 - `zerotouch_devices`
-  物理 / 仮想 device の登録情報
+  物理 device のID、workspace 紐付け、ニックネーム
 - `zerotouch_context_profiles`
   分析用コンテクストの正本
 
@@ -300,23 +307,27 @@ ZeroTouch の次段では、
 
 ### 1. Prompt 入力
 
-task / knowledge 抽出や stateful daily 生成時に、
+Action Candidate / task / knowledge 抽出時に、
 `context profile` を明示的に渡す。
 
 特に効く箇所:
 
+- intent の意味づけ
+- connector / 出力先候補の判定
+- required fields の補完
 - task の意味づけ
 - knowledge のカテゴリ化
 - decision の背景解釈
 - viewer 上の「この会話は何のためのものか」の説明
 
-### 2. Artifact への埋め込み
+### 2. 生成物への埋め込み
 
-次の artifact に context summary を含める。
+次の生成物に context summary を含める。
 
-- `09_context_bundle.json`
-- `10_stateful_daily_rollup.json`
-- `12_active_state_snapshot.json`
+- Action Candidate
+- Connector Draft
+- Wiki Page
+- Query Answer
 
 初期は full context ではなく、
 分析に必要な圧縮要約だけを入れる。

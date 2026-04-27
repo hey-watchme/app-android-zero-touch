@@ -7,6 +7,7 @@ FastAPI application for ambient voice capture -> transcription -> card generatio
 import os
 import uuid
 import threading
+import time
 from datetime import datetime
 from contextlib import asynccontextmanager
 
@@ -32,6 +33,11 @@ from services.wiki_ingestor import ingest_wiki
 from services.wiki_querier import query_wiki
 from services.wiki_linter import lint_wiki
 from services.workspace_registry import resolve_workspace_id_for_device
+from services.action_converter import (
+    convert_topic as run_action_converter,
+    list_action_candidates,
+    review_action_candidate,
+)
 
 
 # --- Configuration ---
@@ -40,6 +46,8 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 S3_BUCKET = os.getenv("S3_BUCKET", "watchme-vault")
 AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-2")
+TOPIC_FINALIZE_SCHEDULER_ENABLED = os.getenv("TOPIC_FINALIZE_SCHEDULER_ENABLED", "true").lower() not in {"0", "false", "no"}
+TOPIC_FINALIZE_SCHEDULER_INTERVAL_SECONDS = int(os.getenv("TOPIC_FINALIZE_SCHEDULER_INTERVAL_SECONDS", "15"))
 TABLE = "zerotouch_sessions"
 TOPIC_TABLE = os.getenv("TOPIC_TABLE", "zerotouch_conversation_topics")
 ACCOUNT_TABLE = "zerotouch_accounts"
@@ -58,11 +66,48 @@ DEVICE_SETTINGS_TABLE = "zerotouch_device_settings"
 
 supabase: Client = None
 s3_client = None
+topic_finalize_stop_event: threading.Event = None
+topic_finalize_thread: threading.Thread = None
+
+
+def _run_topic_finalize_scheduler(stop_event: threading.Event):
+    interval = max(5, min(TOPIC_FINALIZE_SCHEDULER_INTERVAL_SECONDS, 300))
+    print(f"[ZeroTouch] Topic finalize scheduler started interval={interval}s")
+    while not stop_event.wait(interval):
+        try:
+            rows = (
+                supabase.table(TOPIC_TABLE)
+                .select("device_id")
+                .eq("topic_status", "active")
+                .execute()
+                .data
+                or []
+            )
+            device_ids = sorted({row.get("device_id") for row in rows if row.get("device_id")})
+            for device_id in device_ids:
+                llm_service = resolve_device_llm_service(
+                    supabase=supabase,
+                    device_id=device_id,
+                    fallback_llm_service=_get_topic_llm_service(),
+                )
+                result = finalize_active_topic_for_device(
+                    supabase=supabase,
+                    device_id=device_id,
+                    llm_service=llm_service,
+                    idle_seconds=DEFAULT_IDLE_SECONDS,
+                    force=False,
+                    boundary_reason="idle_timeout",
+                )
+                if result.get("ready") or result.get("finalized"):
+                    print(f"[ZeroTouch] Topic finalize scheduler result device={device_id}: {result}")
+        except Exception as error:
+            print(f"[ZeroTouch] Topic finalize scheduler failed: {error}")
+    print("[ZeroTouch] Topic finalize scheduler stopped")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global supabase, s3_client
+    global supabase, s3_client, topic_finalize_stop_event, topic_finalize_thread
 
     # Startup
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
@@ -73,10 +118,23 @@ async def lifespan(app: FastAPI):
 
     print(f"[ZeroTouch] API started - Supabase: {SUPABASE_URL[:30]}...")
     print(f"[ZeroTouch] S3 bucket: {S3_BUCKET}, Region: {AWS_REGION}")
+    if TOPIC_FINALIZE_SCHEDULER_ENABLED:
+        topic_finalize_stop_event = threading.Event()
+        topic_finalize_thread = threading.Thread(
+            target=_run_topic_finalize_scheduler,
+            args=(topic_finalize_stop_event,),
+            daemon=True,
+            name="zerotouch-topic-finalize-scheduler",
+        )
+        topic_finalize_thread.start()
 
     yield
 
     # Shutdown
+    if topic_finalize_stop_event is not None:
+        topic_finalize_stop_event.set()
+    if topic_finalize_thread is not None:
+        topic_finalize_thread.join(timeout=2)
     print("[ZeroTouch] API shutting down")
 
 
@@ -314,8 +372,14 @@ def _insert_session_compat(payload: Dict[str, Any]) -> None:
             supabase.table(TABLE).insert(candidate).execute()
             return
         except Exception as error:
-            if "workspace_id" in candidate and _error_mentions_missing_column(error, "workspace_id"):
-                candidate.pop("workspace_id", None)
+            missing_columns = [
+                column
+                for column in list(candidate.keys())
+                if column != "id" and _error_mentions_missing_column(error, column)
+            ]
+            if missing_columns:
+                for column in missing_columns:
+                    candidate.pop(column, None)
                 continue
             raise
 
@@ -724,9 +788,30 @@ async def upload_audio(
     file: UploadFile = File(...),
     device_id: str = Form(...),
     workspace_id: Optional[str] = Form(None),
-    recorded_at: Optional[str] = Form(None)
+    recorded_at: Optional[str] = Form(None),
+    local_recording_id: Optional[str] = Form(None)
 ):
     """Upload audio file to S3 and create session."""
+    stable_recording_id = (local_recording_id or "").strip() or None
+    if stable_recording_id:
+        existing_rows = (
+            supabase.table(TABLE)
+            .select("id, s3_audio_path, status")
+            .eq("device_id", device_id)
+            .eq("local_recording_id", stable_recording_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if existing_rows:
+            existing = existing_rows[0]
+            return {
+                "session_id": existing["id"],
+                "s3_path": existing.get("s3_audio_path"),
+                "status": existing.get("status") or "uploaded",
+            }
+
     session_id = str(uuid.uuid4())
     now = datetime.now()
 
@@ -752,12 +837,34 @@ async def upload_audio(
             "device_id": device_id,
             "workspace_id": resolved_workspace_id,
             "s3_audio_path": s3_key,
+            "local_recording_id": stable_recording_id,
             "status": "uploaded",
             "recorded_at": recorded_at or now.isoformat(),
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
         }
-        _insert_session_compat(session_data)
+        try:
+            _insert_session_compat(session_data)
+        except Exception:
+            if stable_recording_id:
+                existing_rows = (
+                    supabase.table(TABLE)
+                    .select("id, s3_audio_path, status")
+                    .eq("device_id", device_id)
+                    .eq("local_recording_id", stable_recording_id)
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                if existing_rows:
+                    existing = existing_rows[0]
+                    return {
+                        "session_id": existing["id"],
+                        "s3_path": existing.get("s3_audio_path"),
+                        "status": existing.get("status") or "uploaded",
+                    }
+            raise
 
         return {"session_id": session_id, "s3_path": s3_key, "status": "uploaded"}
 
@@ -1890,6 +1997,110 @@ def get_wiki_pages(device_id: Optional[str] = None, limit: int = 500):
         })
 
     return {"device_id": resolved_device_id, "pages": pages, "wiki_available": True}
+
+
+# --- Action Candidates ---
+
+class ActionConvertRequest(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    force: bool = False
+    domain: str = "knowledge_worker"
+
+
+class ActionReviewRequest(BaseModel):
+    action: str  # approve | reject | edit
+    edits: Optional[Dict[str, Any]] = None
+    notes: Optional[str] = None
+    reviewer: Optional[str] = None
+
+
+@app.post("/api/action-candidates/from-topic/{topic_id}")
+def convert_topic_to_action_candidates(topic_id: str, body: Optional[ActionConvertRequest] = None):
+    """
+    Slice 1: Generate Action Candidates for a finalized topic.
+    Currently emits email_draft candidates only. Manual trigger.
+    """
+    request = body or ActionConvertRequest()
+
+    device_row = (
+        supabase.table(TOPIC_TABLE)
+        .select("device_id")
+        .eq("id", topic_id)
+        .single()
+        .execute()
+        .data
+        or {}
+    )
+    device_id = device_row.get("device_id")
+
+    if request.provider and request.model:
+        llm_service = LLMFactory.create(provider=request.provider, model=request.model)
+    else:
+        llm_service = resolve_device_llm_service(
+            supabase=supabase,
+            device_id=device_id,
+            fallback_llm_service=_get_topic_llm_service(),
+        )
+
+    result = run_action_converter(
+        supabase=supabase,
+        topic_id=topic_id,
+        llm_service=llm_service,
+        force=request.force,
+        domain=request.domain,
+    )
+    return {"status": "ok", "result": result}
+
+
+@app.get("/api/action-candidates")
+def get_action_candidates(
+    device_id: Optional[str] = None,
+    topic_id: Optional[str] = None,
+    status: Optional[str] = None,
+    intent_type: Optional[str] = None,
+    limit: int = 50,
+):
+    """List Action Candidates filtered by device / topic / status / intent."""
+    rows = list_action_candidates(
+        supabase=supabase,
+        device_id=device_id,
+        topic_id=topic_id,
+        status=status,
+        intent_type=intent_type,
+        limit=limit,
+    )
+    return {"candidates": rows, "count": len(rows)}
+
+
+@app.get("/api/action-candidates/{candidate_id}")
+def get_action_candidate(candidate_id: str):
+    row = (
+        supabase.table("zerotouch_action_candidates")
+        .select("*")
+        .eq("id", candidate_id)
+        .single()
+        .execute()
+        .data
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="action candidate not found")
+    return row
+
+
+@app.post("/api/action-candidates/{candidate_id}/review")
+def review_action_candidate_endpoint(candidate_id: str, body: ActionReviewRequest):
+    result = review_action_candidate(
+        supabase=supabase,
+        candidate_id=candidate_id,
+        action=body.action,
+        edits=body.edits,
+        notes=body.notes,
+        reviewer=body.reviewer,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("reason") or "review_failed")
+    return result
 
 
 # --- Model Catalog ---

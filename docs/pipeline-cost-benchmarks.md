@@ -46,8 +46,8 @@ DBに入っている topic/fact を再スコアリング・再アノテーショ
 | canonical化 | `canonicalize_distilled_items.py` | 169 items → まとめ1回 | ~10,000 |
 | spot wrapup | `generate_spot_wrapup.py` | 3〜6 spots × LLM 1回 | ~15,000 |
 | daily rollup | `generate_daily_rollup.py` | 2日分 × 1回 | ~10,000 |
-| stateful daily | `generate_stateful_daily.py` | 2日分 × 1回 | ~16,000 |
-| **合計** | | | **~113,000** |
+| action candidate 抽出 | 今後実装 | 2日分 × 1回 | 未計測 |
+| **合計** | | | **~97,000 + action candidate 分** |
 
 コスト目安（gpt-4.1-mini）: **$0.10〜0.15**
 

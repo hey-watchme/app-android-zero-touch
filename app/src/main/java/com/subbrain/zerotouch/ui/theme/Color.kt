@@ -84,3 +84,18 @@ val ZtGlassSurface = Color(0xF2FFFFFF)
 // Login background gradient colors
 val ZtLoginBgTop = Color(0xFFF2EFE6)
 val ZtLoginBgBottom = Color(0xFFE5E0D5)
+
+// --- Home dashboard stage accents ---
+// Subtle, desaturated tints used only in stage badges & column hairlines.
+// Body remains monochrome — these mark the left → right flow.
+val ZtStagePhysical = Color(0xFF1A1A1A)
+val ZtStagePhysicalSoft = Color(0xFFEEEDEA)
+val ZtStageConvert = Color(0xFF4A5BC4)
+val ZtStageConvertSoft = Color(0xFFEEF0FB)
+val ZtStageDigital = Color(0xFFB87333)
+val ZtStageDigitalSoft = Color(0xFFFAF1E5)
+
+// Canvas gradient endpoints (left → right "physical → digital" hue drift)
+val ZtCanvasLeft = Color(0xFFF6F4EE)
+val ZtCanvasMid = Color(0xFFF6F0E4)
+val ZtCanvasRight = Color(0xFFEFE4D0)

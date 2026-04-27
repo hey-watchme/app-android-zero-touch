@@ -171,32 +171,68 @@ class AmbientRecordingService : Service() {
         )
         val deviceId = DeviceIdProvider.getDeviceId(this)
         scope.launch {
+            var uploadedSessionId: String? = null
             try {
                 val api = ZeroTouchApi()
                 val upload = api.uploadAudio(file, deviceId)
-                // Once upload succeeds, rely on backend sessions/topics for rendering state.
-                // Keeping local entries indefinitely causes stale "processing" placeholders.
-                val uploaded = AmbientStatus.state.value.recordings.filterNot { item ->
-                    item.path == file.absolutePath
+                uploadedSessionId = upload.session_id
+                val uploaded = AmbientStatus.state.value.recordings.map { item ->
+                    if (item.path == file.absolutePath) {
+                        item.copy(
+                            sessionId = upload.session_id,
+                            status = "uploaded",
+                            errorMessage = null
+                        )
+                    } else {
+                        item
+                    }
                 }
                 AmbientStatus.update(
-                    recordings = uploaded,
-                    lastEvent = "Upload completed"
+                    recordings = uploaded.take(MAX_RECORDINGS),
+                    lastEvent = "Upload completed:${upload.session_id}"
                 )
                 val asrProvider = AmbientPreferences.getAsrProvider(this@AmbientRecordingService)
                 api.transcribe(upload.session_id, autoChain = false, provider = asrProvider)
+                val transcribing = AmbientStatus.state.value.recordings.map { item ->
+                    if (item.path == file.absolutePath) {
+                        item.copy(
+                            sessionId = upload.session_id,
+                            status = "transcribing",
+                            errorMessage = null
+                        )
+                    } else {
+                        item
+                    }
+                }
+                AmbientStatus.update(
+                    recordings = transcribing.take(MAX_RECORDINGS),
+                    lastEvent = "Transcribe started:${upload.session_id}"
+                )
                 Log.d(
                     TAG,
                     "Uploaded session=${upload.session_id} durationMs=$durationMs provider=$asrProvider"
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "Upload failed: ${file.name} ${e.message}")
-                val retained = AmbientStatus.state.value.recordings.filterNot { item ->
-                    item.path == file.absolutePath
+                val sessionId = uploadedSessionId
+                if (sessionId == null) {
+                    Log.e(TAG, "Upload failed: ${file.name} ${e.message}")
+                } else {
+                    Log.e(TAG, "Transcribe trigger failed: session=$sessionId ${e.message}")
+                }
+                val retained = AmbientStatus.state.value.recordings.map { item ->
+                    if (item.path == file.absolutePath) {
+                        item.copy(
+                            sessionId = sessionId ?: item.sessionId,
+                            status = "failed",
+                            errorMessage = e.message
+                        )
+                    } else {
+                        item
+                    }
                 }
                 AmbientStatus.update(
-                    recordings = retained,
-                    lastEvent = "Upload failed"
+                    recordings = retained.take(MAX_RECORDINGS),
+                    lastEvent = if (sessionId == null) "Upload failed" else "Transcribe failed:$sessionId"
                 )
             }
         }

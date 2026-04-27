@@ -1,88 +1,85 @@
 # ZeroTouch Docs Index
 
-このディレクトリの入口です。次のセッションでゼロベースから理解するための最短経路を示します。
+このディレクトリの入口です。
+
+ZeroTouch は、現場の会話を単に記録するアプリではなく、
+会話を **業務システムが処理できる Action / Draft / Knowledge** に変換するための
+Conversation Action Platform です。
 
 ---
 
-## ⚠️ まず最初にこれを読む
+## まず読むもの
 
-長期記憶パイプラインの理解は、次の 2 本を基準にします。
+1. **`conversation-action-platform.md`**
+   - ZeroTouch の現在の最上位方針
+   - 会話を SaaS / ERP / 業務システムの入力へ変換する設計
+   - 飲食店を最初の参照ケースにしつつ、建設、医療、福祉、教育へ広げる考え方
 
-- **`amical-longterm-memory-handoff.md`**
-  現在の作業引き継ぎ。次に何をやるかを再開するための最新メモ。
-- **`knowledge-pipeline-v2.md`**
-  長期記憶パイプラインの設計正本。Karpathy wiki 方式の整理と設計判断。
+2. **`poc-knowledge-worker-domain.md`**
+   - 最初の PoC を「自分の業務（ナレッジワーカー）」で実装するための設計
+   - 6 つの出力カテゴリ / 4 つの最小構成 / 必要データ / 実装段階
 
-旧 v1 / stateful daily 系の設計文書は削除済みです。現在の判断は上の 2 本に寄せます。
+3. **`amical-longterm-memory-handoff.md`**
+   - 現在の実装状態と次にやること
+   - 既存の Card / Topic / Wiki / Query を、Action 変換基盤の下位レイヤーとしてどう扱うか
 
----
+4. **`knowledge-pipeline-v2.md`**
+   - Wiki / 長期記憶レイヤーの設計
+   - Raw sources を残し、Fact / Wiki / Query として蓄積する仕組み
+   - Action Candidate の根拠、SOP、文脈補助として使う
 
-## 最短で読む順番
-
-1. **`amical-longterm-memory-handoff.md`**
-   - 長期記憶 / 知識構築 / Amical → ZeroTouch import の最新引き継ぎ
-   - 次に再開する手順
-
-2. **`knowledge-pipeline-v2.md`**
-   - パイプラインの設計正本
-   - wiki スキーマ 3 軸の定義
-   - 既存実装との対応
-
-3. `wiki-project-category-page-design.md`
-   - `theme` を `project > category > page` に切り替える設計
-   - project を人間管理しつつ、category/page を整理する方針
-
-4. `context-enrichment-project.md`
-   - account / workspace / device / environment を分析前提に入れる設計（現在も有効）
-
-5. `pipeline-cost-benchmarks.md`
-   - 再処理コストの目安
-
-6. `amical-validation-wrapup.md`
-   - 初期検証の結果まとめ。履歴参照用
+5. **`ambient-pipeline-refactor-handoff.md`**
+   - Ambient 録音 / upload idempotency / ASR retry / Topic finalize scheduler の再開メモ
+   - 今回の変更、検証済みコマンド、残タスク、scheduler 並行性リスク
 
 ---
 
-## ドキュメント一覧
-
-### 現在有効
+## 現在の設計正本
 
 | ファイル | 内容 | 状態 |
 |---------|------|------|
-| `amical-longterm-memory-handoff.md` | 現在の作業引き継ぎ | ✅ 最新 |
-| `knowledge-pipeline-v2.md` | 長期記憶パイプラインの設計正本 | ✅ 最新 |
-| `wiki-project-category-page-design.md` | `project > category > page` 再設計 | ✅ 最新 |
-| `account-workspace-org-design.md` | Account / Workspace / Organization 4層構造と権限モデル | ✅ 最新 |
-| `context-enrichment-project.md` | コンテキスト軸の詳細設計 | ✅ 有効 |
-| `pipeline-cost-benchmarks.md` | 再処理コスト・トークン目安 | ✅ 有効 |
-
-### 実験・参照用
-
-| ファイル | 内容 | 状態 |
-|---------|------|------|
-| `amical-validation-wrapup.md` | 実験パイプライン・生成物・結果のまとめ | 📦 参照用 |
-| `amical-batch-reprocessing.md` | 安い LLM で大量ログを再処理する運用メモ | 📦 参照用 |
+| `conversation-action-platform.md` | 会話を Action / Draft / SaaS 入力へ変換する最上位設計 | ✅ 最新 |
+| `poc-knowledge-worker-domain.md` | 最初の PoC をナレッジワーカードメインで作る設計 | ✅ 最新 |
+| `amical-longterm-memory-handoff.md` | 現在の実装状態と再開ポイント | ✅ 更新対象 |
+| `ambient-pipeline-refactor-handoff.md` | Ambient pipeline リファクタリングの再開ポイント | ✅ 最新 |
+| `knowledge-pipeline-v2.md` | Wiki / 長期記憶レイヤーの設計 | ✅ 有効 |
+| `wiki-project-category-page-design.md` | Wiki の project / category / page 分類設計 | ✅ 有効 |
+| `account-workspace-org-design.md` | Account / Workspace / Organization の所有モデル | ✅ 有効 |
+| `context-enrichment-project.md` | Converter / Wiki の精度を上げる文脈入力 | ✅ 有効 |
+| `pipeline-cost-benchmarks.md` | 再処理コスト、トークン目安 | ✅ 有効 |
 
 ---
 
-## Amical 検証
+## 実装・運用メモ
 
-- `amical-longterm-memory-handoff.md` — 長期記憶・知識構築・DB import の最新状態
-- `amical-validation-wrapup.md` — 実験パイプライン・生成物・実データの結果・次の一手
+| ファイル | 内容 |
+|---------|------|
+| `ambient-recording-debug-checklist.md` | Android Ambient 録音のデバッグ手順 |
+| `ambient-agent-spec.md` | 初期の Ambient Agent 企画メモ |
+| `vad-improvement-plan.md` | VAD 改善メモ |
+| `Ambient_Context_Monopoly.pdf` | 関連調査資料 |
 
-## Android / Ambient 運用
+---
 
-- `ambient-recording-debug-checklist.md`
-- `ambient-agent-spec.md`
-- `vad-improvement-plan.md`
+## 古い前提の扱い
 
-## Context Enrichment
+旧 v1 / stateful daily / snapshot reducer 系の設計は、現在の正本ではありません。
 
-- `context-enrichment-project.md`
-  - コンテクスト追加のスキーマ、入力導線、artifact 注入、段階導入計画
-- `wiki-project-category-page-design.md`
-  - project / category / page の分類再設計
+現在の判断:
 
-## その他
+- 破壊的な state snapshot 更新は採用しない
+- Raw sources は残す
+- Wiki は長期記憶レイヤーとして残す
+- その上に Action Candidate / Review / Connector レイヤーを作る
+- 飲食店の例は最初の参照実装であり、ZeroTouch 自体は業界横断の基盤として設計する
 
-- `Ambient_Context_Monopoly.pdf` — 関連調査資料
+---
+
+## 次に作るもの
+
+1. 飲食店 domain schema
+2. `zerotouch_action_candidates` 系テーブル
+3. Topic / Fact から Action Candidate を生成する backend service
+4. Action Review Queue
+5. 初期 connector: JSON export / Google Sheets / Notion など
+6. 業界・個社ごとの connector 追加
