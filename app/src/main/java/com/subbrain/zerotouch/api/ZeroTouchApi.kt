@@ -12,13 +12,42 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import android.util.Log
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.delay
 
 data class UploadResponse(
     val session_id: String,
     val s3_path: String,
     val status: String
 )
+
+sealed class ZeroTouchApiException(
+    message: String,
+    cause: Throwable? = null
+) : Exception(message, cause) {
+    abstract val operation: String
+    abstract val retryable: Boolean
+
+    class Http(
+        override val operation: String,
+        val statusCode: Int,
+        val responseBody: String?,
+        override val retryable: Boolean
+    ) : ZeroTouchApiException(
+        "$operation failed: HTTP $statusCode${responseBody?.takeIf { it.isNotBlank() }?.let { " $it" }.orEmpty()}"
+    )
+
+    class Network(
+        override val operation: String,
+        cause: IOException
+    ) : ZeroTouchApiException(
+        "$operation failed: ${cause.message ?: cause.javaClass.simpleName}",
+        cause
+    ) {
+        override val retryable: Boolean = true
+    }
+}
 
 data class SessionSummary(
     val id: String,
@@ -360,6 +389,54 @@ data class WikiPagesResponse(
     val wiki_available: Boolean = true
 )
 
+data class ActionCandidate(
+    val id: String,
+    val topic_id: String,
+    val device_id: String,
+    val workspace_id: String? = null,
+    val domain: String,
+    val intent_type: String,
+    val title: String? = null,
+    val summary: String? = null,
+    val payload: Map<String, Any?>? = null,
+    val sources: Map<String, Any?>? = null,
+    val destination: String? = null,
+    val status: String,
+    val confidence: Double? = null,
+    val requires_review: Boolean = true,
+    val review_state: Map<String, Any?>? = null,
+    val provider: String? = null,
+    val model: String? = null,
+    val created_at: String,
+    val updated_at: String
+)
+
+data class ActionCandidateListResponse(
+    val candidates: List<ActionCandidate>,
+    val count: Int
+)
+
+data class ActionConvertResult(
+    val topic_id: String,
+    val ok: Boolean,
+    val created: Int? = null,
+    val candidate_ids: List<String>? = null,
+    val reused: Boolean? = null,
+    val superseded: Int? = null,
+    val reason: String? = null
+)
+
+data class ActionConvertResponse(
+    val status: String,
+    val result: ActionConvertResult
+)
+
+data class ActionReviewResponse(
+    val ok: Boolean,
+    val candidate: ActionCandidate? = null,
+    val reason: String? = null
+)
+
 class ZeroTouchApi(
     private val baseUrl: String = "https://api.hey-watch.me"
 ) {
@@ -375,8 +452,42 @@ class ZeroTouchApi(
 
     private val gson = Gson()
 
-    suspend fun uploadAudio(file: File, deviceId: String): UploadResponse = withContext(Dispatchers.IO) {
-        val requestBody = MultipartBody.Builder()
+    private fun httpException(operation: String, code: Int, body: String?): ZeroTouchApiException.Http {
+        return ZeroTouchApiException.Http(
+            operation = operation,
+            statusCode = code,
+            responseBody = body,
+            retryable = code == 408 || code == 429 || code in 500..599
+        )
+    }
+
+    private suspend fun <T> withRetry(
+        operation: String,
+        maxAttempts: Int = 3,
+        initialDelayMs: Long = 1_000L,
+        block: () -> T
+    ): T {
+        var nextDelayMs = initialDelayMs
+        repeat(maxAttempts - 1) { attempt ->
+            try {
+                return block()
+            } catch (e: ZeroTouchApiException) {
+                if (!e.retryable) throw e
+                Log.w(TAG, "$operation retry ${attempt + 1}/$maxAttempts after retryable failure: ${e.message}")
+                delay(nextDelayMs)
+                nextDelayMs *= 2
+            }
+        }
+        return block()
+    }
+
+    suspend fun uploadAudio(
+        file: File,
+        deviceId: String,
+        localRecordingId: String? = null
+    ): UploadResponse = withContext(Dispatchers.IO) {
+        val operation = "Upload"
+        val requestBuilder = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("device_id", deviceId)
             .addFormDataPart(
@@ -384,18 +495,30 @@ class ZeroTouchApi(
                 file.name,
                 file.asRequestBody("audio/mp4".toMediaType())
             )
-            .build()
+        if (!localRecordingId.isNullOrBlank()) {
+            requestBuilder.addFormDataPart("local_recording_id", localRecordingId)
+        }
+        val requestBody = requestBuilder.build()
 
         val request = Request.Builder()
             .url("$baseUrl/zerotouch/api/upload")
             .post(requestBody)
             .build()
 
-        val response = client.newCall(request).execute()
-        if (!response.isSuccessful) {
-            throw Exception("Upload failed: ${response.code} ${response.body?.string()}")
+        val executeUpload = {
+            try {
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string()
+                    if (!response.isSuccessful) {
+                        throw httpException(operation, response.code, body)
+                    }
+                    gson.fromJson(body, UploadResponse::class.java)
+                }
+            } catch (e: IOException) {
+                throw ZeroTouchApiException.Network(operation, e)
+            }
         }
-        gson.fromJson(response.body!!.string(), UploadResponse::class.java)
+        if (localRecordingId.isNullOrBlank()) executeUpload() else withRetry(operation = operation, block = executeUpload)
     }
 
     suspend fun transcribe(
@@ -405,24 +528,33 @@ class ZeroTouchApi(
         model: String? = null,
         language: String? = null
     ): Map<String, Any> = withContext(Dispatchers.IO) {
-        val url = buildString {
-            append("$baseUrl/zerotouch/api/transcribe/$sessionId?auto_chain=$autoChain")
-            if (!provider.isNullOrBlank()) append("&provider=$provider")
-            if (!model.isNullOrBlank()) append("&model=$model")
-            if (!language.isNullOrBlank()) append("&language=$language")
-        }
+        val operation = "Transcribe trigger"
+        withRetry(operation = operation) {
+            val url = buildString {
+                append("$baseUrl/zerotouch/api/transcribe/$sessionId?auto_chain=$autoChain")
+                if (!provider.isNullOrBlank()) append("&provider=$provider")
+                if (!model.isNullOrBlank()) append("&model=$model")
+                if (!language.isNullOrBlank()) append("&language=$language")
+            }
 
-        val request = Request.Builder()
-            .url(url)
-            .post("".toRequestBody(null))
-            .build()
+            val request = Request.Builder()
+                .url(url)
+                .post("".toRequestBody(null))
+                .build()
 
-        val response = client.newCall(request).execute()
-        if (!response.isSuccessful) {
-            throw Exception("Transcribe failed: ${response.code} ${response.body?.string()}")
+            try {
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string()
+                    if (!response.isSuccessful) {
+                        throw httpException(operation, response.code, body)
+                    }
+                    val type = object : TypeToken<Map<String, Any>>() {}.type
+                    gson.fromJson(body, type)
+                }
+            } catch (e: IOException) {
+                throw ZeroTouchApiException.Network(operation, e)
+            }
         }
-        val type = object : TypeToken<Map<String, Any>>() {}.type
-        gson.fromJson(response.body!!.string(), type)
     }
 
     suspend fun getSession(sessionId: String): SessionDetail = withContext(Dispatchers.IO) {
@@ -936,6 +1068,91 @@ class ZeroTouchApi(
         val type = object : TypeToken<ContextProfileResponse>() {}.type
         val envelope: ContextProfileResponse = gson.fromJson(body, type)
         envelope.profile ?: throw Exception("Context profile missing in response")
+    }
+
+    suspend fun convertTopicToActions(
+        topicId: String,
+        force: Boolean = false,
+        domain: String = "knowledge_worker",
+        provider: String? = null,
+        model: String? = null,
+    ): ActionConvertResponse = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/action-candidates/from-topic/$topicId"
+        val payload = mutableMapOf<String, Any?>(
+            "force" to force,
+            "domain" to domain,
+        )
+        if (!provider.isNullOrBlank()) payload["provider"] = provider
+        if (!model.isNullOrBlank()) payload["model"] = model
+        val request = Request.Builder()
+            .url(url)
+            .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+            .build()
+        Log.d(TAG, "POST $url")
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "POST $url failed: ${response.code} body=$body")
+            throw Exception("Convert topic to actions failed: ${response.code}")
+        }
+        gson.fromJson(body, ActionConvertResponse::class.java)
+    }
+
+    suspend fun listActionCandidates(
+        deviceId: String? = null,
+        topicId: String? = null,
+        status: String? = null,
+        intentType: String? = null,
+        limit: Int = 50,
+    ): ActionCandidateListResponse = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append("$baseUrl/zerotouch/api/action-candidates")
+            val params = mutableListOf<String>()
+            if (!deviceId.isNullOrBlank()) params += "device_id=$deviceId"
+            if (!topicId.isNullOrBlank()) params += "topic_id=$topicId"
+            if (!status.isNullOrBlank()) params += "status=$status"
+            if (!intentType.isNullOrBlank()) params += "intent_type=$intentType"
+            params += "limit=$limit"
+            if (params.isNotEmpty()) {
+                append("?")
+                append(params.joinToString("&"))
+            }
+        }
+        Log.d(TAG, "GET $url")
+        val request = Request.Builder().url(url).get().build()
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "GET $url failed: ${response.code} body=$body")
+            throw Exception("List action candidates failed: ${response.code}")
+        }
+        gson.fromJson(body, ActionCandidateListResponse::class.java)
+    }
+
+    suspend fun reviewActionCandidate(
+        candidateId: String,
+        action: String,
+        edits: Map<String, Any?>? = null,
+        notes: String? = null,
+        reviewer: String? = null,
+    ): ActionReviewResponse = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/zerotouch/api/action-candidates/$candidateId/review"
+        val payload = mutableMapOf<String, Any?>("action" to action)
+        if (edits != null) payload["edits"] = edits
+        if (!notes.isNullOrBlank()) payload["notes"] = notes
+        if (!reviewer.isNullOrBlank()) payload["reviewer"] = reviewer
+        val request = Request.Builder()
+            .url(url)
+            .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+            .build()
+        Log.d(TAG, "POST $url")
+        val response = client.newCall(request).execute()
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+            Log.e(TAG, "POST $url failed: ${response.code} body=$body")
+            throw Exception("Review action candidate failed: ${response.code}")
+        }
+        gson.fromJson(body, ActionReviewResponse::class.java)
     }
 
     fun parseCards(cardsResult: Map<String, Any>?): List<Card> {

@@ -31,6 +31,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,12 +44,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,10 +70,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.subbrain.zerotouch.api.ActionCandidate
 import com.subbrain.zerotouch.api.FactSummary
 import com.subbrain.zerotouch.api.SessionSummary
 import com.subbrain.zerotouch.api.WikiPage
 import com.subbrain.zerotouch.api.ZeroTouchApi
+import kotlinx.coroutines.launch
 import com.subbrain.zerotouch.audio.ambient.AmbientRecordingEntry
 import com.subbrain.zerotouch.audio.ambient.AmbientStatus
 import com.subbrain.zerotouch.ui.components.CardDetailSheet
@@ -165,6 +174,11 @@ fun HomeDashboardScreen(
         displayTopics.find { it.id == id }
     } ?: displayTopics.firstOrNull()
 
+    val coroutineScope = rememberCoroutineScope()
+    var actionsRefreshKey by remember { mutableIntStateOf(0) }
+    var actionGenerating by remember { mutableStateOf(false) }
+    var actionStatus by remember { mutableStateOf<String?>(null) }
+
     val selectedCard = uiState.selectedCardId?.let { id ->
         (uiState.homeLiveTopics + uiState.topicCards).flatMap { it.utterances }.find { it.id == id }
             ?: uiState.feedCards.find { it.id == id }
@@ -233,7 +247,35 @@ fun HomeDashboardScreen(
             ConvertColumn(
                 modifier = Modifier.weight(1.05f).fillMaxHeight(),
                 topic = selectedTopic,
-                facts = selectedTopic?.let { uiState.factsByTopic[it.id] }.orEmpty()
+                facts = selectedTopic?.let { uiState.factsByTopic[it.id] }.orEmpty(),
+                isGenerating = actionGenerating,
+                statusMessage = actionStatus,
+                onGenerateActions = { force ->
+                    val topicId = selectedTopic?.id ?: return@ConvertColumn
+                    if (actionGenerating) return@ConvertColumn
+                    actionGenerating = true
+                    actionStatus = "生成中…"
+                    coroutineScope.launch {
+                        try {
+                            val response = homeApi.convertTopicToActions(
+                                topicId = topicId,
+                                force = force,
+                            )
+                            val r = response.result
+                            actionStatus = when {
+                                !r.ok -> r.reason?.let { "失敗: $it" } ?: "失敗しました"
+                                r.reused == true -> "既存の候補を表示します"
+                                (r.created ?: 0) == 0 -> "メール下書きの対象は見つかりませんでした"
+                                else -> "${r.created}件の候補を生成しました"
+                            }
+                            actionsRefreshKey += 1
+                        } catch (e: Exception) {
+                            actionStatus = "失敗: ${e.message ?: "unknown"}"
+                        } finally {
+                            actionGenerating = false
+                        }
+                    }
+                }
             )
             FlowGutter(
                 active = selectedTopic?.let { uiState.factsByTopic[it.id]?.isNotEmpty() } == true
@@ -241,7 +283,22 @@ fun HomeDashboardScreen(
             DigitalColumn(
                 modifier = Modifier.weight(1.0f).fillMaxHeight(),
                 deviceId = uiState.selectedDeviceId,
-                selectedFacts = selectedTopic?.let { uiState.factsByTopic[it.id] }.orEmpty()
+                selectedTopicId = selectedTopic?.id,
+                actionRefreshKey = actionsRefreshKey,
+                selectedFacts = selectedTopic?.let { uiState.factsByTopic[it.id] }.orEmpty(),
+                onReviewAction = { candidateId, reviewAction ->
+                    coroutineScope.launch {
+                        try {
+                            homeApi.reviewActionCandidate(
+                                candidateId = candidateId,
+                                action = reviewAction,
+                            )
+                            actionsRefreshKey += 1
+                        } catch (_: Exception) {
+                            actionsRefreshKey += 1
+                        }
+                    }
+                }
             )
         }
     }
@@ -926,7 +983,10 @@ private fun ContextNote() {
 private fun ConvertColumn(
     modifier: Modifier,
     topic: TopicFeedCard?,
-    facts: List<FactSummary>
+    facts: List<FactSummary>,
+    isGenerating: Boolean,
+    statusMessage: String?,
+    onGenerateActions: (Boolean) -> Unit
 ) {
     StagePanel(modifier = modifier, stage = Stage.Convert) {
         LazyColumn(
@@ -950,7 +1010,14 @@ private fun ConvertColumn(
                 }
             }
 
-            item { ConverterFooter() }
+            item {
+                ConverterActionFooter(
+                    enabled = topic.status != "active",
+                    isGenerating = isGenerating,
+                    statusMessage = statusMessage,
+                    onGenerateActions = onGenerateActions
+                )
+            }
         }
     }
 }
@@ -1343,23 +1410,96 @@ private fun StepBar(active: Boolean) {
 }
 
 @Composable
-private fun ConverterFooter() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+private fun ConverterActionFooter(
+    enabled: Boolean,
+    isGenerating: Boolean,
+    statusMessage: String?,
+    onGenerateActions: (Boolean) -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = ZtSurface,
+        border = BorderStroke(1.dp, ZtStageConvert.copy(alpha = 0.22f))
     ) {
-        MonoLabel("AVG · 2.4s")
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = "→ デジタル成果物へ",
-            style = MaterialTheme.typography.labelSmall,
-            color = ZtStageDigital,
-            fontWeight = FontWeight.Medium,
-            letterSpacing = 0.3.sp
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 11.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Email,
+                    contentDescription = null,
+                    tint = ZtStageDigital,
+                    modifier = Modifier.size(15.dp)
+                )
+                Text(
+                    text = "メール下書きを生成",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = ZtOnBackground,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.weight(1f))
+                if (isGenerating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = ZtStageConvert
+                    )
+                }
+            }
+            Text(
+                text = "このトピックの会話から、メール返信や送信の下書きを抽出します。",
+                style = MaterialTheme.typography.labelSmall,
+                color = ZtCaption,
+                maxLines = 2
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onGenerateActions(false) },
+                    enabled = enabled && !isGenerating
+                ) {
+                    Text(
+                        text = "Action 候補を生成",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                TextButton(
+                    onClick = { onGenerateActions(true) },
+                    enabled = enabled && !isGenerating
+                ) {
+                    Text(
+                        text = "再生成",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtCaption
+                    )
+                }
+            }
+            if (!statusMessage.isNullOrBlank()) {
+                Text(
+                    text = statusMessage,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtStageConvert,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.3.sp
+                )
+            }
+            if (!enabled && !isGenerating) {
+                Text(
+                    text = "トピックが finalize されるまで生成できません",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtCaption
+                )
+            }
+        }
     }
 }
 
@@ -1393,50 +1533,25 @@ private fun EmptyConverter(message: String) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 03 / DIGITAL — SaaS draft slots + Wiki
+// 03 / DIGITAL — Action drafts (Email) + Wiki
 // ════════════════════════════════════════════════════════════════════════════
-
-private data class SaasSlot(
-    val name: String,
-    val brand: String,
-    val tag: String,
-    val tile: Color,
-    val placeholder: String
-)
-
-private val SAAS_SLOTS = listOf(
-    SaasSlot(
-        name = "トレタ",
-        brand = "予約台帳",
-        tag = "T",
-        tile = Color(0xFFD93636),
-        placeholder = "予約・人数変更が抽出されると下書きが生成されます"
-    ),
-    SaasSlot(
-        name = "アスクル",
-        brand = "発注システム",
-        tag = "A",
-        tile = Color(0xFF2F58B5),
-        placeholder = "在庫・補充の発言から発注下書きが生成されます"
-    ),
-    SaasSlot(
-        name = "Notion",
-        brand = "顧客メモ / SOP",
-        tag = "N",
-        tile = ZtBlack,
-        placeholder = "顧客フィードバック・運用メモから記録下書きが生成されます"
-    )
-)
 
 @Composable
 private fun DigitalColumn(
     modifier: Modifier,
     deviceId: String?,
-    selectedFacts: List<FactSummary>
+    selectedTopicId: String?,
+    actionRefreshKey: Int,
+    selectedFacts: List<FactSummary>,
+    onReviewAction: (String, String) -> Unit
 ) {
     var pages by remember { mutableStateOf<List<WikiPage>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    var actionCandidates by remember { mutableStateOf<List<ActionCandidate>>(emptyList()) }
+    var actionsLoading by remember { mutableStateOf(false) }
+    var actionsError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(deviceId) {
         isLoading = true
@@ -1448,6 +1563,28 @@ private fun DigitalColumn(
             error = e.message
         } finally {
             isLoading = false
+        }
+    }
+
+    LaunchedEffect(selectedTopicId, actionRefreshKey) {
+        if (selectedTopicId.isNullOrBlank()) {
+            actionCandidates = emptyList()
+            actionsLoading = false
+            actionsError = null
+            return@LaunchedEffect
+        }
+        actionsLoading = true
+        actionsError = null
+        try {
+            val response = homeApi.listActionCandidates(
+                topicId = selectedTopicId,
+                limit = 20,
+            )
+            actionCandidates = response.candidates
+        } catch (e: Exception) {
+            actionsError = e.message
+        } finally {
+            actionsLoading = false
         }
     }
 
@@ -1469,6 +1606,8 @@ private fun DigitalColumn(
         }
     }
 
+    val visibleCandidates = actionCandidates.filter { it.status == "pending" || it.status == "approved" }
+
     StagePanel(modifier = modifier, stage = Stage.Digital) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -1477,13 +1616,27 @@ private fun DigitalColumn(
         ) {
             item {
                 SectionLabel(
-                    text = "業務システム連携",
-                    suffix = "準備中",
+                    text = "メール下書き",
+                    suffix = if (visibleCandidates.isEmpty()) "未生成" else "${visibleCandidates.size}件",
                     accent = ZtStageDigital
                 )
             }
-            items(SAAS_SLOTS) { slot ->
-                SaasDraftSlot(slot = slot)
+            when {
+                selectedTopicId.isNullOrBlank() ->
+                    item { EmptyBox("トピックを選択すると下書きを生成できます") }
+                actionsLoading ->
+                    item { LoadingBox("候補を読み込み中") }
+                !actionsError.isNullOrBlank() ->
+                    item { ErrorBox(actionsError ?: "候補の読み込みに失敗しました") }
+                visibleCandidates.isEmpty() ->
+                    item { EmptyBox("中央レーンで「Action 候補を生成」を押してください") }
+                else -> items(visibleCandidates, key = { it.id }) { candidate ->
+                    EmailDraftCard(
+                        candidate = candidate,
+                        onApprove = { onReviewAction(candidate.id, "approve") },
+                        onReject = { onReviewAction(candidate.id, "reject") }
+                    )
+                }
             }
 
             item { Spacer(Modifier.height(2.dp)) }
@@ -1507,100 +1660,223 @@ private fun DigitalColumn(
 }
 
 @Composable
-private fun SaasDraftSlot(slot: SaasSlot) {
-    val dashedBorder = remember {
-        PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
-    }
+private fun EmailDraftCard(
+    candidate: ActionCandidate,
+    onApprove: () -> Unit,
+    onReject: () -> Unit
+) {
+    val payload = candidate.payload.orEmpty()
+    val subject = (payload["subject"] as? String).orEmpty()
+    val body = (payload["body"] as? String).orEmpty()
+    val recipient = (payload["recipient"] as? String)
+        ?: (payload["recipient_name"] as? String)
+    val tone = payload["tone"] as? String
+    val sourceQuote = (candidate.sources.orEmpty()["source_quote"] as? String)
+        ?: (payload["source_quote"] as? String)
+    val isApproved = candidate.status == "approved"
+
+    val clipboardManager: ClipboardManager = LocalClipboardManager.current
+
     Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = ZtSurface.copy(alpha = 0.65f)
+        shape = RoundedCornerShape(11.dp),
+        color = ZtSurface,
+        border = BorderStroke(1.5.dp, ZtStageDigital.copy(alpha = if (isApproved) 0.55f else 0.30f))
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(2.dp)
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Canvas(modifier = Modifier.fillMaxWidth().height(86.dp)) {
-                val cornerRadius = 10.dp.toPx()
-                drawRoundRect(
-                    color = ZtStageDigital.copy(alpha = 0.30f),
-                    topLeft = Offset.Zero,
-                    size = size,
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(cornerRadius, cornerRadius),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(
-                        width = 1.dp.toPx(),
-                        pathEffect = dashedBorder
-                    )
-                )
-            }
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 11.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(28.dp)
-                        .background(slot.tile, RoundedCornerShape(6.dp)),
+                        .size(22.dp)
+                        .background(ZtStageDigitalSoft, RoundedCornerShape(6.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = slot.tag,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold
+                    Icon(
+                        imageVector = Icons.Outlined.Email,
+                        contentDescription = null,
+                        tint = ZtStageDigital,
+                        modifier = Modifier.size(13.dp)
                     )
                 }
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Email Draft",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ZtStageDigital,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.4.sp
+                )
+                if (!tone.isNullOrBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = ZtStageDigitalSoft.copy(alpha = 0.6f)
+                    ) {
                         Text(
-                            text = slot.name,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = ZtOnBackground,
-                            fontWeight = FontWeight.SemiBold
+                            text = tone,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZtStageDigital,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                if (isApproved) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = ZtStagePhysicalSoft
+                    ) {
                         Text(
-                            text = "· ${slot.brand}",
+                            text = "APPROVED",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ZtOnBackground,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 0.6.sp,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                } else {
+                    candidate.confidence?.let { c ->
+                        Text(
+                            text = "${(c * 100).toInt()}%",
                             style = MaterialTheme.typography.labelSmall,
                             color = ZtCaption,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
+                            fontWeight = FontWeight.Medium
                         )
-                        ComingSoonChip()
                     }
+                }
+            }
+
+            if (!recipient.isNullOrBlank()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = slot.placeholder,
+                        text = "To",
                         style = MaterialTheme.typography.labelSmall,
-                        color = ZtOnSurfaceVariant,
-                        maxLines = 2,
+                        color = ZtCaption,
+                        modifier = Modifier.width(28.dp)
+                    )
+                    Text(
+                        text = recipient,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtOnBackground,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
-        }
-    }
-}
 
-@Composable
-private fun ComingSoonChip() {
-    Surface(
-        shape = RoundedCornerShape(4.dp),
-        color = ZtStageDigitalSoft
-    ) {
-        Text(
-            text = "Coming",
-            style = MaterialTheme.typography.labelSmall,
-            color = ZtStageDigital,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.5.sp,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-        )
+            if (subject.isNotBlank()) {
+                Text(
+                    text = subject,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = ZtOnBackground,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (body.isNotBlank()) {
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ZtOnSurfaceVariant,
+                    maxLines = 8,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (!sourceQuote.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(7.dp),
+                    color = ZtStageDigitalSoft.copy(alpha = 0.45f),
+                    border = BorderStroke(1.dp, ZtStageDigital.copy(alpha = 0.10f))
+                ) {
+                    Text(
+                        text = "「$sourceQuote」",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtOnSurfaceVariant,
+                        fontStyle = FontStyle.Italic,
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        val text = buildString {
+                            if (subject.isNotBlank()) {
+                                append("件名: ")
+                                append(subject)
+                                append("\n\n")
+                            }
+                            append(body)
+                        }
+                        clipboardManager.setText(AnnotatedString(text))
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.ContentCopy,
+                        contentDescription = null,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = "Copy",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                TextButton(
+                    onClick = onReject,
+                    enabled = !isApproved
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = null,
+                        modifier = Modifier.size(13.dp),
+                        tint = ZtCaption
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text(
+                        text = "Reject",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtCaption
+                    )
+                }
+                OutlinedButton(
+                    onClick = onApprove,
+                    enabled = !isApproved
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(13.dp),
+                        tint = ZtStagePhysical
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        text = "Approve",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ZtStagePhysical,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
     }
 }
 

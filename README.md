@@ -222,6 +222,8 @@ SaaS / ERP / 業務システム Connector
 **Topic finalize ルール（現在値）**
 - 最後の Card から 30 秒間新しい発言がなければ Topic を finalize
 - Ambient Off でも Topic を finalize
+- 通常の idle finalize は backend scheduler が担当する。Android の画面 load / refresh は finalize mutation を起こさない
+- 現在の scheduler は FastAPI process 内 thread。複数 worker 起動では重複実行されるため、prod では `TOPIC_FINALIZE_SCHEDULER_ENABLED` を 1 process のみ `true` にする。次の本命は Lambda / EventBridge など外部 worker 化
 - これらの値は運用しながら継続的に調整する前提
 
 ### バックエンド API
@@ -229,7 +231,7 @@ SaaS / ERP / 業務システム Connector
 | エンドポイント | メソッド | 説明 |
 |-------------|---------|------|
 | `/health` | GET | ヘルスチェック |
-| `/api/upload` | POST | 音声をS3にアップロード、セッション作成 |
+| `/api/upload` | POST | 音声をS3にアップロード、セッション作成（`local_recording_id` による device 単位 idempotency） |
 | `/api/transcribe/{id}` | POST | 文字起こし開始（202 Accepted） |
 | `/api/generate-cards/{id}` | POST | カード生成開始（202 Accepted / 現在は未使用） |
 | `/api/topics` | GET | トピック一覧取得 |
@@ -526,6 +528,7 @@ android-zero-touch/
 - 会話 → 業務アクション変換設計: `docs/conversation-action-platform.md`
 - Wiki / 長期記憶レイヤー設計: `docs/knowledge-pipeline-v2.md`
 - 現在の作業引き継ぎ: `docs/amical-longterm-memory-handoff.md`
+- Ambient pipeline リファクタリング再開メモ: `docs/ambient-pipeline-refactor-handoff.md`
 - アンビエント録音デバッグ手順: `docs/ambient-recording-debug-checklist.md`
 - モデルプロジェクト: `/Users/kaya.matsumoto/projects/watchme/business`
 - WatchMe インフラ: `/Users/kaya.matsumoto/projects/watchme/server-configs`

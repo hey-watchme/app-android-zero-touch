@@ -15,14 +15,22 @@ Conversation Action Platform です。
    - 会話を SaaS / ERP / 業務システムの入力へ変換する設計
    - 飲食店を最初の参照ケースにしつつ、建設、医療、福祉、教育へ広げる考え方
 
-2. **`amical-longterm-memory-handoff.md`**
+2. **`poc-knowledge-worker-domain.md`**
+   - 最初の PoC を「自分の業務（ナレッジワーカー）」で実装するための設計
+   - 6 つの出力カテゴリ / 4 つの最小構成 / 必要データ / 実装段階
+
+3. **`amical-longterm-memory-handoff.md`**
    - 現在の実装状態と次にやること
    - 既存の Card / Topic / Wiki / Query を、Action 変換基盤の下位レイヤーとしてどう扱うか
 
-3. **`knowledge-pipeline-v2.md`**
+4. **`knowledge-pipeline-v2.md`**
    - Wiki / 長期記憶レイヤーの設計
    - Raw sources を残し、Fact / Wiki / Query として蓄積する仕組み
    - Action Candidate の根拠、SOP、文脈補助として使う
+
+5. **`ambient-pipeline-refactor-handoff.md`**
+   - Ambient 録音 / upload idempotency / ASR retry / Topic finalize scheduler の再開メモ
+   - 今回の変更、検証済みコマンド、残タスク、scheduler 並行性リスク
 
 ---
 
@@ -31,7 +39,9 @@ Conversation Action Platform です。
 | ファイル | 内容 | 状態 |
 |---------|------|------|
 | `conversation-action-platform.md` | 会話を Action / Draft / SaaS 入力へ変換する最上位設計 | ✅ 最新 |
+| `poc-knowledge-worker-domain.md` | 最初の PoC をナレッジワーカードメインで作る設計 | ✅ 最新 |
 | `amical-longterm-memory-handoff.md` | 現在の実装状態と再開ポイント | ✅ 更新対象 |
+| `ambient-pipeline-refactor-handoff.md` | Ambient pipeline リファクタリングの再開ポイント | ✅ 最新 |
 | `knowledge-pipeline-v2.md` | Wiki / 長期記憶レイヤーの設計 | ✅ 有効 |
 | `wiki-project-category-page-design.md` | Wiki の project / category / page 分類設計 | ✅ 有効 |
 | `account-workspace-org-design.md` | Account / Workspace / Organization の所有モデル | ✅ 有効 |
