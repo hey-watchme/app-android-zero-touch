@@ -177,51 +177,58 @@ def _select_transcription_file_url(payload: Dict[str, Any]) -> Optional[str]:
 
 
 def _parse_transcription_payload(payload: Dict[str, Any]):
-    transcript_text = ""
     utterances = []
     speaker_set = set()
 
-    combined = payload.get("combinedRecognizedPhrases") or []
-    if combined:
-        parts = [p.get("display") for p in combined if p.get("display")]
-        transcript_text = " ".join(parts).strip()
-
+    # Build utterances from recognizedPhrases in chronological order.
+    # combinedRecognizedPhrases is intentionally skipped: when diarization is
+    # enabled Azure returns one entry per speaker, so joining them produces
+    # out-of-order text. recognizedPhrases sorted by offsetInTicks is the
+    # canonical source for both transcript and utterances.
     phrases = payload.get("recognizedPhrases") or []
-    if phrases:
-        for phrase in phrases:
-            display = phrase.get("display")
-            if not display and phrase.get("nBest"):
-                display = phrase["nBest"][0].get("display")
-            display = (display or "").strip()
-            if not display:
-                continue
-            speaker = phrase.get("speaker")
-            speaker_value = None
-            if speaker is not None:
-                try:
-                    speaker_value = int(speaker)
-                except (TypeError, ValueError):
-                    speaker_value = None
-            if speaker_value is not None:
-                speaker_set.add(speaker_value)
+    phrases_sorted = sorted(phrases, key=lambda p: p.get("offsetInTicks", 0))
 
-            start = _ticks_to_seconds(phrase.get("offsetInTicks"))
-            end = None
-            duration = _ticks_to_seconds(phrase.get("durationInTicks"))
-            if start is not None and duration is not None:
-                end = start + duration
+    for phrase in phrases_sorted:
+        display = phrase.get("display")
+        if not display and phrase.get("nBest"):
+            display = phrase["nBest"][0].get("display")
+        display = (display or "").strip()
+        if not display:
+            continue
 
-            utterances.append(
-                {
-                    "start": start or 0.0,
-                    "end": end or 0.0,
-                    "speaker": speaker_value,
-                    "text": display,
-                }
-            )
+        speaker = phrase.get("speaker")
+        speaker_value = None
+        if speaker is not None:
+            try:
+                speaker_value = int(speaker)
+            except (TypeError, ValueError):
+                speaker_value = None
+        if speaker_value is not None:
+            speaker_set.add(speaker_value)
 
-        if not transcript_text:
-            transcript_text = " ".join(u["text"] for u in utterances).strip()
+        start = _ticks_to_seconds(phrase.get("offsetInTicks"))
+        end = None
+        duration = _ticks_to_seconds(phrase.get("durationInTicks"))
+        if start is not None and duration is not None:
+            end = start + duration
+
+        utterances.append(
+            {
+                "start": start or 0.0,
+                "end": end or 0.0,
+                "speaker": speaker_value,
+                "text": display,
+            }
+        )
+
+    transcript_text = " ".join(u["text"] for u in utterances).strip()
+
+    # Last-resort fallback: use combinedRecognizedPhrases only when
+    # recognizedPhrases returned nothing and diarization is off (single entry).
+    if not transcript_text:
+        combined = payload.get("combinedRecognizedPhrases") or []
+        if len(combined) == 1:
+            transcript_text = (combined[0].get("display") or "").strip()
 
     return transcript_text, utterances, len(speaker_set)
 
