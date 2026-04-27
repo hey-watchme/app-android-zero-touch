@@ -1573,6 +1573,13 @@ private fun DigitalColumn(
             actionsError = null
             return@LaunchedEffect
         }
+        val isRealTopicId = try { java.util.UUID.fromString(selectedTopicId); true } catch (_: Exception) { false }
+        if (!isRealTopicId) {
+            actionCandidates = emptyList()
+            actionsLoading = false
+            actionsError = null
+            return@LaunchedEffect
+        }
         actionsLoading = true
         actionsError = null
         try {

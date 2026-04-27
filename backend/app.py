@@ -2062,6 +2062,11 @@ def get_action_candidates(
     limit: int = 50,
 ):
     """List Action Candidates filtered by device / topic / status / intent."""
+    if topic_id is not None:
+        try:
+            uuid.UUID(topic_id)
+        except ValueError:
+            return {"candidates": [], "count": 0}
     rows = list_action_candidates(
         supabase=supabase,
         device_id=device_id,
