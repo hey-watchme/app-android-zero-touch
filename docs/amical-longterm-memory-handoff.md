@@ -1,10 +1,12 @@
 # Current Handoff
 
-更新日: `2026-04-25`
+更新日: `2026-04-27`（Slice 1 デプロイ完了）
 
 この文書は、次のセッションで ZeroTouch 開発を再開するための最新メモです。
 
 最上位の設計正本は [`conversation-action-platform.md`](./conversation-action-platform.md)。
+Ambient pipeline の直近リファクタリング詳細は [`ambient-pipeline-refactor-handoff.md`](./ambient-pipeline-refactor-handoff.md)。
+Knowledge Worker PoC 設計は [`poc-knowledge-worker-domain.md`](./poc-knowledge-worker-domain.md)。
 ZeroTouch は、現場会話を録音・保存するアプリではなく、
 会話を **業務アクション候補、外部システム用の下書き、長期記憶** に変換する基盤として進める。
 
@@ -16,17 +18,15 @@ ZeroTouch は、現場会話を録音・保存するアプリではなく、
 現場会話
   -> ASR / Card / Topic
   -> Fact / Wiki / Context
-  -> ZeroTouch Converter
+  -> ZeroTouch Converter  ← Slice 1 完成・デプロイ済み
   -> Action Candidate / Draft
   -> Human Review
   -> SaaS / ERP / 業務システム
 ```
 
-最初は飲食店の例で作る。
-
-ただし、ZeroTouch は飲食店専用ではない。
-同じ仕組みを、建設、医療、福祉、教育などにも展開する前提で設計する。
-業界・個社ごとに出力先 SaaS / ERP は変わるため、connector は今後増え続ける。
+最初のドメインは `knowledge_worker`（デザイン / PM / ベンダー調整）。
+自分の業務会話で PoC を進め、構造的完成形を確認してから他ドメインへ横展開する。
+（飲食店 domain schema は後続フェーズ）
 
 ---
 
@@ -70,11 +70,21 @@ ZeroTouch は、現場会話を録音・保存するアプリではなく、
 | 項目 | 状態 |
 |------|------|
 | Android Ambient Recording | 実装済み |
-| S3 upload | 実装済み |
+| S3 upload | 実装済み。`local_recording_id` による idempotency を追加 |
 | ASR | Speechmatics / Deepgram / Azure Speech Service 稼働 |
 | `zerotouch_sessions` | Card / 発話単位として利用 |
 | `zerotouch_conversation_topics` | Topic / 会話区間として利用 |
 | live topic model | Card と同時に active topic へ紐付ける方針 |
+| Topic finalize | idle finalize は backend scheduler、Ambient Off は Android の明示 trigger |
+
+2026-04-27 checkpoint:
+
+- Android の `loadSessions` / `refreshSessions` から `evaluate-pending` mutation を削除
+- `transcribe` trigger retry と API 例外分類を追加
+- WebRTC VAD 設定は未実装なので Silero に fallback
+- `Mp4AudioWriter` の release を `finally` で保証
+- `backend/migrations/015_add_session_upload_idempotency.sql` を追加
+- in-process scheduler は複数 worker 起動で重複実行リスクあり。次は advisory lock または Lambda / EventBridge 化
 
 ### Knowledge Layer
 
@@ -94,89 +104,63 @@ Action Candidate を作るための根拠、文脈、SOP、長期記憶として
 
 ---
 
-## 未実装
+## Slice 1 完了（2026-04-27 デプロイ済み）
 
-Action / Connector レイヤーはまだ未実装。
+### 実装内容
 
-必要なもの:
+| ファイル | 内容 |
+|---------|------|
+| `backend/migrations/016_create_action_candidates.sql` | `zerotouch_action_candidates` テーブル（JSONB payload/sources/review_state）|
+| `backend/services/domain_schemas/__init__.py` | domain registry |
+| `backend/services/domain_schemas/knowledge_worker.py` | `email_draft` intent 定義 + LLM プロンプトビルダー |
+| `backend/services/action_converter.py` | Topic+Facts → Action Candidates 変換、idempotency/supersede/review ロジック |
+| `backend/app.py` | 4 エンドポイント追加 |
+| `api/ZeroTouchApi.kt` | ActionCandidate data class + 3 API メソッド |
+| `ui/HomeDashboardScreen.kt` | 中央レーンのフッターを「Action 候補を生成」ボタンに差し替え。右レーンの SAAS_SLOTS ダミーを EmailDraftCard に差し替え |
 
-- domain schema registry
-- restaurant domain schema
-- intent extraction for action
-- `zerotouch_action_candidates`
-- `zerotouch_action_candidate_sources`
-- `zerotouch_action_reviews`
-- `zerotouch_connector_drafts`
-- `zerotouch_connector_runs`
-- Review Queue UI
-- 初期 connector
+### API エンドポイント（本番稼働中）
+
+```
+POST /api/action-candidates/from-topic/{topic_id}  → Action Candidate 生成
+GET  /api/action-candidates                         → 一覧（device_id/topic_id/status/intent_type/limit）
+GET  /api/action-candidates/{candidate_id}          → 詳細
+POST /api/action-candidates/{candidate_id}/review   → approve / reject / edit
+```
+
+### Slice 1 の制約（意図的な未実装）
+
+- intent は `email_draft` のみ。他は Slice 2 以降
+- 自動トリガーなし（Topic finalize 後、手動でボタンをタップ）
+- Gmail 実 API 連携なし。Android の Copy ボタンでクリップボード経由
+- payload の直接編集なし（approve / reject のステータス更新のみ）
 
 ---
 
-## 次に作るもの
+## 次に作るもの（Slice 2 候補）
 
-### 1. 飲食店 domain schema
+### 1. Android ビルドして E2E テスト
 
-最初の参照実装として、飲食店の intent と required fields を定義する。
+1. Android Studio で Run → redmi-001 にインストール
+2. 業務会話で「〇〇さんからメール来たから返信しなきゃ」とつぶやく
+3. Topic finalize 後、「Action 候補を生成」をタップ
+4. 右レーンに Email Draft Card が出現するか確認
+5. Copy → Gmail に貼り付けて検証
 
-候補:
+### 2. slack_message_draft intent の追加（Slice 2）
 
-| intent | 説明 | 出力例 |
-|--------|------|--------|
-| `change_guest_count` | テーブル人数変更 | 予約台帳の人数変更下書き |
-| `booking_update` | 予約の新規 / 変更 | 予約システム更新下書き |
-| `stock_alert` | 在庫不足 / 補充 | 発注システムへの補充メモ |
-| `quality_issue` | 顧客フィードバック / 品質問題 | 顧客メモ、再発防止タスク |
-| `equipment_request` | 備品や設備の依頼 | 店舗運用タスク |
-| `shift_note` | 人員、シフト、休憩の調整 | シフト管理メモ |
+`knowledge_worker.py` に intent を 1 件追加するだけ。
+converter prompt と normalize_payload を拡張。
 
-### 2. Action Candidate schema
+### 3. Gmail draft API 連携（Slice 2）
 
-最小テーブルを追加する。
+Copy ボタンの代わりに「Gmail に下書き作成」ボタン。
+Google Sign-In + Gmail API (`POST /gmail/v1/users/me/drafts`)。
+送信はしない。下書き作成のみ。
 
-```text
-zerotouch_action_candidates
-zerotouch_action_candidate_sources
-zerotouch_action_reviews
-zerotouch_connector_drafts
-zerotouch_connector_runs
-```
+### 4. 自動トリガー（Slice 3）
 
-最初は外部 SaaS を直接更新しない。
-`status=pending` の下書きを作り、人間が確認してから反映する。
-
-### 3. Converter service
-
-Topic / Fact / Context Profile / Wiki を入力にして、Action Candidate を生成する。
-
-最初は batch / manual trigger でよい。
-リアルタイム化は後で行う。
-
-### 4. Review Queue
-
-Android か WebViewer に、承認待ちの下書きを表示する。
-
-必要な操作:
-
-- 根拠会話を見る
-- payload を確認する
-- 編集する
-- 承認する
-- 却下する
-
-### 5. 初期 connector
-
-最初から特定SaaSの本番 API 更新に寄せない。
-
-候補:
-
-- JSON export
-- Google Sheets
-- Notion database
-- Slack notification
-- webhook
-
-その後、予約台帳、発注、在庫、POS などへ広げる。
+Topic finalize webhook → `POST /api/action-candidates/from-topic/{topic_id}` を自動呼び出し。
+confidence しきい値（≥0.8）で自動承認、それ以下は pending に残す。
 
 ---
 

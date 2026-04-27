@@ -57,25 +57,29 @@ class Mp4AudioWriter(
 
     fun stop() {
         val encoder = codec ?: return
-        val eosIndex = encoder.dequeueInputBuffer(10_000)
-        if (eosIndex >= 0) {
-            val ptsUs = (totalSamplesWritten * 1_000_000L) / sampleRate
-            encoder.queueInputBuffer(eosIndex, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-        }
-        drain(true)
-        encoder.stop()
-        encoder.release()
-        codec = null
-
-        muxer?.let {
-            if (muxerStarted) {
-                it.stop()
+        val currentMuxer = muxer
+        try {
+            val eosIndex = encoder.dequeueInputBuffer(10_000)
+            if (eosIndex >= 0) {
+                val ptsUs = (totalSamplesWritten * 1_000_000L) / sampleRate
+                encoder.queueInputBuffer(eosIndex, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
             }
-            it.release()
+            drain(true)
+        } finally {
+            runCatching { encoder.stop() }
+            runCatching { encoder.release() }
+            codec = null
+
+            currentMuxer?.let {
+                if (muxerStarted) {
+                    runCatching { it.stop() }
+                }
+                runCatching { it.release() }
+            }
+            muxer = null
+            muxerStarted = false
+            trackIndex = -1
         }
-        muxer = null
-        muxerStarted = false
-        trackIndex = -1
     }
 
     private fun drain(endOfStream: Boolean) {

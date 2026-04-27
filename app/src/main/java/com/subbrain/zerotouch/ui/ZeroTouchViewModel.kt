@@ -32,6 +32,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -145,7 +146,6 @@ class ZeroTouchViewModel : ViewModel() {
         private const val PROCESSING_TIMEOUT_MS = 20 * 60_000L
         private const val PROCESSING_MONITOR_INTERVAL_MS = 2_000L
         private const val TOPIC_IDLE_SECONDS = 30
-        private const val TOPIC_EVALUATE_COOLDOWN_MS = 60_000L
     }
 
     private val api = ZeroTouchApi()
@@ -161,8 +161,6 @@ class ZeroTouchViewModel : ViewModel() {
     private var hasMoreSessions = true
     private var currentTopicOffset = 0
     private var hasMoreTopics = true
-    private var topicEvaluateInFlight = false
-    private var lastTopicEvaluateAtMs = 0L
     private val optimisticTranscribing = mutableMapOf<String, Long>()
     private val processingMonitors = mutableMapOf<String, Job>()
     private var isLoadingFacts = false
@@ -665,10 +663,6 @@ class ZeroTouchViewModel : ViewModel() {
                     favoriteIds = favoriteIds.toSet()
                 )
                 rebuildHomeLiveInputFromAmbient()
-                triggerTopicEvaluatePendingInBackground(
-                    deviceId = viewScope.deviceId,
-                    allowEvaluate = viewScope.allowEvaluate
-                )
             } catch (e: Exception) {
                 Log.e(TAG, "loadSessions failed", e)
                 _uiState.value = _uiState.value.copy(
@@ -751,10 +745,6 @@ class ZeroTouchViewModel : ViewModel() {
                     )
                     rebuildHomeLiveInputFromAmbient()
                 }
-                triggerTopicEvaluatePendingInBackground(
-                    deviceId = viewScope.deviceId,
-                    allowEvaluate = viewScope.allowEvaluate
-                )
             } catch (e: Exception) {
                 Log.e(TAG, "refreshSessions failed", e)
                 _uiState.value = _uiState.value.copy(
@@ -869,11 +859,25 @@ class ZeroTouchViewModel : ViewModel() {
                 val deviceId = DeviceIdProvider.getDeviceId(context)
                 Log.d(TAG, "Upload starting: file=${audioFile.name}, size=${audioFile.length()}, device=$deviceId")
 
-                val uploadResult = api.uploadAudio(audioFile, deviceId)
+                val uploadResult = api.uploadAudio(
+                    file = audioFile,
+                    deviceId = deviceId,
+                    localRecordingId = UUID.randomUUID().toString()
+                )
                 Log.d(TAG, "Upload success: session=${uploadResult.session_id}")
 
                 val asrProvider = AmbientPreferences.getAsrProvider(context)
-                api.transcribe(uploadResult.session_id, autoChain = false, provider = asrProvider)
+                try {
+                    api.transcribe(uploadResult.session_id, autoChain = false, provider = asrProvider)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Transcribe trigger failed after upload: session=${uploadResult.session_id}", e)
+                    _uiState.value = _uiState.value.copy(
+                        isUploading = false,
+                        error = "アップロードは完了しましたが、文字起こし開始に失敗しました: ${e.message}"
+                    )
+                    startProcessingMonitor(context, uploadResult.session_id)
+                    return@launch
+                }
                 Log.d(TAG, "Transcribe triggered for session=${uploadResult.session_id}")
 
                 _uiState.value = _uiState.value.copy(isUploading = false)
@@ -1185,36 +1189,6 @@ class ZeroTouchViewModel : ViewModel() {
         } catch (e: Exception) {
             Log.e(TAG, "loadTopicCards failed: device=$deviceId offset=$offset", e)
             TopicPageResult(cards = emptyList(), rawCount = 0, hasMore = false)
-        }
-    }
-
-    private fun triggerTopicEvaluatePendingInBackground(
-        deviceId: String?,
-        allowEvaluate: Boolean
-    ) {
-        if (!allowEvaluate || deviceId.isNullOrBlank()) return
-        if (topicEvaluateInFlight) return
-
-        val now = System.currentTimeMillis()
-        if ((now - lastTopicEvaluateAtMs) < TOPIC_EVALUATE_COOLDOWN_MS) return
-
-        topicEvaluateInFlight = true
-        lastTopicEvaluateAtMs = now
-
-        viewModelScope.launch {
-            try {
-                val eval = api.evaluatePendingTopics(
-                    deviceId = deviceId,
-                    force = false,
-                    idleSeconds = TOPIC_IDLE_SECONDS,
-                    maxSessions = 200
-                )
-                Log.d(TAG, "topic evaluate-pending (bg): device=$deviceId result=${eval.result}")
-            } catch (e: Exception) {
-                Log.w(TAG, "topic evaluate-pending (bg) failed: device=$deviceId", e)
-            } finally {
-                topicEvaluateInFlight = false
-            }
         }
     }
 

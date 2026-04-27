@@ -20,6 +20,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 
 class AmbientRecordingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -71,20 +72,26 @@ class AmbientRecordingService : Service() {
         val outputDir = File(filesDir, "ambient/${TimeUtils.todayString()}")
         val selectedSource = AmbientPreferences.getAmbientAudioSource(this)
         val selectedVadEngine = AmbientPreferences.getVadEngine(this)
+        val resolvedVadEngine = when (selectedVadEngine) {
+            AmbientPreferences.VAD_ENGINE_WEBRTC -> AmbientPreferences.VAD_ENGINE_SILERO
+            else -> selectedVadEngine
+        }
         val audioSource = when (selectedSource) {
             "voice_recognition" -> MediaRecorder.AudioSource.VOICE_RECOGNITION
             else -> MediaRecorder.AudioSource.MIC
         }
         val hpfEnabled = AmbientPreferences.isHighPassFilterEnabled(this)
         val preprocessor = if (hpfEnabled) HighPassAudioPreprocessor() else NoOpAudioPreprocessor
-        val detector = when (selectedVadEngine) {
+        val detector = when (resolvedVadEngine) {
             AmbientPreferences.VAD_ENGINE_SILERO -> SileroVadDetector(applicationContext)
-            AmbientPreferences.VAD_ENGINE_WEBRTC -> WebRtcVadDetector()
             else -> VadDetector()
+        }
+        if (selectedVadEngine == AmbientPreferences.VAD_ENGINE_WEBRTC) {
+            Log.w(TAG, "WebRTC VAD is not implemented; falling back to $resolvedVadEngine")
         }
         Log.i(
             TAG,
-            "Ambient start requested trigger=$trigger audioSourcePref=$selectedSource audioSourceResolved=${audioSourceName(audioSource)}($audioSource) hpfEnabled=$hpfEnabled vadEnginePref=$selectedVadEngine detector=${detector.javaClass.simpleName} detectorConfig=${detector.debugConfig()} outputDir=${outputDir.absolutePath}"
+            "Ambient start requested trigger=$trigger audioSourcePref=$selectedSource audioSourceResolved=${audioSourceName(audioSource)}($audioSource) hpfEnabled=$hpfEnabled vadEnginePref=$selectedVadEngine vadEngineResolved=$resolvedVadEngine detector=${detector.javaClass.simpleName} detectorConfig=${detector.debugConfig()} outputDir=${outputDir.absolutePath}"
         )
         recorder = AmbientRecorder(
             outputDir = outputDir,
@@ -157,6 +164,7 @@ class AmbientRecordingService : Service() {
         )
         val current = AmbientStatus.state.value
         val entry = AmbientRecordingEntry(
+            localRecordingId = UUID.randomUUID().toString(),
             path = file.absolutePath,
             durationMs = durationMs,
             createdAt = System.currentTimeMillis(),
@@ -174,7 +182,11 @@ class AmbientRecordingService : Service() {
             var uploadedSessionId: String? = null
             try {
                 val api = ZeroTouchApi()
-                val upload = api.uploadAudio(file, deviceId)
+                val upload = api.uploadAudio(
+                    file = file,
+                    deviceId = deviceId,
+                    localRecordingId = entry.localRecordingId
+                )
                 uploadedSessionId = upload.session_id
                 val uploaded = AmbientStatus.state.value.recordings.map { item ->
                     if (item.path == file.absolutePath) {
