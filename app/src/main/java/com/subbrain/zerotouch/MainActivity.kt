@@ -193,7 +193,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     var showDeviceDrawer by remember { mutableStateOf(false) }
     var selectedDeviceForDrawer by remember { mutableStateOf<DeviceSummary?>(null) }
     var showContextOnboarding by remember { mutableStateOf(false) }
-    var isSidebarCollapsed by remember { mutableStateOf(false) }
+    var isSidebarCollapsed by remember { mutableStateOf(AmbientPreferences.isSidebarCollapsed(context)) }
     var ambientEnabled by remember { mutableStateOf(AmbientPreferences.isAmbientEnabled(context)) }
     var hasRecordPermission by remember {
         mutableStateOf(
@@ -587,7 +587,11 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                 workspaceLabel = workspaceLabel,
                 deviceLabel = deviceLabel,
                 isAmbientLive = ambientState.isRecording || ambientState.speech,
-                onToggleSidebar = { isSidebarCollapsed = !isSidebarCollapsed },
+                onToggleSidebar = {
+                    val next = !isSidebarCollapsed
+                    isSidebarCollapsed = next
+                    AmbientPreferences.setSidebarCollapsed(context, next)
+                },
                 onSelectTab = { tab ->
                     selectedTab = tab
                     showSettings = false

@@ -15,6 +15,7 @@ object AmbientPreferences {
     private const val KEY_IMPORTANCE_LEVELS = "importance_levels"
     private const val KEY_LIVE_TRANSCRIPT_HISTORY = "live_transcript_history"
     private const val KEY_LIVE_ASR_MODEL = "live_asr_model"
+    private const val KEY_SIDEBAR_COLLAPSED = "sidebar_collapsed"
     private const val DEFAULT_ASR_PROVIDER = "azure"
     private const val DEFAULT_LLM_PROVIDER = "openai"
     private const val DEFAULT_LLM_MODEL = "gpt-4.1-nano"
@@ -141,5 +142,15 @@ object AmbientPreferences {
     fun setLiveAsrModel(context: Context, model: String?) {
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_LIVE_ASR_MODEL, model?.trim()?.takeIf { it.isNotBlank() }).apply()
+    }
+
+    fun isSidebarCollapsed(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_SIDEBAR_COLLAPSED, true)
+    }
+
+    fun setSidebarCollapsed(context: Context, collapsed: Boolean) {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_SIDEBAR_COLLAPSED, collapsed).apply()
     }
 }
