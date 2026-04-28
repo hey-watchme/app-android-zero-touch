@@ -14,6 +14,7 @@ import kotlin.math.max
 class AmbientRecorder(
     private val outputDir: File,
     private val onSessionReady: (File, Long) -> Unit,
+    private val onRealtimeChunkReady: (File, Long) -> Unit = { _, _ -> },
     private val onStatusChanged: (String) -> Unit,
     private val onLevelChanged: (Float, Float, Boolean) -> Unit,
     private val onRecordingState: (Boolean, Long) -> Unit,
@@ -39,6 +40,8 @@ class AmbientRecorder(
     private val minSessionMs = 3_000
     private val preRollSeconds = 2
     private val bitRate = 64_000
+    private val realtimeChunkMs = 2_500L
+    private val minRealtimeChunkMs = 500L
 
     private val ringBuffer = PcmRingBuffer(sampleRate, preRollSeconds)
     private val frameBuffer = ShortArray(frameSamples)
@@ -78,6 +81,10 @@ class AmbientRecorder(
     private var activeSessionNonSpeechFrames = 0
     private var activeSessionReadErrors = 0
     private var activeSessionMaxSpeechScore = 0
+    private var realtimeChunkWriter: Mp4AudioWriter? = null
+    private var realtimeChunkFile: File? = null
+    private var realtimeChunkSamples: Long = 0
+    private var realtimeChunkStartElapsed: Long = 0L
 
     fun start() {
         if (running) {
@@ -234,6 +241,7 @@ class AmbientRecorder(
 
                 writer?.writePcm(frameBuffer, read)
                 recordedSamples += read
+                writeRealtimeChunk(frameBuffer, read, now)
 
                 val confirmedSpeech = speech &&
                     speechStreakFrames >= continueDebounceFrames &&
@@ -314,6 +322,7 @@ class AmbientRecorder(
         sessionStartElapsed = SystemClock.elapsedRealtime()
         lastRecordingTick = sessionStartElapsed
         recordingActive = true
+        startRealtimeChunkWriter(sessionStartElapsed)
         onStatusChanged("Recording")
         onRecordingState(true, 0)
         Log.i(
@@ -334,6 +343,7 @@ class AmbientRecorder(
         val lastSpeechAgoMs = if (lastSpeechAt > 0L) (now - lastSpeechAt).coerceAtLeast(0L) else -1L
 
         recordingActive = false
+        finalizeRealtimeChunk(force = true)
         writer?.stop()
         writer = null
 
@@ -372,6 +382,64 @@ class AmbientRecorder(
         clearActiveSessionMetrics()
         onStatusChanged("Listening")
         onRecordingState(false, durationMs)
+    }
+
+    private fun startRealtimeChunkWriter(nowElapsed: Long) {
+        outputDir.mkdirs()
+        val file = File(outputDir, "ambient_realtime_${System.currentTimeMillis()}_${UUID.randomUUID()}.m4a")
+        try {
+            realtimeChunkWriter = Mp4AudioWriter(sampleRate, 1, bitRate).also { it.start(file) }
+            realtimeChunkFile = file
+            realtimeChunkSamples = 0
+            realtimeChunkStartElapsed = nowElapsed
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to start realtime chunk writer: ${e.message}")
+            realtimeChunkWriter = null
+            realtimeChunkFile = null
+            realtimeChunkSamples = 0
+            realtimeChunkStartElapsed = 0L
+        }
+    }
+
+    private fun writeRealtimeChunk(samples: ShortArray, length: Int, nowElapsed: Long) {
+        if (realtimeChunkWriter == null) {
+            startRealtimeChunkWriter(nowElapsed)
+        }
+        val chunkWriter = realtimeChunkWriter ?: return
+        chunkWriter.writePcm(samples, length)
+        realtimeChunkSamples += length
+
+        val elapsed = nowElapsed - realtimeChunkStartElapsed
+        if (elapsed >= realtimeChunkMs) {
+            finalizeRealtimeChunk(force = false)
+            if (recordingActive) {
+                startRealtimeChunkWriter(nowElapsed)
+            }
+        }
+    }
+
+    private fun finalizeRealtimeChunk(force: Boolean) {
+        val chunkWriter = realtimeChunkWriter ?: return
+        val file = realtimeChunkFile
+        realtimeChunkWriter = null
+        realtimeChunkFile = null
+        val sampleCount = realtimeChunkSamples
+        realtimeChunkSamples = 0
+        realtimeChunkStartElapsed = 0L
+
+        runCatching { chunkWriter.stop() }
+
+        val durationMs = ceil(sampleCount.toDouble() * 1000 / sampleRate).toLong()
+        if (file == null) return
+        if (durationMs < minRealtimeChunkMs) {
+            runCatching { file.delete() }
+            return
+        }
+        if (durationMs <= 0L) {
+            runCatching { file.delete() }
+            return
+        }
+        onRealtimeChunkReady(file, durationMs)
     }
 
     private fun updateVadDebugStats(result: VadResult, now: Long) {

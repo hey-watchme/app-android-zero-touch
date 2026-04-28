@@ -101,6 +101,7 @@ class AmbientRecordingService : Service() {
         recorder = AmbientRecorder(
             outputDir = outputDir,
             onSessionReady = { file, durationMs -> handleSessionReady(file, durationMs) },
+            onRealtimeChunkReady = { file, durationMs -> handleRealtimeChunkReady(file, durationMs) },
             onStatusChanged = { status ->
                 AmbientStatus.update(status = status)
                 updateNotification(status)
@@ -199,39 +200,6 @@ class AmbientRecordingService : Service() {
         scope.launch {
             var uploadedSessionId: String? = null
             try {
-                val api = ZeroTouchApi()
-                val liveSessionId = ensureLiveSession(api)
-                if (!liveSessionId.isNullOrBlank()) {
-                    val chunkIndex = allocateLiveChunkIndex()
-                    try {
-                        val realtime = api.transcribeRealtimeChunk(
-                            file = file,
-                            liveSessionId = liveSessionId,
-                            chunkIndex = chunkIndex
-                        )
-                        Log.d(
-                            TAG,
-                            "Realtime transcribe sent liveSession=$liveSessionId chunk=$chunkIndex textLength=${realtime.text?.length ?: 0}"
-                        )
-                        val text = realtime.text?.trim().orEmpty()
-                        if (text.isNotBlank()) {
-                            val history = (AmbientStatus.state.value.liveTranscriptHistory + text).takeLast(12)
-                            AmbientStatus.update(
-                                liveTranscriptLatest = text,
-                                liveTranscriptHistory = history,
-                                lastEvent = "Realtime updated:$chunkIndex"
-                            )
-                        } else {
-                            AmbientStatus.update(lastEvent = "Realtime updated:$chunkIndex")
-                        }
-                    } catch (realtimeError: Exception) {
-                        Log.w(
-                            TAG,
-                            "Realtime transcribe failed liveSession=$liveSessionId chunk=$chunkIndex error=${realtimeError.message}"
-                        )
-                        AmbientStatus.update(lastEvent = "Realtime failed:$chunkIndex")
-                    }
-                }
                 if (!ENABLE_LEGACY_BATCH_PIPELINE) {
                     val retained = AmbientStatus.state.value.recordings.map { item ->
                         if (item.path == file.absolutePath) {
@@ -247,8 +215,10 @@ class AmbientRecordingService : Service() {
                         recordings = retained.take(MAX_RECORDINGS),
                         lastEvent = "Live-only chunk completed"
                     )
+                    runCatching { file.delete() }
                     return@launch
                 }
+                val api = ZeroTouchApi()
                 val upload = api.uploadAudio(
                     file = file,
                     deviceId = deviceId,
@@ -313,6 +283,45 @@ class AmbientRecordingService : Service() {
                     recordings = retained.take(MAX_RECORDINGS),
                     lastEvent = if (sessionId == null) "Upload failed" else "Transcribe failed:$sessionId"
                 )
+            }
+        }
+    }
+
+    private fun handleRealtimeChunkReady(file: File, durationMs: Long) {
+        scope.launch {
+            try {
+                val api = ZeroTouchApi()
+                val liveSessionId = ensureLiveSession(api)
+                if (liveSessionId.isNullOrBlank()) {
+                    AmbientStatus.update(lastEvent = "Realtime skipped:no_live_session")
+                    return@launch
+                }
+                val chunkIndex = allocateLiveChunkIndex()
+                val realtime = api.transcribeRealtimeChunk(
+                    file = file,
+                    liveSessionId = liveSessionId,
+                    chunkIndex = chunkIndex
+                )
+                val text = realtime.text?.trim().orEmpty()
+                if (text.isNotBlank()) {
+                    val history = (AmbientStatus.state.value.liveTranscriptHistory + text).takeLast(24)
+                    AmbientStatus.update(
+                        liveTranscriptLatest = text,
+                        liveTranscriptHistory = history,
+                        lastEvent = "Realtime updated:$chunkIndex"
+                    )
+                } else {
+                    AmbientStatus.update(lastEvent = "Realtime empty:$chunkIndex")
+                }
+                Log.d(
+                    TAG,
+                    "Realtime transcribe sent chunk=$chunkIndex durationMs=$durationMs textLength=${text.length}"
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Realtime chunk failed file=${file.name} error=${e.message}")
+                AmbientStatus.update(lastEvent = "Realtime failed")
+            } finally {
+                runCatching { file.delete() }
             }
         }
     }

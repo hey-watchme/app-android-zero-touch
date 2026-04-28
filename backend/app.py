@@ -64,6 +64,7 @@ LIVE_SESSION_TABLE = "zerotouch_live_sessions"
 LIVE_TRANSCRIPT_TABLE = "zerotouch_live_transcripts"
 LIVE_KEYPOINT_TABLE = "zerotouch_live_keypoints"
 REALTIME_TRANSCRIBE_MODEL = os.getenv("REALTIME_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+REALTIME_TRANSCRIBE_PERSIST = os.getenv("REALTIME_TRANSCRIBE_PERSIST", "false").lower() == "true"
 
 
 # --- Globals ---
@@ -1055,18 +1056,20 @@ async def transcribe_realtime(
     live_session_id: str = Form(...),
     chunk_index: int = Form(...),
 ):
-    session_rows = (
-        supabase.table(LIVE_SESSION_TABLE)
-        .select("id, status, is_deleted")
-        .eq("id", live_session_id)
-        .eq("is_deleted", False)
-        .limit(1)
-        .execute()
-        .data
-        or []
-    )
-    if not session_rows:
-        raise HTTPException(status_code=404, detail="Live session not found")
+    # Display-first mode can skip per-chunk DB validation to minimize latency.
+    if REALTIME_TRANSCRIBE_PERSIST:
+        session_rows = (
+            supabase.table(LIVE_SESSION_TABLE)
+            .select("id, status, is_deleted")
+            .eq("id", live_session_id)
+            .eq("is_deleted", False)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if not session_rows:
+            raise HTTPException(status_code=404, detail="Live session not found")
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -1098,9 +1101,19 @@ async def transcribe_realtime(
 
     text = getattr(response, "text", None) or ""
     language = getattr(response, "language", None)
-    metadata = response.model_dump() if hasattr(response, "model_dump") else {}
 
     now = datetime.now().isoformat()
+    if not REALTIME_TRANSCRIBE_PERSIST:
+        return {
+            "live_session_id": live_session_id,
+            "chunk_index": int(chunk_index),
+            "text": text,
+            "persisted": False,
+            "model": model,
+            "language": language,
+            "processed_at": now,
+        }
+
     transcript_payload = {
         "id": str(uuid.uuid4()),
         "live_session_id": live_session_id,
@@ -1109,7 +1122,7 @@ async def transcribe_realtime(
         "provider": "openai",
         "model": model,
         "language": language,
-        "metadata": metadata,
+        "metadata": {},
         "created_at": now,
         "updated_at": now,
     }
@@ -1127,6 +1140,7 @@ async def transcribe_realtime(
         "live_session_id": live_session_id,
         "chunk_index": int(chunk_index),
         "text": text,
+        "persisted": True,
         "transcript": stored_rows[0] if stored_rows else transcript_payload,
     }
 
