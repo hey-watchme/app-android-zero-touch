@@ -8,7 +8,7 @@ import os
 import uuid
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
 import boto3
@@ -60,6 +60,10 @@ DEVICE_TABLE = "zerotouch_devices"
 CONTEXT_PROFILE_TABLE = "zerotouch_context_profiles"
 FACT_TABLE = "zerotouch_facts"
 DEVICE_SETTINGS_TABLE = "zerotouch_device_settings"
+LIVE_SESSION_TABLE = "zerotouch_live_sessions"
+LIVE_TRANSCRIPT_TABLE = "zerotouch_live_transcripts"
+LIVE_KEYPOINT_TABLE = "zerotouch_live_keypoints"
+REALTIME_TRANSCRIBE_MODEL = os.getenv("REALTIME_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
 
 
 # --- Globals ---
@@ -293,6 +297,15 @@ class ContextProfileRequest(BaseModel):
     prompt_preamble: Optional[str] = None
 
 
+class LiveSessionCreateRequest(BaseModel):
+    device_id: str
+    workspace_id: Optional[str] = None
+    share_token: Optional[str] = None
+    language_primary: Optional[str] = "ja"
+    visibility: Optional[str] = "public"
+    metadata: Optional[Dict[str, Any]] = None
+
+
 # --- Health ---
 
 @app.get("/health")
@@ -382,6 +395,15 @@ def _insert_session_compat(payload: Dict[str, Any]) -> None:
                     candidate.pop(column, None)
                 continue
             raise
+
+
+def _looks_like_duplicate_share_token(error: Exception) -> bool:
+    message = str(error).lower()
+    return "duplicate key value" in message and "share_token" in message
+
+
+def _generate_live_share_token() -> str:
+    return uuid.uuid4().hex[:12]
 
 
 def _resolve_workspace_id(
@@ -870,6 +892,243 @@ async def upload_audio(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+# --- Live Support ---
+
+@app.post("/api/live-sessions")
+def create_live_session(body: LiveSessionCreateRequest):
+    now_dt = datetime.now()
+    now = now_dt.isoformat()
+    expires_at = (now_dt + timedelta(days=30)).isoformat()
+    requested_token = (body.share_token or "").strip() or None
+    requested_visibility = (body.visibility or "public").strip().lower()
+    if requested_visibility not in {"public", "private", "deleted"}:
+        raise HTTPException(status_code=400, detail="visibility must be one of: public, private, deleted")
+    max_attempts = 5
+
+    for _ in range(max_attempts):
+        share_token = requested_token or _generate_live_share_token()
+        payload = {
+            "id": str(uuid.uuid4()),
+            "device_id": body.device_id,
+            "workspace_id": _resolve_workspace_id(
+                device_id=body.device_id,
+                workspace_id=body.workspace_id,
+            ),
+            "share_token": share_token,
+            "status": "active",
+            "started_at": now,
+            "expires_at": expires_at,
+            "language_primary": body.language_primary or "ja",
+            "visibility": requested_visibility,
+            "metadata": body.metadata or {},
+            "created_at": now,
+            "updated_at": now,
+        }
+        try:
+            row = (
+                supabase.table(LIVE_SESSION_TABLE)
+                .insert(payload)
+                .execute()
+                .data
+                or []
+            )
+            return row[0] if row else payload
+        except Exception as exc:
+            # If caller explicitly requested the token and it already exists, fail fast.
+            if requested_token and _looks_like_duplicate_share_token(exc):
+                raise HTTPException(status_code=409, detail="share_token already exists")
+            if requested_token or not _looks_like_duplicate_share_token(exc):
+                raise HTTPException(status_code=500, detail=f"Failed to create live session: {exc}")
+            continue
+
+    raise HTTPException(status_code=500, detail="Failed to generate a unique share_token")
+
+
+@app.get("/api/live-sessions/{live_session_id}")
+def get_live_session(live_session_id: str):
+    rows = (
+        supabase.table(LIVE_SESSION_TABLE)
+        .select("*")
+        .eq("id", live_session_id)
+        .eq("is_deleted", False)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Live session not found")
+    return rows[0]
+
+
+@app.get("/api/live-sessions/by-token/{share_token}")
+def get_live_session_by_share_token(share_token: str):
+    rows = (
+        supabase.table(LIVE_SESSION_TABLE)
+        .select("*")
+        .eq("share_token", share_token)
+        .eq("is_deleted", False)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Live session not found")
+    return rows[0]
+
+
+@app.post("/api/live-sessions/{live_session_id}/end")
+def end_live_session(live_session_id: str):
+    now = datetime.now().isoformat()
+    rows = (
+        supabase.table(LIVE_SESSION_TABLE)
+        .update(
+            {
+                "status": "ended",
+                "ended_at": now,
+                "updated_at": now,
+            }
+        )
+        .eq("id", live_session_id)
+        .eq("is_deleted", False)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Live session not found")
+    return {"status": "ended", "live_session": rows[0]}
+
+
+@app.post("/api/live-sessions/{live_session_id}/delete")
+def delete_live_session(live_session_id: str):
+    now = datetime.now().isoformat()
+    rows = (
+        supabase.table(LIVE_SESSION_TABLE)
+        .update(
+            {
+                "status": "deleted",
+                "visibility": "deleted",
+                "is_deleted": True,
+                "deleted_at": now,
+                "deleted_reason": "manual",
+                "updated_at": now,
+            }
+        )
+        .eq("id", live_session_id)
+        .eq("is_deleted", False)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        return {
+            "status": "deleted",
+            "live_session_id": live_session_id,
+            "already_deleted": True,
+        }
+    return {"status": "deleted", "live_session": rows[0]}
+
+
+@app.get("/api/live-sessions/{live_session_id}/transcripts")
+def list_live_session_transcripts(live_session_id: str, limit: int = 200, offset: int = 0):
+    query = (
+        supabase.table(LIVE_TRANSCRIPT_TABLE)
+        .select("*")
+        .eq("live_session_id", live_session_id)
+        .order("chunk_index", desc=False)
+        .order("created_at", desc=False)
+        .range(offset, offset + limit - 1)
+    )
+    rows = query.execute().data or []
+    return {"transcripts": rows, "count": len(rows)}
+
+
+# --- Realtime Transcribe ---
+
+@app.post("/api/transcribe/realtime")
+async def transcribe_realtime(
+    file: UploadFile = File(...),
+    live_session_id: str = Form(...),
+    chunk_index: int = Form(...),
+):
+    session_rows = (
+        supabase.table(LIVE_SESSION_TABLE)
+        .select("id, status, is_deleted")
+        .eq("id", live_session_id)
+        .eq("is_deleted", False)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not session_rows:
+        raise HTTPException(status_code=404, detail="Live session not found")
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured")
+
+    try:
+        from openai import OpenAI
+    except ModuleNotFoundError as exc:
+        raise HTTPException(status_code=500, detail="openai package is not installed") from exc
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Audio chunk is empty")
+
+    client = OpenAI(api_key=api_key)
+    model = REALTIME_TRANSCRIBE_MODEL
+
+    try:
+        response = client.audio.transcriptions.create(
+            model=model,
+            file=(
+                file.filename or f"chunk-{chunk_index}.webm",
+                content,
+                file.content_type or "audio/webm",
+            ),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Realtime transcription failed: {exc}")
+
+    text = getattr(response, "text", None) or ""
+    language = getattr(response, "language", None)
+    metadata = response.model_dump() if hasattr(response, "model_dump") else {}
+
+    now = datetime.now().isoformat()
+    transcript_payload = {
+        "id": str(uuid.uuid4()),
+        "live_session_id": live_session_id,
+        "chunk_index": int(chunk_index),
+        "text": text,
+        "provider": "openai",
+        "model": model,
+        "language": language,
+        "metadata": metadata,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    stored_rows = (
+        supabase.table(LIVE_TRANSCRIPT_TABLE)
+        .upsert(transcript_payload, on_conflict="live_session_id,chunk_index")
+        .execute()
+        .data
+        or []
+    )
+    supabase.table(LIVE_SESSION_TABLE).update({"updated_at": now}).eq("id", live_session_id).execute()
+
+    return {
+        "live_session_id": live_session_id,
+        "chunk_index": int(chunk_index),
+        "text": text,
+        "transcript": stored_rows[0] if stored_rows else transcript_payload,
+    }
 
 
 # --- Transcribe ---

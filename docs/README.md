@@ -6,29 +6,39 @@ ZeroTouch は、現場の会話を単に記録するアプリではなく、
 会話を **業務システムが処理できる Action / Draft / Knowledge** に変換するための
 Conversation Action Platform です。
 
+2026-04-28 時点で、当面の実装優先は **Live Support ピボット（Live モード）** です。  
+まず `live-support-pivot-spec.md` を読み、その上で従来の ZeroTouch 設計文書を参照してください。
+
+画面情報設計は `Home`（MeMo Live）/ `Dashboard`（ZeroTouch）を基準にします。
+
 ---
 
 ## まず読むもの
 
-1. **`conversation-action-platform.md`**
+1. **`live-support-pivot-spec.md`**
+   - 当面の最優先仕様（Live モードへのピボット）
+   - 「会話中のライブサポート」を先に実装するための要件・Phase 設計
+   - ZeroTouch モードとの共存方針、デュアル ASR 方針、Take-Home ページ方針
+
+2. **`conversation-action-platform.md`**
    - ZeroTouch の現在の最上位方針
    - 会話を SaaS / ERP / 業務システムの入力へ変換する設計
    - 飲食店を最初の参照ケースにしつつ、建設、医療、福祉、教育へ広げる考え方
 
-2. **`poc-knowledge-worker-domain.md`**
+3. **`poc-knowledge-worker-domain.md`**
    - 最初の PoC を「自分の業務（ナレッジワーカー）」で実装するための設計
    - 6 つの出力カテゴリ / 4 つの最小構成 / 必要データ / 実装段階
 
-3. **`amical-longterm-memory-handoff.md`**
+4. **`amical-longterm-memory-handoff.md`**
    - 現在の実装状態と次にやること
    - 既存の Card / Topic / Wiki / Query を、Action 変換基盤の下位レイヤーとしてどう扱うか
 
-4. **`knowledge-pipeline-v2.md`**
+5. **`knowledge-pipeline-v2.md`**
    - Wiki / 長期記憶レイヤーの設計
    - Raw sources を残し、Fact / Wiki / Query として蓄積する仕組み
    - Action Candidate の根拠、SOP、文脈補助として使う
 
-5. **`ambient-pipeline-refactor-handoff.md`**
+6. **`ambient-pipeline-refactor-handoff.md`**
    - Ambient 録音 / upload idempotency / ASR retry / Topic finalize scheduler の再開メモ
    - 今回の変更、検証済みコマンド、残タスク、scheduler 並行性リスク
 
@@ -38,6 +48,7 @@ Conversation Action Platform です。
 
 | ファイル | 内容 | 状態 |
 |---------|------|------|
+| `live-support-pivot-spec.md` | Live モードへのピボット仕様（当面の実装優先） | ✅ 最新 |
 | `conversation-action-platform.md` | 会話を Action / Draft / SaaS 入力へ変換する最上位設計 | ✅ 最新 |
 | `poc-knowledge-worker-domain.md` | 最初の PoC をナレッジワーカードメインで作る設計 | ✅ 最新 |
 | `amical-longterm-memory-handoff.md` | 現在の実装状態と再開ポイント | ✅ 更新対象 |
@@ -77,9 +88,7 @@ Conversation Action Platform です。
 
 ## 次に作るもの
 
-1. 飲食店 domain schema
-2. `zerotouch_action_candidates` 系テーブル
-3. Topic / Fact から Action Candidate を生成する backend service
-4. Action Review Queue
-5. 初期 connector: JSON export / Google Sheets / Notion など
-6. 業界・個社ごとの connector 追加
+1. `Live` モード Phase 1（`live-support-pivot-spec.md`）
+2. Live セッション / リアルタイム転写 / Take-Home ページの実装
+3. Live と既存 Topic / Fact / Wiki の接続
+4. その後に ZeroTouch モード側の Action Candidate / Review / Connector を拡張

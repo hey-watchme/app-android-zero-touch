@@ -86,12 +86,15 @@ import com.subbrain.zerotouch.ui.QueryWebViewScreen
 import com.subbrain.zerotouch.ui.SettingsSheet
 import com.subbrain.zerotouch.ui.TimelineScreen
 import com.subbrain.zerotouch.ui.HomeDashboardScreen
+import com.subbrain.zerotouch.ui.MemoLiveHomeScreen
 import com.subbrain.zerotouch.ui.VoiceMemoScreen
 import com.subbrain.zerotouch.ui.WikiScreen
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.outlined.QuestionAnswer
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.outlined.Dashboard
 import com.subbrain.zerotouch.ui.ZeroTouchUiState
 import com.subbrain.zerotouch.ui.ZeroTouchViewModel
 import com.subbrain.zerotouch.ui.context.ContextOnboardingScreen
@@ -393,16 +396,18 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
         ownerName = accountLabel
     )
     val currentPageTitle = when (selectedTab) {
-        1 -> "タイムライン"
-        2 -> "Wiki"
-        3 -> "Query"
-        else -> "ホーム"
+        1 -> "Dashboard"
+        2 -> "タイムライン"
+        3 -> "Wiki"
+        4 -> "Query"
+        else -> "Home"
     }
     val currentPageSubtitle = when (selectedTab) {
-        1 -> "日付ごとにカードをたどって確認"
-        2 -> "ナレッジベースを閲覧"
-        3 -> "Wikiに質問する"
-        else -> if (activeTopicCount > 0) "$activeTopicCount 件のライブトピックを監視中" else "会話カードとトピックを一覧で確認"
+        1 -> "ZeroTouch の事後変換と業務下書きを確認"
+        2 -> "日付ごとにカードをたどって確認"
+        3 -> "ナレッジベースを閲覧"
+        4 -> "Wikiに質問する"
+        else -> if (activeTopicCount > 0) "$activeTopicCount 件のライブトピックを監視中" else "MeMo Live を開始"
     }
     val ambientStatusLabel = when {
         ambientState.isRecording -> "Recording"
@@ -607,7 +612,20 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                             .background(MaterialTheme.colorScheme.background)
                     ) {
                         when (selectedTab) {
-                            0 -> HomeDashboardScreen(
+                            0 -> MemoLiveHomeScreen(
+                                modifier = Modifier.fillMaxSize(),
+                                uiState = uiState,
+                                workspaceLabel = workspaceLabel,
+                                ambientEnabled = ambientEnabled,
+                                ambientStatusLabel = ambientStatusLabel,
+                                isAmbientLive = ambientState.isRecording || ambientState.speech,
+                                liveSessionId = ambientState.liveSessionId,
+                                liveShareToken = ambientState.liveShareToken,
+                                liveTranscriptLatest = ambientState.liveTranscriptLatest,
+                                liveTranscriptHistory = ambientState.liveTranscriptHistory,
+                                onToggleAmbient = handleAmbientToggle
+                            )
+                            1 -> HomeDashboardScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 uiState = uiState,
                                 ambientEnabled = ambientEnabled,
@@ -619,7 +637,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 onSelectCard = { id -> viewModel.selectCard(id) },
                                 onDismissDetail = { viewModel.clearSelection() }
                             )
-                            1 -> TimelineScreen(
+                            2 -> TimelineScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 uiState = uiState,
                                 onDeleteCard = { id -> viewModel.deleteCard(context, id) },
@@ -631,11 +649,11 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 onRetranscribeEnglish = { id -> viewModel.retranscribeSession(context, id, language = "en") },
                                 onRetryTranscribe = { id -> viewModel.retryTranscribeSession(context, id) }
                             )
-                            2 -> WikiScreen(
+                            3 -> WikiScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 deviceId = uiState.selectedDeviceId
                             )
-                            3 -> QueryWebViewScreen(modifier = Modifier.fillMaxSize())
+                            4 -> QueryWebViewScreen(modifier = Modifier.fillMaxSize())
                             else -> VoiceMemoScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 uiState = uiState,
@@ -993,33 +1011,45 @@ private fun ZeroTouchSidebar(
                 }
 
                 SidebarDestination(
-                    label = "ホーム",
+                    label = "Home",
                     selected = selectedTab == 0,
                     isCollapsed = isCollapsed,
                     badgeCount = activeTopicCount,
                     selectedIcon = {
-                        Icon(imageVector = Icons.Filled.Home, contentDescription = "ホーム", modifier = Modifier.size(20.dp))
+                        Icon(imageVector = Icons.Filled.Home, contentDescription = "Home", modifier = Modifier.size(20.dp))
                     },
                     icon = {
-                        Icon(imageVector = Icons.Outlined.Home, contentDescription = "ホーム", modifier = Modifier.size(20.dp))
+                        Icon(imageVector = Icons.Outlined.Home, contentDescription = "Home", modifier = Modifier.size(20.dp))
                     },
                     onClick = { onSelectTab(0) }
                 )
                 SidebarDestination(
-                    label = "タイムライン",
+                    label = "Dashboard",
                     selected = selectedTab == 1,
                     isCollapsed = isCollapsed,
                     selectedIcon = {
-                        Icon(imageVector = Icons.Filled.Schedule, contentDescription = "タイムライン", modifier = Modifier.size(20.dp))
+                        Icon(imageVector = Icons.Filled.Dashboard, contentDescription = "Dashboard", modifier = Modifier.size(20.dp))
                     },
                     icon = {
-                        Icon(imageVector = Icons.Outlined.Schedule, contentDescription = "タイムライン", modifier = Modifier.size(20.dp))
+                        Icon(imageVector = Icons.Outlined.Dashboard, contentDescription = "Dashboard", modifier = Modifier.size(20.dp))
                     },
                     onClick = { onSelectTab(1) }
                 )
                 SidebarDestination(
-                    label = "Wiki",
+                    label = "Timeline",
                     selected = selectedTab == 2,
+                    isCollapsed = isCollapsed,
+                    selectedIcon = {
+                        Icon(imageVector = Icons.Filled.Schedule, contentDescription = "Timeline", modifier = Modifier.size(20.dp))
+                    },
+                    icon = {
+                        Icon(imageVector = Icons.Outlined.Schedule, contentDescription = "Timeline", modifier = Modifier.size(20.dp))
+                    },
+                    onClick = { onSelectTab(2) }
+                )
+                SidebarDestination(
+                    label = "Wiki",
+                    selected = selectedTab == 3,
                     isCollapsed = isCollapsed,
                     selectedIcon = {
                         Icon(imageVector = Icons.Filled.MenuBook, contentDescription = "Wiki", modifier = Modifier.size(20.dp))
@@ -1027,11 +1057,11 @@ private fun ZeroTouchSidebar(
                     icon = {
                         Icon(imageVector = Icons.Outlined.MenuBook, contentDescription = "Wiki", modifier = Modifier.size(20.dp))
                     },
-                    onClick = { onSelectTab(2) }
+                    onClick = { onSelectTab(3) }
                 )
                 SidebarDestination(
                     label = "Query",
-                    selected = selectedTab == 3,
+                    selected = selectedTab == 4,
                     isCollapsed = isCollapsed,
                     selectedIcon = {
                         Icon(imageVector = Icons.Filled.QuestionAnswer, contentDescription = "Query", modifier = Modifier.size(20.dp))
@@ -1039,7 +1069,7 @@ private fun ZeroTouchSidebar(
                     icon = {
                         Icon(imageVector = Icons.Outlined.QuestionAnswer, contentDescription = "Query", modifier = Modifier.size(20.dp))
                     },
-                    onClick = { onSelectTab(3) }
+                    onClick = { onSelectTab(4) }
                 )
 
                 // ── Bottom: account avatar + settings ────────────────

@@ -7,6 +7,20 @@ Conversation Action Platform です。
 価値は録音や文字起こしそのものではなく、現場の非構造な会話を
 SaaS / ERP / 業務システムに渡せる入力、下書き、タスク、SOP に変換することにあります。
 
+## 重要なピボット（2026-04-28）
+
+当面のプロダクトフォーカスは、**「会話の事後変換」から「会話中のライブサポート（Live モード）」へ移行**しています。  
+最終的な方向性（会話 → Action / Draft / Knowledge）は維持しつつ、初期価値の入口を Live 体験に寄せる方針です。
+
+- ピボット仕様書（ライブモード正本）: `docs/live-support-pivot-spec.md`
+- 上位設計（最終形態の正本）: `docs/conversation-action-platform.md`
+
+モード整理:
+
+- `Live モード`: 会話中のリアルタイム表示 + Share（QR）で持ち帰り
+- `ZeroTouch モード`: 既存の Topic / Fact / Wiki / Action Candidate 基盤（業務統合側）
+- 画面IA: `Home` = MeMo Live、`Dashboard` = ZeroTouch（既存機能は削除せず残す）
+
 ## リポジトリと作業対象（重要）
 
 このREADMEが指す実体のリポジトリは **ZeroTouch専用リポジトリ** です。  
@@ -30,6 +44,7 @@ SaaS / ERP / 業務システムに渡せる入力、下書き、タスク、SOP 
 
 最上位のプロダクト方針は、次の文書を正本にする。
 
+- **Live Support ピボット仕様（当面の実装優先）**: `docs/live-support-pivot-spec.md`
 - **会話 → 業務アクション変換の設計正本**: `docs/conversation-action-platform.md`
 - **現在の作業引き継ぎ**: `docs/amical-longterm-memory-handoff.md`
 - **Wiki / 長期記憶レイヤーの設計**: `docs/knowledge-pipeline-v2.md`
@@ -88,6 +103,9 @@ Android 側の Topic / Card を Web で閲覧できる読み取り専用 MVP を
 > **DB は `zerotouch_sessions`（Card）と `zerotouch_conversation_topics`（Topic）を中心に使う POC** です。WatchMe 本家の既存テーブル/パイプラインには触れません。
 
 ## Action / Connector レイヤー（次の実装対象）
+
+※ これは **ZeroTouch モード側** の中長期ロードマップです。  
+直近の最優先実装は `docs/live-support-pivot-spec.md` の `Phase 1: Minimum Live Display` です。
 
 次に作る中核は、会話から業務イベントを抽出し、外部システムに渡せる下書きへ変換する層です。
 

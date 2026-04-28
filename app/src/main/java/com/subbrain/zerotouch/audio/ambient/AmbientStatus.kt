@@ -14,6 +14,10 @@ data class AmbientUiState(
     val recordingElapsedMs: Long = 0,
     val recordingHeartbeatAt: Long = 0,
     val recordings: List<AmbientRecordingEntry> = emptyList(),
+    val liveSessionId: String? = null,
+    val liveShareToken: String? = null,
+    val liveTranscriptLatest: String? = null,
+    val liveTranscriptHistory: List<String> = emptyList(),
     val lastEvent: String? = null,
     val eventSeq: Long = 0
 )
@@ -43,6 +47,13 @@ object AmbientStatus {
         recordingElapsedMs: Long? = null,
         recordingHeartbeatAt: Long? = null,
         recordings: List<AmbientRecordingEntry>? = null,
+        liveSessionId: String? = null,
+        liveShareToken: String? = null,
+        liveTranscriptLatest: String? = null,
+        liveTranscriptHistory: List<String>? = null,
+        clearLiveSessionId: Boolean = false,
+        clearLiveShareToken: Boolean = false,
+        clearLiveTranscript: Boolean = false,
         lastEvent: String? = null
     ) {
         val current = _state.value
@@ -58,6 +69,10 @@ object AmbientStatus {
             recordingElapsedMs = recordingElapsedMs ?: current.recordingElapsedMs,
             recordingHeartbeatAt = recordingHeartbeatAt ?: current.recordingHeartbeatAt,
             recordings = recordings ?: current.recordings,
+            liveSessionId = if (clearLiveSessionId) null else (liveSessionId ?: current.liveSessionId),
+            liveShareToken = if (clearLiveShareToken) null else (liveShareToken ?: current.liveShareToken),
+            liveTranscriptLatest = if (clearLiveTranscript) null else (liveTranscriptLatest ?: current.liveTranscriptLatest),
+            liveTranscriptHistory = if (clearLiveTranscript) emptyList() else (liveTranscriptHistory ?: current.liveTranscriptHistory),
             lastEvent = lastEvent ?: current.lastEvent,
             eventSeq = nextEventSeq
         )

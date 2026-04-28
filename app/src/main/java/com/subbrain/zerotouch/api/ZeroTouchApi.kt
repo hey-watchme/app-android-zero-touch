@@ -437,6 +437,37 @@ data class ActionReviewResponse(
     val reason: String? = null
 )
 
+data class LiveSession(
+    val id: String,
+    val device_id: String,
+    val workspace_id: String? = null,
+    val share_token: String,
+    val status: String,
+    val started_at: String? = null,
+    val ended_at: String? = null,
+    val expires_at: String? = null,
+    val visibility: String? = null
+)
+
+data class LiveSessionCreateRequest(
+    val device_id: String,
+    val workspace_id: String? = null,
+    val language_primary: String = "ja",
+    val visibility: String = "public",
+    val metadata: Map<String, Any?>? = null
+)
+
+data class LiveSessionEndResponse(
+    val status: String,
+    val live_session: LiveSession? = null
+)
+
+data class RealtimeTranscribeResponse(
+    val live_session_id: String,
+    val chunk_index: Int,
+    val text: String? = null
+)
+
 class ZeroTouchApi(
     private val baseUrl: String = "https://api.hey-watch.me"
 ) {
@@ -550,6 +581,102 @@ class ZeroTouchApi(
                     }
                     val type = object : TypeToken<Map<String, Any>>() {}.type
                     gson.fromJson(body, type)
+                }
+            } catch (e: IOException) {
+                throw ZeroTouchApiException.Network(operation, e)
+            }
+        }
+    }
+
+    suspend fun createLiveSession(
+        deviceId: String,
+        workspaceId: String? = null,
+        languagePrimary: String = "ja",
+        visibility: String = "public",
+        metadata: Map<String, Any?>? = null
+    ): LiveSession = withContext(Dispatchers.IO) {
+        val operation = "Create live session"
+        withRetry(operation = operation) {
+            val url = "$baseUrl/zerotouch/api/live-sessions"
+            val payload = LiveSessionCreateRequest(
+                device_id = deviceId,
+                workspace_id = workspaceId,
+                language_primary = languagePrimary,
+                visibility = visibility,
+                metadata = metadata
+            )
+            val request = Request.Builder()
+                .url(url)
+                .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        throw httpException(operation, response.code, body)
+                    }
+                    gson.fromJson(body, LiveSession::class.java)
+                }
+            } catch (e: IOException) {
+                throw ZeroTouchApiException.Network(operation, e)
+            }
+        }
+    }
+
+    suspend fun endLiveSession(liveSessionId: String): LiveSessionEndResponse = withContext(Dispatchers.IO) {
+        val operation = "End live session"
+        withRetry(operation = operation) {
+            val url = "$baseUrl/zerotouch/api/live-sessions/$liveSessionId/end"
+            val request = Request.Builder()
+                .url(url)
+                .post("".toRequestBody(null))
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        throw httpException(operation, response.code, body)
+                    }
+                    gson.fromJson(body, LiveSessionEndResponse::class.java)
+                }
+            } catch (e: IOException) {
+                throw ZeroTouchApiException.Network(operation, e)
+            }
+        }
+    }
+
+    suspend fun transcribeRealtimeChunk(
+        file: File,
+        liveSessionId: String,
+        chunkIndex: Int
+    ): RealtimeTranscribeResponse = withContext(Dispatchers.IO) {
+        val operation = "Realtime transcribe"
+        withRetry(operation = operation) {
+            val url = "$baseUrl/zerotouch/api/transcribe/realtime"
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("live_session_id", liveSessionId)
+                .addFormDataPart("chunk_index", chunkIndex.toString())
+                .addFormDataPart(
+                    "file",
+                    file.name,
+                    file.asRequestBody("audio/mp4".toMediaType())
+                )
+                .build()
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        throw httpException(operation, response.code, body)
+                    }
+                    gson.fromJson(body, RealtimeTranscribeResponse::class.java)
                 }
             } catch (e: IOException) {
                 throw ZeroTouchApiException.Network(operation, e)

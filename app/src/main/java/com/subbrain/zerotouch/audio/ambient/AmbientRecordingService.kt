@@ -13,6 +13,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.subbrain.zerotouch.api.DeviceIdProvider
+import com.subbrain.zerotouch.api.SelectionPreferences
 import com.subbrain.zerotouch.api.ZeroTouchApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +30,9 @@ class AmbientRecordingService : Service() {
     private var watchdogRestartCount = 0
     private var lastObservedRecordingState = false
     private var lastWatchdogRestartAt = 0L
+    @Volatile private var currentLiveSessionId: String? = null
+    @Volatile private var currentLiveShareToken: String? = null
+    @Volatile private var nextLiveChunkIndex: Int = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -66,7 +70,8 @@ class AmbientRecordingService : Service() {
             speech = false,
             isRecording = false,
             recordingElapsedMs = 0,
-            recordingHeartbeatAt = SystemClock.elapsedRealtime()
+            recordingHeartbeatAt = SystemClock.elapsedRealtime(),
+            clearLiveTranscript = true
         )
         startForeground(NOTIFICATION_ID, buildNotification("Listening"))
         val outputDir = File(filesDir, "ambient/${TimeUtils.todayString()}")
@@ -126,6 +131,10 @@ class AmbientRecordingService : Service() {
             detector = detector,
             preprocessor = preprocessor
         ).also { it.start() }
+        scope.launch {
+            val api = ZeroTouchApi()
+            ensureLiveSession(api)
+        }
         startMonitor()
         Log.d(
             TAG,
@@ -138,6 +147,9 @@ class AmbientRecordingService : Service() {
             TAG,
             "Ambient stop requested reason=$reason recorderActive=${recorder != null} monitorRunning=$monitorRunning"
         )
+        scope.launch {
+            endLiveSession(reason = reason)
+        }
         recorder?.stop()
         recorder = null
         monitorRunning = false
@@ -150,8 +162,14 @@ class AmbientRecordingService : Service() {
             speech = false,
             isRecording = false,
             recordingElapsedMs = 0,
-            recordingHeartbeatAt = SystemClock.elapsedRealtime()
+            recordingHeartbeatAt = SystemClock.elapsedRealtime(),
+            clearLiveSessionId = true,
+            clearLiveShareToken = true,
+            clearLiveTranscript = true
         )
+        currentLiveSessionId = null
+        currentLiveShareToken = null
+        nextLiveChunkIndex = 0
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         Log.d(TAG, "Ambient service stopped reason=$reason")
@@ -182,6 +200,55 @@ class AmbientRecordingService : Service() {
             var uploadedSessionId: String? = null
             try {
                 val api = ZeroTouchApi()
+                val liveSessionId = ensureLiveSession(api)
+                if (!liveSessionId.isNullOrBlank()) {
+                    val chunkIndex = allocateLiveChunkIndex()
+                    try {
+                        val realtime = api.transcribeRealtimeChunk(
+                            file = file,
+                            liveSessionId = liveSessionId,
+                            chunkIndex = chunkIndex
+                        )
+                        Log.d(
+                            TAG,
+                            "Realtime transcribe sent liveSession=$liveSessionId chunk=$chunkIndex textLength=${realtime.text?.length ?: 0}"
+                        )
+                        val text = realtime.text?.trim().orEmpty()
+                        if (text.isNotBlank()) {
+                            val history = (AmbientStatus.state.value.liveTranscriptHistory + text).takeLast(12)
+                            AmbientStatus.update(
+                                liveTranscriptLatest = text,
+                                liveTranscriptHistory = history,
+                                lastEvent = "Realtime updated:$chunkIndex"
+                            )
+                        } else {
+                            AmbientStatus.update(lastEvent = "Realtime updated:$chunkIndex")
+                        }
+                    } catch (realtimeError: Exception) {
+                        Log.w(
+                            TAG,
+                            "Realtime transcribe failed liveSession=$liveSessionId chunk=$chunkIndex error=${realtimeError.message}"
+                        )
+                        AmbientStatus.update(lastEvent = "Realtime failed:$chunkIndex")
+                    }
+                }
+                if (!ENABLE_LEGACY_BATCH_PIPELINE) {
+                    val retained = AmbientStatus.state.value.recordings.map { item ->
+                        if (item.path == file.absolutePath) {
+                            item.copy(
+                                status = "completed",
+                                errorMessage = null
+                            )
+                        } else {
+                            item
+                        }
+                    }
+                    AmbientStatus.update(
+                        recordings = retained.take(MAX_RECORDINGS),
+                        lastEvent = "Live-only chunk completed"
+                    )
+                    return@launch
+                }
                 val upload = api.uploadAudio(
                     file = file,
                     deviceId = deviceId,
@@ -248,6 +315,58 @@ class AmbientRecordingService : Service() {
                 )
             }
         }
+    }
+
+    private suspend fun ensureLiveSession(api: ZeroTouchApi): String? {
+        val existing = currentLiveSessionId
+        if (!existing.isNullOrBlank()) {
+            AmbientStatus.update(
+                liveSessionId = existing,
+                liveShareToken = currentLiveShareToken
+            )
+            return existing
+        }
+        return try {
+            val deviceId = DeviceIdProvider.getDeviceId(this)
+            val workspaceId = SelectionPreferences.getSelectedWorkspaceId(this)?.takeIf { it.isNotBlank() }
+            val session = api.createLiveSession(
+                deviceId = deviceId,
+                workspaceId = workspaceId
+            )
+            currentLiveSessionId = session.id
+            currentLiveShareToken = session.share_token
+            nextLiveChunkIndex = 0
+            AmbientStatus.update(
+                liveSessionId = session.id,
+                liveShareToken = session.share_token,
+                lastEvent = "Live session started:${session.id}"
+            )
+            Log.i(
+                TAG,
+                "Live session started sessionId=${session.id} shareToken=${session.share_token} workspaceId=$workspaceId"
+            )
+            session.id
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to create live session: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun endLiveSession(reason: String) {
+        val sessionId = currentLiveSessionId ?: return
+        try {
+            val api = ZeroTouchApi()
+            api.endLiveSession(sessionId)
+            Log.i(TAG, "Live session ended sessionId=$sessionId reason=$reason")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to end live session sessionId=$sessionId reason=$reason error=${e.message}")
+        }
+    }
+
+    private fun allocateLiveChunkIndex(): Int = synchronized(this) {
+        val current = nextLiveChunkIndex
+        nextLiveChunkIndex += 1
+        current
     }
 
     private fun updateNotification(status: String) {
@@ -353,6 +472,7 @@ class AmbientRecordingService : Service() {
         private const val MAX_RECORDINGS = 50
         private const val RECORDING_STALE_THRESHOLD_MS = 4000L
         private const val WATCHDOG_RESTART_COOLDOWN_MS = 10_000L
+        private const val ENABLE_LEGACY_BATCH_PIPELINE = false
         const val ACTION_START = "com.subbrain.zerotouch.AMBIENT_START"
         const val ACTION_STOP = "com.subbrain.zerotouch.AMBIENT_STOP"
     }
