@@ -304,7 +304,10 @@ class AmbientRecordingService : Service() {
                 )
                 val text = realtime.text?.trim().orEmpty()
                 if (text.isNotBlank()) {
-                    val history = (AmbientStatus.state.value.liveTranscriptHistory + text).takeLast(24)
+                    val history = mergeLiveTranscriptLines(
+                        current = AmbientStatus.state.value.liveTranscriptHistory,
+                        incoming = text
+                    )
                     AmbientStatus.update(
                         liveTranscriptLatest = text,
                         liveTranscriptHistory = history,
@@ -376,6 +379,44 @@ class AmbientRecordingService : Service() {
         val current = nextLiveChunkIndex
         nextLiveChunkIndex += 1
         current
+    }
+
+    private fun mergeLiveTranscriptLines(current: List<String>, incoming: String): List<String> {
+        val cleaned = incoming.trim()
+        if (cleaned.isBlank()) return current
+        if (cleaned.length <= 1) return current
+
+        val updated = current.toMutableList()
+        val last = updated.lastOrNull()
+        if (last.isNullOrBlank()) {
+            updated.add(cleaned)
+            return updated.takeLast(MAX_LIVE_TRANSCRIPT_LINES)
+        }
+
+        val normalizedIncoming = normalizeTranscriptLine(cleaned)
+        val normalizedLast = normalizeTranscriptLine(last)
+        if (normalizedIncoming.isBlank() || normalizedLast.isBlank()) {
+            updated.add(cleaned)
+            return updated.takeLast(MAX_LIVE_TRANSCRIPT_LINES)
+        }
+
+        if (normalizedIncoming == normalizedLast) {
+            return updated.takeLast(MAX_LIVE_TRANSCRIPT_LINES)
+        }
+        if (normalizedIncoming.startsWith(normalizedLast) || normalizedLast.startsWith(normalizedIncoming)) {
+            updated[updated.lastIndex] = if (cleaned.length >= last.length) cleaned else last
+            return updated.takeLast(MAX_LIVE_TRANSCRIPT_LINES)
+        }
+
+        updated.add(cleaned)
+        return updated.takeLast(MAX_LIVE_TRANSCRIPT_LINES)
+    }
+
+    private fun normalizeTranscriptLine(value: String): String {
+        return value
+            .lowercase()
+            .replace("\\s+".toRegex(), "")
+            .replace("[、。！？!?・「」『』（）()\\-ー]".toRegex(), "")
     }
 
     private fun updateNotification(status: String) {
@@ -482,6 +523,7 @@ class AmbientRecordingService : Service() {
         private const val RECORDING_STALE_THRESHOLD_MS = 4000L
         private const val WATCHDOG_RESTART_COOLDOWN_MS = 10_000L
         private const val ENABLE_LEGACY_BATCH_PIPELINE = false
+        private const val MAX_LIVE_TRANSCRIPT_LINES = 24
         const val ACTION_START = "com.subbrain.zerotouch.AMBIENT_START"
         const val ACTION_STOP = "com.subbrain.zerotouch.AMBIENT_STOP"
     }

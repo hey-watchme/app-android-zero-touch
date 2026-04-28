@@ -56,13 +56,17 @@ fun MemoLiveHomeScreen(
     onToggleAmbient: (Boolean) -> Unit
 ) {
     val liveTopics = uiState.homeLiveTopics
-    val latestLiveText = liveTranscriptLatest
-        ?.takeIf { it.isNotBlank() }
-        ?: liveTopics
-            .firstOrNull()
-            ?.summary
-            ?.takeIf { it.isNotBlank() }
-        ?: "会話中の内容がここに表示されます。"
+    val liveLines = buildList {
+        liveTranscriptLatest?.trim()?.takeIf { it.isNotBlank() }?.let { add(it) }
+        liveTranscriptHistory
+            .asReversed()
+            .forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.isNotBlank() && !contains(trimmed)) {
+                    add(trimmed)
+                }
+            }
+    }
 
     Column(
         modifier = modifier
@@ -145,7 +149,8 @@ fun MemoLiveHomeScreen(
                             .weight(1.8f)
                             .fillMaxSize(),
                         title = workspaceLabel.ifBlank { "Workspace" },
-                        text = latestLiveText,
+                        liveLines = liveLines,
+                        ambientEnabled = ambientEnabled,
                         ambientStatusLabel = ambientStatusLabel,
                         isAmbientLive = isAmbientLive
                     )
@@ -153,8 +158,7 @@ fun MemoLiveHomeScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxSize(),
-                        liveTopics = liveTopics,
-                        liveTranscriptHistory = liveTranscriptHistory
+                        liveTopics = liveTopics
                     )
                 }
             } else {
@@ -167,7 +171,8 @@ fun MemoLiveHomeScreen(
                             .weight(1.3f)
                             .fillMaxWidth(),
                         title = workspaceLabel.ifBlank { "Workspace" },
-                        text = latestLiveText,
+                        liveLines = liveLines,
+                        ambientEnabled = ambientEnabled,
                         ambientStatusLabel = ambientStatusLabel,
                         isAmbientLive = isAmbientLive
                     )
@@ -175,8 +180,7 @@ fun MemoLiveHomeScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth(),
-                        liveTopics = liveTopics,
-                        liveTranscriptHistory = liveTranscriptHistory
+                        liveTopics = liveTopics
                     )
                 }
             }
@@ -213,7 +217,8 @@ fun MemoLiveHomeScreen(
 private fun LiveTranscriptPanel(
     modifier: Modifier,
     title: String,
-    text: String,
+    liveLines: List<String>,
+    ambientEnabled: Boolean,
     ambientStatusLabel: String,
     isAmbientLive: Boolean
 ) {
@@ -261,14 +266,49 @@ private fun LiveTranscriptPanel(
                 shape = RoundedCornerShape(10.dp),
                 color = ZtSurfaceVariant
             ) {
-                Text(
-                    text = text,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(14.dp),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = ZtOnSurface
-                )
+                if (liveLines.isEmpty()) {
+                    val standbyText = when {
+                        !ambientEnabled -> "Listening Off"
+                        isAmbientLive -> "会話を待っています..."
+                        else -> "録音準備中..."
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(14.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = standbyText,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = ZtOnSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(liveLines, key = { line -> line.hashCode() }) { line ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = ZtSurface,
+                                border = BorderStroke(1.dp, ZtOutline)
+                            ) {
+                                Text(
+                                    text = line,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = ZtOnSurface
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -277,8 +317,7 @@ private fun LiveTranscriptPanel(
 @Composable
 private fun ConversationListPanel(
     modifier: Modifier,
-    liveTopics: List<TopicFeedCard>,
-    liveTranscriptHistory: List<String>
+    liveTopics: List<TopicFeedCard>
 ) {
     Surface(
         modifier = modifier,
@@ -308,38 +347,7 @@ private fun ConversationListPanel(
                 )
             }
 
-            if (liveTranscriptHistory.isNotEmpty()) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(liveTranscriptHistory.reversed()) { line ->
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = ZtSurfaceVariant,
-                            border = BorderStroke(1.dp, ZtOutline)
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = "just now",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = ZtOnSurfaceVariant
-                                )
-                                Text(
-                                    text = line,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = ZtOnSurface
-                                )
-                            }
-                        }
-                    }
-                }
-            } else if (liveTopics.isEmpty()) {
+            if (liveTopics.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
