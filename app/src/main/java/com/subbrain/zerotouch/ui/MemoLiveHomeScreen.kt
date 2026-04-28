@@ -67,15 +67,13 @@ fun MemoLiveHomeScreen(
         .sortedByDescending { topic -> topic.updatedAtEpochMs }
         .toList()
     val liveLines = buildList {
-        liveTranscriptLatest?.trim()?.takeIf { it.isNotBlank() }?.let { add(it) }
-        liveTranscriptHistory
-            .asReversed()
-            .forEach { line ->
-                val trimmed = line.trim()
-                if (trimmed.isNotBlank() && !contains(trimmed)) {
-                    add(trimmed)
-                }
-            }
+        liveTranscriptHistory.forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isNotBlank()) add(trimmed)
+        }
+        liveTranscriptLatest?.trim()?.takeIf { it.isNotBlank() }?.let { latest ->
+            if (isEmpty() || last() != latest) add(latest)
+        }
     }
 
     Column(
@@ -236,9 +234,9 @@ private fun LiveTranscriptPanel(
     isAmbientLive: Boolean
 ) {
     val listState = rememberLazyListState()
-    LaunchedEffect(liveLines.firstOrNull(), liveLines.size) {
+    LaunchedEffect(liveLines.lastOrNull(), liveLines.size) {
         if (liveLines.isNotEmpty()) {
-            listState.scrollToItem(0)
+            listState.scrollToItem(liveLines.lastIndex)
         }
     }
 
@@ -280,80 +278,49 @@ private fun LiveTranscriptPanel(
                 style = MaterialTheme.typography.labelMedium,
                 color = ZtOnSurfaceVariant
             )
-            Surface(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-                color = ZtSurfaceVariant
-            ) {
-                if (liveLines.isEmpty()) {
-                    val standbyText = when {
-                        !ambientEnabled -> "Listening is off. Turn it on to start live transcript."
-                        isAmbientLive -> "録音を開始しました。話し始めるとここに文字起こしが表示されます。"
-                        else -> "マイクを準備しています。まもなく文字起こしが始まります。"
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(14.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+            if (liveLines.isEmpty()) {
+                val standbyText = when {
+                    !ambientEnabled -> "Listening is off. Turn it on to start live transcript."
+                    isAmbientLive -> "録音を開始しました。話し始めるとここに文字起こしが表示されます。"
+                    else -> "マイクを準備しています。まもなく文字起こしが始まります。"
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = standbyText,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = ZtOnSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(liveLines) { line ->
                         Text(
-                            text = standbyText,
-                            style = MaterialTheme.typography.bodyLarge,
+                            text = line,
+                            style = MaterialTheme.typography.displaySmall,
+                            color = ZtOnSurface
+                        )
+                    }
+                    item {
+                        Spacer(modifier = Modifier.size(4.dp))
+                        Text(
+                            text = "English (Preview): translation stream will appear here.",
+                            style = MaterialTheme.typography.titleMedium,
                             color = ZtOnSurfaceVariant
                         )
                     }
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(liveLines, key = { line -> line.hashCode() }) { line ->
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = ZtSurface,
-                                border = BorderStroke(1.dp, ZtOutline)
-                            ) {
-                                Text(
-                                    text = line,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    style = MaterialTheme.typography.displaySmall,
-                                    color = ZtOnSurface
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-                color = ZtSurfaceVariant
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = "English (Preview)",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = ZtOnSurfaceVariant
-                    )
-                    Text(
-                        text = "Live English translation is not available yet. A translated stream will appear here in a future update.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = ZtOnSurface
-                    )
                 }
             }
         }
