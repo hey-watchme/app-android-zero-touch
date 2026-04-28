@@ -621,6 +621,7 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 isAmbientLive = ambientState.isRecording || ambientState.speech,
                                 liveSessionId = ambientState.liveSessionId,
                                 liveShareToken = ambientState.liveShareToken,
+                                liveAsrModel = ambientState.liveAsrModel,
                                 liveTranscriptLatest = ambientState.liveTranscriptLatest,
                                 liveTranscriptHistory = ambientState.liveTranscriptHistory,
                                 onToggleAmbient = handleAmbientToggle

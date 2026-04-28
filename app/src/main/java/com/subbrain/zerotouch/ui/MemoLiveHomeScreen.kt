@@ -53,6 +53,7 @@ fun MemoLiveHomeScreen(
     isAmbientLive: Boolean,
     liveSessionId: String?,
     liveShareToken: String?,
+    liveAsrModel: String?,
     liveTranscriptLatest: String?,
     liveTranscriptHistory: List<String>,
     onToggleAmbient: (Boolean) -> Unit
@@ -159,7 +160,7 @@ fun MemoLiveHomeScreen(
                         modifier = Modifier
                             .weight(1.65f)
                             .fillMaxSize(),
-                        title = workspaceLabel.ifBlank { "Workspace" },
+                        liveAsrModel = liveAsrModel,
                         liveLines = liveLines,
                         ambientEnabled = ambientEnabled,
                         ambientStatusLabel = ambientStatusLabel,
@@ -181,7 +182,7 @@ fun MemoLiveHomeScreen(
                         modifier = Modifier
                             .weight(1.3f)
                             .fillMaxWidth(),
-                        title = workspaceLabel.ifBlank { "Workspace" },
+                        liveAsrModel = liveAsrModel,
                         liveLines = liveLines,
                         ambientEnabled = ambientEnabled,
                         ambientStatusLabel = ambientStatusLabel,
@@ -227,7 +228,7 @@ fun MemoLiveHomeScreen(
 @Composable
 private fun LiveTranscriptPanel(
     modifier: Modifier,
-    title: String,
+    liveAsrModel: String?,
     liveLines: List<String>,
     ambientEnabled: Boolean,
     ambientStatusLabel: String,
@@ -274,7 +275,7 @@ private fun LiveTranscriptPanel(
                 )
             }
             Text(
-                text = title,
+                text = "ASR Model: ${liveAsrModel?.takeIf { it.isNotBlank() } ?: "unknown"}",
                 style = MaterialTheme.typography.labelMedium,
                 color = ZtOnSurfaceVariant
             )

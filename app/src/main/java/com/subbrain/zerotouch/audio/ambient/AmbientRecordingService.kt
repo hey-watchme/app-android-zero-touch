@@ -303,18 +303,23 @@ class AmbientRecordingService : Service() {
                     chunkIndex = chunkIndex
                 )
                 val text = realtime.text?.trim().orEmpty()
+                val model = realtime.model?.trim()
                 if (text.isNotBlank()) {
                     val history = mergeLiveTranscriptLines(
                         current = AmbientStatus.state.value.liveTranscriptHistory,
                         incoming = text
                     )
                     AmbientStatus.update(
+                        liveAsrModel = model,
                         liveTranscriptLatest = text,
                         liveTranscriptHistory = history,
                         lastEvent = "Realtime updated:$chunkIndex"
                     )
                 } else {
-                    AmbientStatus.update(lastEvent = "Realtime empty:$chunkIndex")
+                    AmbientStatus.update(
+                        liveAsrModel = model,
+                        lastEvent = "Realtime empty:$chunkIndex"
+                    )
                 }
                 Log.d(
                     TAG,

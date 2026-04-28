@@ -465,7 +465,8 @@ data class LiveSessionEndResponse(
 data class RealtimeTranscribeResponse(
     val live_session_id: String,
     val chunk_index: Int,
-    val text: String? = null
+    val text: String? = null,
+    val model: String? = null
 )
 
 class ZeroTouchApi(
