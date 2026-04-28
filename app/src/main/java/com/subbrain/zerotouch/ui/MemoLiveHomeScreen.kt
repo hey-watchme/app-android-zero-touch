@@ -57,7 +57,15 @@ fun MemoLiveHomeScreen(
     liveTranscriptHistory: List<String>,
     onToggleAmbient: (Boolean) -> Unit
 ) {
-    val liveTopics = uiState.homeLiveTopics
+    val confirmedLiveTopics = (
+        uiState.topicCards.filter { topic ->
+            topic.status == "active" || topic.status == "finalized"
+        } + uiState.homeLiveTopics
+    )
+        .asSequence()
+        .distinctBy { topic -> topic.id }
+        .sortedByDescending { topic -> topic.updatedAtEpochMs }
+        .toList()
     val liveLines = buildList {
         liveTranscriptLatest?.trim()?.takeIf { it.isNotBlank() }?.let { add(it) }
         liveTranscriptHistory
@@ -148,7 +156,7 @@ fun MemoLiveHomeScreen(
                 ) {
                     LiveTranscriptPanel(
                         modifier = Modifier
-                            .weight(1.8f)
+                            .weight(1.65f)
                             .fillMaxSize(),
                         title = workspaceLabel.ifBlank { "Workspace" },
                         liveLines = liveLines,
@@ -160,7 +168,7 @@ fun MemoLiveHomeScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxSize(),
-                        liveTopics = liveTopics
+                        liveTopics = confirmedLiveTopics
                     )
                 }
             } else {
@@ -182,7 +190,7 @@ fun MemoLiveHomeScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth(),
-                        liveTopics = liveTopics
+                        liveTopics = confirmedLiveTopics
                     )
                 }
             }
@@ -224,6 +232,13 @@ private fun LiveTranscriptPanel(
     ambientStatusLabel: String,
     isAmbientLive: Boolean
 ) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(liveLines.firstOrNull(), liveLines.size) {
+        if (liveLines.isNotEmpty()) {
+            listState.scrollToItem(0)
+        }
+    }
+
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),
@@ -264,15 +279,16 @@ private fun LiveTranscriptPanel(
             )
             Surface(
                 modifier = Modifier
-                    .fillMaxSize(),
+                    .weight(1f)
+                    .fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),
                 color = ZtSurfaceVariant
             ) {
                 if (liveLines.isEmpty()) {
                     val standbyText = when {
-                        !ambientEnabled -> "Listening Off"
-                        isAmbientLive -> "会話を待っています..."
-                        else -> "録音準備中..."
+                        !ambientEnabled -> "Listening is off. Turn it on to start live transcript."
+                        isAmbientLive -> "録音を開始しました。話し始めるとここに文字起こしが表示されます。"
+                        else -> "マイクを準備しています。まもなく文字起こしが始まります。"
                     }
                     Box(
                         modifier = Modifier
@@ -287,12 +303,6 @@ private fun LiveTranscriptPanel(
                         )
                     }
                 } else {
-                    val listState = rememberLazyListState()
-                    LaunchedEffect(liveLines.firstOrNull(), liveLines.size) {
-                        if (liveLines.isNotEmpty()) {
-                            listState.scrollToItem(0)
-                        }
-                    }
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
@@ -311,12 +321,36 @@ private fun LiveTranscriptPanel(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    style = MaterialTheme.typography.bodyLarge,
+                                    style = MaterialTheme.typography.displaySmall,
                                     color = ZtOnSurface
                                 )
                             }
                         }
                     }
+                }
+            }
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                color = ZtSurfaceVariant
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "English (Preview)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = ZtOnSurfaceVariant
+                    )
+                    Text(
+                        text = "Live English translation is not available yet. A translated stream will appear here in a future update.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = ZtOnSurface
+                    )
                 }
             }
         }
@@ -328,6 +362,8 @@ private fun ConversationListPanel(
     modifier: Modifier,
     liveTopics: List<TopicFeedCard>
 ) {
+    val orderedTopics = liveTopics.sortedByDescending { topic -> topic.updatedAtEpochMs }
+
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),
@@ -356,7 +392,7 @@ private fun ConversationListPanel(
                 )
             }
 
-            if (liveTopics.isEmpty()) {
+            if (orderedTopics.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -365,7 +401,7 @@ private fun ConversationListPanel(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "会話トピックはまだありません",
+                        text = "確定したトピックはまだありません",
                         style = MaterialTheme.typography.bodyMedium,
                         color = ZtOnSurfaceVariant
                     )
@@ -375,7 +411,7 @@ private fun ConversationListPanel(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(liveTopics.take(10), key = { it.id }) { topic ->
+                    items(orderedTopics.take(10), key = { it.id }) { topic ->
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = ZtSurfaceVariant,
