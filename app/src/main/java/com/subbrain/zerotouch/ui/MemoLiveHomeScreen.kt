@@ -148,7 +148,10 @@ fun MemoLiveHomeScreen(
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            val tabletLayout = maxWidth >= 960.dp
+            // Keep the same two-pane structure even when sidebar is expanded.
+            // The previous threshold (960.dp) switched to stacked layout when the
+            // left menu opened and reduced available width.
+            val tabletLayout = maxWidth >= 640.dp
             if (tabletLayout) {
                 Row(
                     modifier = Modifier.fillMaxSize(),
