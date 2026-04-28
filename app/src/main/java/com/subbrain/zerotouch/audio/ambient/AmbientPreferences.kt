@@ -1,6 +1,7 @@
 package com.subbrain.zerotouch.audio.ambient
 
 import android.content.Context
+import org.json.JSONArray
 
 object AmbientPreferences {
     private const val PREF_NAME = "zerotouch_prefs"
@@ -12,6 +13,8 @@ object AmbientPreferences {
     private const val KEY_LLM_PROVIDER = "llm_provider"
     private const val KEY_LLM_MODEL = "llm_model"
     private const val KEY_IMPORTANCE_LEVELS = "importance_levels"
+    private const val KEY_LIVE_TRANSCRIPT_HISTORY = "live_transcript_history"
+    private const val KEY_LIVE_ASR_MODEL = "live_asr_model"
     private const val DEFAULT_ASR_PROVIDER = "azure"
     private const val DEFAULT_LLM_PROVIDER = "openai"
     private const val DEFAULT_LLM_MODEL = "gpt-4.1-nano"
@@ -106,5 +109,37 @@ object AmbientPreferences {
         val safe = levels.filter { it in 0..5 }.sorted().joinToString(",")
         val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_IMPORTANCE_LEVELS, safe).apply()
+    }
+
+    fun getLiveTranscriptHistory(context: Context): List<String> {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val raw = prefs.getString(KEY_LIVE_TRANSCRIPT_HISTORY, null) ?: return emptyList()
+        return runCatching {
+            val json = JSONArray(raw)
+            buildList {
+                for (i in 0 until json.length()) {
+                    val line = json.optString(i).trim()
+                    if (line.isNotBlank()) add(line)
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun setLiveTranscriptHistory(context: Context, lines: List<String>) {
+        val safeLines = lines.map { it.trim() }.filter { it.isNotBlank() }
+        val json = JSONArray()
+        safeLines.forEach { json.put(it) }
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_LIVE_TRANSCRIPT_HISTORY, json.toString()).apply()
+    }
+
+    fun getLiveAsrModel(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_LIVE_ASR_MODEL, null)?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    fun setLiveAsrModel(context: Context, model: String?) {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_LIVE_ASR_MODEL, model?.trim()?.takeIf { it.isNotBlank() }).apply()
     }
 }

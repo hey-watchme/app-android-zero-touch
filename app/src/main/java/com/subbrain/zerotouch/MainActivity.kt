@@ -281,6 +281,15 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     val latestShowContextOnboarding by rememberUpdatedState(showContextOnboarding)
 
     LaunchedEffect(Unit) {
+        val persistedHistory = AmbientPreferences.getLiveTranscriptHistory(context).takeLast(50)
+        val persistedModel = AmbientPreferences.getLiveAsrModel(context)
+        if (persistedHistory.isNotEmpty() || !persistedModel.isNullOrBlank()) {
+            AmbientStatus.update(
+                liveAsrModel = persistedModel,
+                liveTranscriptLatest = persistedHistory.lastOrNull(),
+                liveTranscriptHistory = persistedHistory
+            )
+        }
         viewModel.loadAuthSession(context)
     }
 

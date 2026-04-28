@@ -37,6 +37,7 @@ class AmbientRecordingService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        restorePersistedLiveTranscript()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -70,8 +71,7 @@ class AmbientRecordingService : Service() {
             speech = false,
             isRecording = false,
             recordingElapsedMs = 0,
-            recordingHeartbeatAt = SystemClock.elapsedRealtime(),
-            clearLiveTranscript = true
+            recordingHeartbeatAt = SystemClock.elapsedRealtime()
         )
         startForeground(NOTIFICATION_ID, buildNotification("Listening"))
         val outputDir = File(filesDir, "ambient/${TimeUtils.todayString()}")
@@ -165,8 +165,7 @@ class AmbientRecordingService : Service() {
             recordingElapsedMs = 0,
             recordingHeartbeatAt = SystemClock.elapsedRealtime(),
             clearLiveSessionId = true,
-            clearLiveShareToken = true,
-            clearLiveTranscript = true
+            clearLiveShareToken = true
         )
         currentLiveSessionId = null
         currentLiveShareToken = null
@@ -315,10 +314,15 @@ class AmbientRecordingService : Service() {
                         liveTranscriptHistory = history,
                         lastEvent = "Realtime updated:$chunkIndex"
                     )
+                    persistLiveTranscriptState(history = history, model = model)
                 } else {
                     AmbientStatus.update(
                         liveAsrModel = model,
                         lastEvent = "Realtime empty:$chunkIndex"
+                    )
+                    persistLiveTranscriptState(
+                        history = AmbientStatus.state.value.liveTranscriptHistory,
+                        model = model
                     )
                 }
                 Log.d(
@@ -422,6 +426,23 @@ class AmbientRecordingService : Service() {
             .lowercase()
             .replace("\\s+".toRegex(), "")
             .replace("[、。！？!?・「」『』（）()\\-ー]".toRegex(), "")
+    }
+
+    private fun persistLiveTranscriptState(history: List<String>, model: String?) {
+        val limited = history.takeLast(MAX_LIVE_TRANSCRIPT_LINES)
+        AmbientPreferences.setLiveTranscriptHistory(this, limited)
+        AmbientPreferences.setLiveAsrModel(this, model)
+    }
+
+    private fun restorePersistedLiveTranscript() {
+        val history = AmbientPreferences.getLiveTranscriptHistory(this).takeLast(MAX_LIVE_TRANSCRIPT_LINES)
+        val model = AmbientPreferences.getLiveAsrModel(this)
+        if (history.isEmpty() && model.isNullOrBlank()) return
+        AmbientStatus.update(
+            liveAsrModel = model,
+            liveTranscriptLatest = history.lastOrNull(),
+            liveTranscriptHistory = history
+        )
     }
 
     private fun updateNotification(status: String) {
@@ -528,7 +549,7 @@ class AmbientRecordingService : Service() {
         private const val RECORDING_STALE_THRESHOLD_MS = 4000L
         private const val WATCHDOG_RESTART_COOLDOWN_MS = 10_000L
         private const val ENABLE_LEGACY_BATCH_PIPELINE = false
-        private const val MAX_LIVE_TRANSCRIPT_LINES = 24
+        private const val MAX_LIVE_TRANSCRIPT_LINES = 50
         const val ACTION_START = "com.subbrain.zerotouch.AMBIENT_START"
         const val ACTION_STOP = "com.subbrain.zerotouch.AMBIENT_STOP"
     }
