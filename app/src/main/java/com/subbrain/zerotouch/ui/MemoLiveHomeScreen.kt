@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -56,6 +57,8 @@ fun MemoLiveHomeScreen(
     liveAsrModel: String?,
     liveTranscriptLatest: String?,
     liveTranscriptHistory: List<String>,
+    liveTranslationLatest: String?,
+    liveTranslationHistory: List<String>,
     onToggleAmbient: (Boolean) -> Unit
 ) {
     val confirmedLiveTopics = (
@@ -73,6 +76,15 @@ fun MemoLiveHomeScreen(
             if (trimmed.isNotBlank()) add(trimmed)
         }
         liveTranscriptLatest?.trim()?.takeIf { it.isNotBlank() }?.let { latest ->
+            if (isEmpty() || last() != latest) add(latest)
+        }
+    }
+    val liveTranslationLines = buildList {
+        liveTranslationHistory.forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isNotBlank()) add(trimmed)
+        }
+        liveTranslationLatest?.trim()?.takeIf { it.isNotBlank() }?.let { latest ->
             if (isEmpty() || last() != latest) add(latest)
         }
     }
@@ -162,6 +174,7 @@ fun MemoLiveHomeScreen(
                             .fillMaxSize(),
                         liveAsrModel = liveAsrModel,
                         liveLines = liveLines,
+                        liveTranslationLines = liveTranslationLines,
                         ambientEnabled = ambientEnabled,
                         ambientStatusLabel = ambientStatusLabel,
                         isAmbientLive = isAmbientLive
@@ -184,6 +197,7 @@ fun MemoLiveHomeScreen(
                             .fillMaxWidth(),
                         liveAsrModel = liveAsrModel,
                         liveLines = liveLines,
+                        liveTranslationLines = liveTranslationLines,
                         ambientEnabled = ambientEnabled,
                         ambientStatusLabel = ambientStatusLabel,
                         isAmbientLive = isAmbientLive
@@ -230,14 +244,23 @@ private fun LiveTranscriptPanel(
     modifier: Modifier,
     liveAsrModel: String?,
     liveLines: List<String>,
+    liveTranslationLines: List<String>,
     ambientEnabled: Boolean,
     ambientStatusLabel: String,
     isAmbientLive: Boolean
 ) {
     val listState = rememberLazyListState()
-    LaunchedEffect(liveLines.lastOrNull(), liveLines.size) {
-        if (liveLines.isNotEmpty()) {
-            listState.scrollToItem(liveLines.lastIndex)
+    val hasTranscript = liveLines.isNotEmpty()
+    val hasTranslation = liveTranslationLines.isNotEmpty()
+    LaunchedEffect(
+        liveLines.lastOrNull(),
+        liveLines.size,
+        liveTranslationLines.lastOrNull(),
+        liveTranslationLines.size
+    ) {
+        if (hasTranscript || hasTranslation) {
+            val targetIndex = liveLines.size
+            listState.scrollToItem(targetIndex)
         }
     }
 
@@ -279,7 +302,7 @@ private fun LiveTranscriptPanel(
                 style = MaterialTheme.typography.labelMedium,
                 color = ZtOnSurfaceVariant
             )
-            if (liveLines.isEmpty()) {
+            if (liveLines.isEmpty() && liveTranslationLines.isEmpty()) {
                 val standbyText = when {
                     !ambientEnabled -> "Listening is off. Turn it on to start live transcript."
                     isAmbientLive -> "録音を開始しました。話し始めるとここに文字起こしが表示されます。"
@@ -315,12 +338,31 @@ private fun LiveTranscriptPanel(
                         )
                     }
                     item {
-                        Spacer(modifier = Modifier.size(4.dp))
+                        Spacer(modifier = Modifier.size(8.dp))
+                        HorizontalDivider(color = ZtOutline)
+                        Spacer(modifier = Modifier.size(8.dp))
                         Text(
-                            text = "English (Preview): translation stream will appear here.",
-                            style = MaterialTheme.typography.titleMedium,
+                            text = "English Translation",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
                             color = ZtOnSurfaceVariant
                         )
+                        Spacer(modifier = Modifier.size(6.dp))
+                        if (liveTranslationLines.isEmpty()) {
+                            Text(
+                                text = "Waiting for English translation.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = ZtOnSurfaceVariant
+                            )
+                        } else {
+                            liveTranslationLines.forEach { line ->
+                                Text(
+                                    text = line,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = ZtOnSurface
+                                )
+                            }
+                        }
                     }
                 }
             }

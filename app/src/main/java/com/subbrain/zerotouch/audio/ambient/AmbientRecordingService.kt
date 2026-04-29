@@ -24,6 +24,12 @@ import java.io.File
 import java.util.UUID
 
 class AmbientRecordingService : Service() {
+    private data class PendingTranslationClause(
+        val chunkIndex: Int,
+        val text: String,
+        val normalized: String
+    )
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var recorder: AmbientRecorder? = null
     private var monitorRunning = false
@@ -33,6 +39,9 @@ class AmbientRecordingService : Service() {
     @Volatile private var currentLiveSessionId: String? = null
     @Volatile private var currentLiveShareToken: String? = null
     @Volatile private var nextLiveChunkIndex: Int = 0
+    @Volatile private var translationCarryoverText: String = ""
+    private val recentTranslatedClauseBacklog = ArrayDeque<String>()
+    private val pendingTranslationClauses = ArrayDeque<PendingTranslationClause>()
 
     override fun onCreate() {
         super.onCreate()
@@ -170,6 +179,7 @@ class AmbientRecordingService : Service() {
         currentLiveSessionId = null
         currentLiveShareToken = null
         nextLiveChunkIndex = 0
+        resetTranslationPipelineState()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         Log.d(TAG, "Ambient service stopped reason=$reason")
@@ -315,6 +325,18 @@ class AmbientRecordingService : Service() {
                         lastEvent = "Realtime updated:$chunkIndex"
                     )
                     persistLiveTranscriptState(history = history, model = model)
+                    enqueueStableClausesForTranslation(
+                        chunkIndex = chunkIndex,
+                        incomingText = text
+                    ).takeIf { it.isNotEmpty() }?.let { clauses ->
+                        scope.launch {
+                            processRealtimeTranslations(
+                                api = api,
+                                liveSessionId = liveSessionId,
+                                clauses = clauses
+                            )
+                        }
+                    }
                 } else {
                     AmbientStatus.update(
                         liveAsrModel = model,
@@ -421,6 +443,147 @@ class AmbientRecordingService : Service() {
         return updated.takeLast(MAX_LIVE_TRANSCRIPT_LINES)
     }
 
+    private suspend fun processRealtimeTranslations(
+        api: ZeroTouchApi,
+        liveSessionId: String,
+        clauses: List<PendingTranslationClause>
+    ) {
+        for (clause in clauses) {
+            try {
+                val response = api.translateRealtime(
+                    liveSessionId = liveSessionId,
+                    chunkIndex = clause.chunkIndex,
+                    text = clause.text
+                )
+                val translated = response.translated_text?.trim().orEmpty()
+                if (translated.isBlank()) {
+                    dequeuePendingTranslationClause(clause.normalized)
+                    continue
+                }
+                dequeuePendingTranslationClause(clause.normalized)
+                val translationHistory = mergeLiveTranslationLines(
+                    current = AmbientStatus.state.value.liveTranslationHistory,
+                    incoming = translated
+                )
+                AmbientStatus.update(
+                    liveTranslationModel = response.model?.trim(),
+                    liveTranslationLatest = translated,
+                    liveTranslationHistory = translationHistory,
+                    lastEvent = "Translation updated:${clause.chunkIndex}"
+                )
+                persistLiveTranslationState(
+                    history = translationHistory,
+                    model = response.model?.trim()
+                )
+            } catch (e: Exception) {
+                dequeuePendingTranslationClause(clause.normalized)
+                Log.w(
+                    TAG,
+                    "Realtime translation failed chunk=${clause.chunkIndex} error=${e.message}"
+                )
+            }
+        }
+    }
+
+    private fun enqueueStableClausesForTranslation(
+        chunkIndex: Int,
+        incomingText: String
+    ): List<PendingTranslationClause> = synchronized(this) {
+        val stableClauses = extractStableClausesFromRealtime(incomingText)
+        if (stableClauses.isEmpty()) return emptyList()
+
+        val accepted = mutableListOf<PendingTranslationClause>()
+        for (clause in stableClauses) {
+            val normalized = normalizeTranslationClause(clause)
+            if (normalized.isBlank()) continue
+            if (normalized.length < MIN_TRANSLATION_CLAUSE_NORMALIZED_CHARS) continue
+            if (recentTranslatedClauseBacklog.contains(normalized)) continue
+            if (pendingTranslationClauses.any { it.normalized == normalized }) continue
+
+            while (pendingTranslationClauses.size >= MAX_PENDING_TRANSLATION_CLAUSES) {
+                pendingTranslationClauses.removeFirstOrNull()
+            }
+            while (recentTranslatedClauseBacklog.size >= MAX_TRANSLATION_CLAUSE_BACKLOG) {
+                recentTranslatedClauseBacklog.removeFirstOrNull()
+            }
+            pendingTranslationClauses.addLast(
+                PendingTranslationClause(
+                    chunkIndex = chunkIndex,
+                    text = clause,
+                    normalized = normalized
+                )
+            )
+            recentTranslatedClauseBacklog.addLast(normalized)
+            accepted.add(
+                PendingTranslationClause(
+                    chunkIndex = chunkIndex,
+                    text = clause,
+                    normalized = normalized
+                )
+            )
+        }
+        accepted
+    }
+
+    private fun extractStableClausesFromRealtime(incomingText: String): List<String> = synchronized(this) {
+        val cleanedIncoming = incomingText.trim()
+        if (cleanedIncoming.isBlank()) return emptyList()
+
+        val combined = buildString {
+            if (translationCarryoverText.isNotBlank()) {
+                append(translationCarryoverText.trim())
+                append(' ')
+            }
+            append(cleanedIncoming)
+        }.trim()
+        if (combined.isBlank()) return emptyList()
+
+        val clauses = mutableListOf<String>()
+        val builder = StringBuilder()
+        combined.forEach { ch ->
+            builder.append(ch)
+            if (!isClauseBoundary(ch)) return@forEach
+            val clause = builder.toString().trim()
+            if (clause.length >= MIN_TRANSLATION_CLAUSE_CHARS) {
+                clauses.add(clause)
+            }
+            builder.clear()
+        }
+
+        translationCarryoverText = builder
+            .toString()
+            .trim()
+            .takeLast(MAX_TRANSLATION_CARRYOVER_CHARS)
+
+        if (clauses.isEmpty() && translationCarryoverText.length >= FORCE_FLUSH_CARRYOVER_CHARS) {
+            clauses.add(translationCarryoverText)
+            translationCarryoverText = ""
+        }
+
+        clauses
+    }
+
+    private fun isClauseBoundary(ch: Char): Boolean {
+        return ch in CLAUSE_BOUNDARY_CHARS
+    }
+
+    private fun normalizeTranslationClause(value: String): String {
+        return value
+            .lowercase()
+            .replace("\\s+".toRegex(), "")
+            .replace("[、。！？!?・「」『』（）()\\-ー.,;:，；：\"'\\[\\]{}]".toRegex(), "")
+    }
+
+    private fun dequeuePendingTranslationClause(normalized: String) = synchronized(this) {
+        val iterator = pendingTranslationClauses.iterator()
+        while (iterator.hasNext()) {
+            if (iterator.next().normalized == normalized) {
+                iterator.remove()
+                break
+            }
+        }
+    }
+
     private fun normalizeTranscriptLine(value: String): String {
         return value
             .lowercase()
@@ -434,15 +597,66 @@ class AmbientRecordingService : Service() {
         AmbientPreferences.setLiveAsrModel(this, model)
     }
 
+    private fun mergeLiveTranslationLines(current: List<String>, incoming: String): List<String> {
+        val cleaned = incoming.trim()
+        if (cleaned.isBlank()) return current
+        if (cleaned.length <= 1) return current
+
+        val updated = current.toMutableList()
+        val last = updated.lastOrNull()
+        if (last.isNullOrBlank()) {
+            updated.add(cleaned)
+            return updated.takeLast(MAX_LIVE_TRANSLATION_LINES)
+        }
+
+        val normalizedIncoming = normalizeTranscriptLine(cleaned)
+        val normalizedLast = normalizeTranscriptLine(last)
+        if (normalizedIncoming.isBlank() || normalizedLast.isBlank()) {
+            updated.add(cleaned)
+            return updated.takeLast(MAX_LIVE_TRANSLATION_LINES)
+        }
+
+        if (normalizedIncoming == normalizedLast) {
+            return updated.takeLast(MAX_LIVE_TRANSLATION_LINES)
+        }
+        if (normalizedIncoming.startsWith(normalizedLast) || normalizedLast.startsWith(normalizedIncoming)) {
+            updated[updated.lastIndex] = if (cleaned.length >= last.length) cleaned else last
+            return updated.takeLast(MAX_LIVE_TRANSLATION_LINES)
+        }
+
+        updated.add(cleaned)
+        return updated.takeLast(MAX_LIVE_TRANSLATION_LINES)
+    }
+
+    private fun persistLiveTranslationState(history: List<String>, model: String?) {
+        val limited = history.takeLast(MAX_LIVE_TRANSLATION_LINES)
+        AmbientPreferences.setLiveTranslationHistory(this, limited)
+        AmbientPreferences.setLiveTranslationModel(this, model)
+    }
+
     private fun restorePersistedLiveTranscript() {
         val history = AmbientPreferences.getLiveTranscriptHistory(this).takeLast(MAX_LIVE_TRANSCRIPT_LINES)
         val model = AmbientPreferences.getLiveAsrModel(this)
-        if (history.isEmpty() && model.isNullOrBlank()) return
+        val translationHistory = AmbientPreferences.getLiveTranslationHistory(this)
+            .takeLast(MAX_LIVE_TRANSLATION_LINES)
+        val translationModel = AmbientPreferences.getLiveTranslationModel(this)
+        if (history.isEmpty() && model.isNullOrBlank() && translationHistory.isEmpty() && translationModel.isNullOrBlank()) {
+            return
+        }
         AmbientStatus.update(
             liveAsrModel = model,
             liveTranscriptLatest = history.lastOrNull(),
-            liveTranscriptHistory = history
+            liveTranscriptHistory = history,
+            liveTranslationModel = translationModel,
+            liveTranslationLatest = translationHistory.lastOrNull(),
+            liveTranslationHistory = translationHistory
         )
+    }
+
+    private fun resetTranslationPipelineState() = synchronized(this) {
+        translationCarryoverText = ""
+        recentTranslatedClauseBacklog.clear()
+        pendingTranslationClauses.clear()
     }
 
     private fun updateNotification(status: String) {
@@ -550,6 +764,14 @@ class AmbientRecordingService : Service() {
         private const val WATCHDOG_RESTART_COOLDOWN_MS = 10_000L
         private const val ENABLE_LEGACY_BATCH_PIPELINE = false
         private const val MAX_LIVE_TRANSCRIPT_LINES = 50
+        private const val MAX_LIVE_TRANSLATION_LINES = 50
+        private const val MAX_TRANSLATION_CARRYOVER_CHARS = 400
+        private const val FORCE_FLUSH_CARRYOVER_CHARS = 48
+        private const val MAX_TRANSLATION_CLAUSE_BACKLOG = 80
+        private const val MAX_PENDING_TRANSLATION_CLAUSES = 20
+        private const val MIN_TRANSLATION_CLAUSE_CHARS = 16
+        private const val MIN_TRANSLATION_CLAUSE_NORMALIZED_CHARS = 10
+        private val CLAUSE_BOUNDARY_CHARS = setOf('。', '！', '？', '.', '!', '?', ';', '；')
         const val ACTION_START = "com.subbrain.zerotouch.AMBIENT_START"
         const val ACTION_STOP = "com.subbrain.zerotouch.AMBIENT_STOP"
     }

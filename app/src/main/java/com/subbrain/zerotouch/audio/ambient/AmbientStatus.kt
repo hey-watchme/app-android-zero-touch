@@ -19,6 +19,9 @@ data class AmbientUiState(
     val liveAsrModel: String? = null,
     val liveTranscriptLatest: String? = null,
     val liveTranscriptHistory: List<String> = emptyList(),
+    val liveTranslationModel: String? = null,
+    val liveTranslationLatest: String? = null,
+    val liveTranslationHistory: List<String> = emptyList(),
     val lastEvent: String? = null,
     val eventSeq: Long = 0
 )
@@ -53,9 +56,13 @@ object AmbientStatus {
         liveAsrModel: String? = null,
         liveTranscriptLatest: String? = null,
         liveTranscriptHistory: List<String>? = null,
+        liveTranslationModel: String? = null,
+        liveTranslationLatest: String? = null,
+        liveTranslationHistory: List<String>? = null,
         clearLiveSessionId: Boolean = false,
         clearLiveShareToken: Boolean = false,
         clearLiveTranscript: Boolean = false,
+        clearLiveTranslation: Boolean = false,
         lastEvent: String? = null
     ) {
         val current = _state.value
@@ -76,6 +83,9 @@ object AmbientStatus {
             liveAsrModel = if (clearLiveTranscript) null else (liveAsrModel ?: current.liveAsrModel),
             liveTranscriptLatest = if (clearLiveTranscript) null else (liveTranscriptLatest ?: current.liveTranscriptLatest),
             liveTranscriptHistory = if (clearLiveTranscript) emptyList() else (liveTranscriptHistory ?: current.liveTranscriptHistory),
+            liveTranslationModel = if (clearLiveTranslation || clearLiveTranscript) null else (liveTranslationModel ?: current.liveTranslationModel),
+            liveTranslationLatest = if (clearLiveTranslation || clearLiveTranscript) null else (liveTranslationLatest ?: current.liveTranslationLatest),
+            liveTranslationHistory = if (clearLiveTranslation || clearLiveTranscript) emptyList() else (liveTranslationHistory ?: current.liveTranslationHistory),
             lastEvent = lastEvent ?: current.lastEvent,
             eventSeq = nextEventSeq
         )

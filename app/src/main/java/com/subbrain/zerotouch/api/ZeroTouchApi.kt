@@ -469,6 +469,16 @@ data class RealtimeTranscribeResponse(
     val model: String? = null
 )
 
+data class RealtimeTranslateResponse(
+    val live_session_id: String,
+    val chunk_index: Int,
+    val source_text: String? = null,
+    val translated_text: String? = null,
+    val target_language: String? = null,
+    val model: String? = null,
+    val processed_at: String? = null
+)
+
 class ZeroTouchApi(
     private val baseUrl: String = "https://api.hey-watch.me"
 ) {
@@ -678,6 +688,41 @@ class ZeroTouchApi(
                         throw httpException(operation, response.code, body)
                     }
                     gson.fromJson(body, RealtimeTranscribeResponse::class.java)
+                }
+            } catch (e: IOException) {
+                throw ZeroTouchApiException.Network(operation, e)
+            }
+        }
+    }
+
+    suspend fun translateRealtime(
+        liveSessionId: String,
+        chunkIndex: Int,
+        text: String,
+        targetLanguage: String = "en"
+    ): RealtimeTranslateResponse = withContext(Dispatchers.IO) {
+        val operation = "Realtime translate"
+        withRetry(operation = operation) {
+            val url = "$baseUrl/zerotouch/api/translate/realtime"
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("live_session_id", liveSessionId)
+                .addFormDataPart("chunk_index", chunkIndex.toString())
+                .addFormDataPart("text", text)
+                .addFormDataPart("target_language", targetLanguage)
+                .build()
+            val request = Request.Builder()
+                .url(url)
+                .post(requestBody)
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        throw httpException(operation, response.code, body)
+                    }
+                    gson.fromJson(body, RealtimeTranslateResponse::class.java)
                 }
             } catch (e: IOException) {
                 throw ZeroTouchApiException.Network(operation, e)

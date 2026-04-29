@@ -637,6 +637,8 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                                 liveAsrModel = ambientState.liveAsrModel,
                                 liveTranscriptLatest = ambientState.liveTranscriptLatest,
                                 liveTranscriptHistory = ambientState.liveTranscriptHistory,
+                                liveTranslationLatest = ambientState.liveTranslationLatest,
+                                liveTranslationHistory = ambientState.liveTranslationHistory,
                                 onToggleAmbient = handleAmbientToggle
                             )
                             1 -> HomeDashboardScreen(

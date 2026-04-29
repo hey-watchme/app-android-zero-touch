@@ -65,6 +65,7 @@ LIVE_TRANSCRIPT_TABLE = "zerotouch_live_transcripts"
 LIVE_KEYPOINT_TABLE = "zerotouch_live_keypoints"
 REALTIME_TRANSCRIBE_MODEL = os.getenv("REALTIME_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
 REALTIME_TRANSCRIBE_PERSIST = os.getenv("REALTIME_TRANSCRIBE_PERSIST", "false").lower() == "true"
+REALTIME_TRANSLATE_MODEL = os.getenv("REALTIME_TRANSLATE_MODEL", "gpt-4o-mini")
 
 
 # --- Globals ---
@@ -1142,6 +1143,65 @@ async def transcribe_realtime(
         "text": text,
         "persisted": True,
         "transcript": stored_rows[0] if stored_rows else transcript_payload,
+    }
+
+
+# --- Realtime Translate ---
+
+@app.post("/api/translate/realtime")
+async def translate_realtime(
+    live_session_id: str = Form(...),
+    chunk_index: int = Form(...),
+    text: str = Form(...),
+    target_language: str = Form("en"),
+):
+    source_text = (text or "").strip()
+    if not source_text:
+        raise HTTPException(status_code=400, detail="Text is empty")
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured")
+
+    try:
+        from openai import OpenAI
+    except ModuleNotFoundError as exc:
+        raise HTTPException(status_code=500, detail="openai package is not installed") from exc
+
+    client = OpenAI(api_key=api_key)
+    model = REALTIME_TRANSLATE_MODEL
+
+    system_prompt = (
+        "You are a professional translator. Translate the user's Japanese text faithfully into the "
+        "target language. Keep it concise and natural. Return only the translation with no commentary."
+    )
+
+    try:
+        response = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": f"target_language: {target_language}\ntext: {source_text}",
+                },
+            ],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Realtime translation failed: {exc}")
+
+    translated_text = (getattr(response, "output_text", None) or "").strip()
+    if not translated_text:
+        raise HTTPException(status_code=500, detail="Realtime translation returned empty text")
+
+    return {
+        "live_session_id": live_session_id,
+        "chunk_index": int(chunk_index),
+        "source_text": source_text,
+        "translated_text": translated_text,
+        "target_language": target_language,
+        "model": model,
+        "processed_at": datetime.now().isoformat(),
     }
 
 
