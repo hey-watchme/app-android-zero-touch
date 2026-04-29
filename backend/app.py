@@ -63,7 +63,7 @@ DEVICE_SETTINGS_TABLE = "zerotouch_device_settings"
 LIVE_SESSION_TABLE = "zerotouch_live_sessions"
 LIVE_TRANSCRIPT_TABLE = "zerotouch_live_transcripts"
 LIVE_KEYPOINT_TABLE = "zerotouch_live_keypoints"
-REALTIME_TRANSCRIBE_MODEL = os.getenv("REALTIME_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
+REALTIME_TRANSCRIBE_MODEL = os.getenv("REALTIME_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
 REALTIME_TRANSCRIBE_PERSIST = os.getenv("REALTIME_TRANSCRIBE_PERSIST", "false").lower() == "true"
 REALTIME_TRANSLATE_MODEL = os.getenv("REALTIME_TRANSLATE_MODEL", "gpt-4o-mini")
 
