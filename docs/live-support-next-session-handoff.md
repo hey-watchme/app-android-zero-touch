@@ -34,7 +34,7 @@
   - UI に English Translation セクション追加
 - `45e70da` 翻訳投入のしきい値緩和
   - 短い完結文も翻訳に回るよう `MIN_TRANSLATION_*` を調整
-- `MemoLiveHomeScreen` Live 表示レイアウト更新
+- `94d6d5b` `MemoLiveHomeScreen` Live 表示レイアウト更新
   - 上 `2/3` 日本語、下 `1/3` 英語の独立スクロール
   - 下部の Listening バーを削除し、上部セクションへ統合
 
