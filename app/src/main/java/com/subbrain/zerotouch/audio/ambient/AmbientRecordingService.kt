@@ -766,11 +766,11 @@ class AmbientRecordingService : Service() {
         private const val MAX_LIVE_TRANSCRIPT_LINES = 50
         private const val MAX_LIVE_TRANSLATION_LINES = 50
         private const val MAX_TRANSLATION_CARRYOVER_CHARS = 400
-        private const val FORCE_FLUSH_CARRYOVER_CHARS = 48
+        private const val FORCE_FLUSH_CARRYOVER_CHARS = 32
         private const val MAX_TRANSLATION_CLAUSE_BACKLOG = 80
         private const val MAX_PENDING_TRANSLATION_CLAUSES = 20
-        private const val MIN_TRANSLATION_CLAUSE_CHARS = 16
-        private const val MIN_TRANSLATION_CLAUSE_NORMALIZED_CHARS = 10
+        private const val MIN_TRANSLATION_CLAUSE_CHARS = 5
+        private const val MIN_TRANSLATION_CLAUSE_NORMALIZED_CHARS = 3
         private val CLAUSE_BOUNDARY_CHARS = setOf('。', '！', '？', '.', '!', '?', ';', '；')
         const val ACTION_START = "com.subbrain.zerotouch.AMBIENT_START"
         const val ACTION_STOP = "com.subbrain.zerotouch.AMBIENT_STOP"
