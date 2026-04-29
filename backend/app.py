@@ -1177,20 +1177,33 @@ async def translate_realtime(
     )
 
     try:
-        response = client.responses.create(
+        response = client.chat.completions.create(
             model=model,
-            input=[
+            messages=[
                 {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
                     "content": f"target_language: {target_language}\ntext: {source_text}",
                 },
             ],
+            temperature=0,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Realtime translation failed: {exc}")
 
-    translated_text = (getattr(response, "output_text", None) or "").strip()
+    translated_text = ""
+    try:
+        content = response.choices[0].message.content
+        if isinstance(content, str):
+            translated_text = content.strip()
+        elif isinstance(content, list):
+            translated_text = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in content
+            ).strip()
+    except Exception:
+        translated_text = ""
+
     if not translated_text:
         raise HTTPException(status_code=500, detail="Realtime translation returned empty text")
 
