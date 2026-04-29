@@ -13,6 +13,7 @@ SaaS / ERP / 業務システムに渡せる入力、下書き、タスク、SOP 
 最終的な方向性（会話 → Action / Draft / Knowledge）は維持しつつ、初期価値の入口を Live 体験に寄せる方針です。
 
 - ピボット仕様書（ライブモード正本）: `docs/live-support-pivot-spec.md`
+- 最新の再開ハンドオフ（最初に読む）: `docs/live-support-next-session-handoff.md`
 - 上位設計（最終形態の正本）: `docs/conversation-action-platform.md`
 
 モード整理:
@@ -45,8 +46,9 @@ SaaS / ERP / 業務システムに渡せる入力、下書き、タスク、SOP 
 最上位のプロダクト方針は、次の文書を正本にする。
 
 - **Live Support ピボット仕様（当面の実装優先）**: `docs/live-support-pivot-spec.md`
+- **次セッション再開ハンドオフ（最新運用状態）**: `docs/live-support-next-session-handoff.md`
 - **会話 → 業務アクション変換の設計正本**: `docs/conversation-action-platform.md`
-- **現在の作業引き継ぎ**: `docs/amical-longterm-memory-handoff.md`
+- **旧作業引き継ぎ（履歴参照）**: `docs/amical-longterm-memory-handoff.md`
 - **Wiki / 長期記憶レイヤーの設計**: `docs/knowledge-pipeline-v2.md`
 
 ZeroTouch の全体パイプラインは、今後以下の形を目標にする。
