@@ -21,7 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -101,55 +100,76 @@ fun MemoLiveHomeScreen(
             color = ZtSurface,
             border = BorderStroke(1.dp, ZtOutline)
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "Home / MeMo Live",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = ZtOnSurface
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MemoCueChip("Action")
-                        MemoCueChip("Draft")
-                        MemoCueChip("Knowledge")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Home / MeMo Live",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ZtOnSurface
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MemoCueChip("Action")
+                            MemoCueChip("Draft")
+                            MemoCueChip("Knowledge")
+                        }
+                        if (!liveShareToken.isNullOrBlank()) {
+                            Text(
+                                text = "Share token: $liveShareToken",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ZtOnSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        } else if (!liveSessionId.isNullOrBlank()) {
+                            Text(
+                                text = "Live session: ${liveSessionId.take(8)}...",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ZtOnSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
-                    if (!liveShareToken.isNullOrBlank()) {
-                        Text(
-                            text = "Share token: $liveShareToken",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ZtOnSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (!liveSessionId.isNullOrBlank()) {
-                        Text(
-                            text = "Live session: ${liveSessionId.take(8)}...",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ZtOnSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+
+                    MemoLanguageChip(label = "日本語", selected = true)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    MemoLanguageChip(label = "English", selected = false)
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    OutlinedButton(
+                        onClick = { onToggleAmbient(!ambientEnabled) },
+                        border = BorderStroke(1.dp, ZtOutline),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = ZtOnSurface),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(if (ambientEnabled) "Listening On" else "Listening Off")
                     }
                 }
-
-                MemoLanguageChip(label = "日本語", selected = true)
-                Spacer(modifier = Modifier.width(8.dp))
-                MemoLanguageChip(label = "English", selected = false)
-                Spacer(modifier = Modifier.width(10.dp))
-
-                OutlinedButton(
-                    onClick = { onToggleAmbient(!ambientEnabled) },
-                    border = BorderStroke(1.dp, ZtOutline),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ZtOnSurface),
-                    shape = RoundedCornerShape(8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(if (ambientEnabled) "Listening On" else "Listening Off")
+                    AmbientDot(isEnabled = ambientEnabled, isRecording = isAmbientLive)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = when {
+                            isAmbientLive -> "Listening: 会話を取得中"
+                            ambientEnabled -> "Listening: 待機中"
+                            else -> "Listening: 停止中"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = ZtOnSurface
+                    )
                 }
             }
         }
@@ -212,30 +232,6 @@ fun MemoLiveHomeScreen(
             }
         }
 
-        Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = ZtSurface,
-            border = BorderStroke(1.dp, ZtOutline)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                AmbientDot(isEnabled = ambientEnabled, isRecording = isAmbientLive)
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = when {
-                        isAmbientLive -> "Listening: 会話を取得中"
-                        ambientEnabled -> "Listening: 待機中"
-                        else -> "Listening: 停止中"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = ZtOnSurface
-                )
-            }
-        }
     }
 }
 
@@ -249,18 +245,18 @@ private fun LiveTranscriptPanel(
     ambientStatusLabel: String,
     isAmbientLive: Boolean
 ) {
-    val listState = rememberLazyListState()
+    val japaneseListState = rememberLazyListState()
+    val englishListState = rememberLazyListState()
     val hasTranscript = liveLines.isNotEmpty()
     val hasTranslation = liveTranslationLines.isNotEmpty()
-    LaunchedEffect(
-        liveLines.lastOrNull(),
-        liveLines.size,
-        liveTranslationLines.lastOrNull(),
-        liveTranslationLines.size
-    ) {
-        if (hasTranscript || hasTranslation) {
-            val targetIndex = liveLines.size
-            listState.scrollToItem(targetIndex)
+    LaunchedEffect(liveLines.lastOrNull(), liveLines.size) {
+        if (hasTranscript) {
+            japaneseListState.scrollToItem((liveLines.size - 1).coerceAtLeast(0))
+        }
+    }
+    LaunchedEffect(liveTranslationLines.lastOrNull(), liveTranslationLines.size) {
+        if (hasTranslation) {
+            englishListState.scrollToItem((liveTranslationLines.size - 1).coerceAtLeast(0))
         }
     }
 
@@ -322,45 +318,77 @@ private fun LiveTranscriptPanel(
                     )
                 }
             } else {
-                LazyColumn(
-                    state = listState,
+                Column(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(liveLines) { line ->
-                        Text(
-                            text = line,
-                            style = MaterialTheme.typography.displaySmall,
-                            color = ZtOnSurface
-                        )
-                    }
-                    item {
-                        Spacer(modifier = Modifier.size(8.dp))
-                        HorizontalDivider(color = ZtOutline)
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Text(
-                            text = "English Translation",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = ZtOnSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.size(6.dp))
-                        if (liveTranslationLines.isEmpty()) {
-                            Text(
-                                text = "Waiting for English translation.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = ZtOnSurfaceVariant
-                            )
-                        } else {
-                            liveTranslationLines.forEach { line ->
+                    Surface(
+                        modifier = Modifier
+                            .weight(2f)
+                            .fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = ZtSurfaceVariant,
+                        border = BorderStroke(1.dp, ZtOutline)
+                    ) {
+                        LazyColumn(
+                            state = japaneseListState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(liveLines) { line ->
                                 Text(
                                     text = line,
-                                    style = MaterialTheme.typography.bodyLarge,
+                                    style = MaterialTheme.typography.displaySmall,
                                     color = ZtOnSurface
                                 )
+                            }
+                        }
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = ZtSurfaceVariant,
+                        border = BorderStroke(1.dp, ZtOutline)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "English Translation",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ZtOnSurfaceVariant
+                            )
+                            if (liveTranslationLines.isEmpty()) {
+                                Text(
+                                    text = "Waiting for English translation.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = ZtOnSurfaceVariant
+                                )
+                            } else {
+                                LazyColumn(
+                                    state = englishListState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    items(liveTranslationLines) { line ->
+                                        Text(
+                                            text = line,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = ZtOnSurface
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
