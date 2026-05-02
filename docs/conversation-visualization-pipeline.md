@@ -431,7 +431,43 @@ displayConversationItems =
 
 ---
 
-## 14. ドキュメント上の扱い
+## 14. 実装上の既知制約
+
+Conversation パイプラインを再稼働させる際に必ず確認する事項。
+
+### 14.1 DB migration の適用確認
+
+`015_add_session_upload_idempotency.sql` が Supabase に適用済みか確認する。
+
+- `zerotouch_sessions.local_recording_id` カラムと `(device_id, local_recording_id)` の unique index が対象
+- これが未適用でも upload 自体は動くが、upload idempotency（重複送信防止）が成立しない
+- Android 側は録音ごとに `localRecordingId` を生成して `/api/upload` に送信している
+
+### 14.2 Topic finalize scheduler の運用注意
+
+本番では `TOPIC_FINALIZE_SCHEDULER_ENABLED=true` を **1 process のみ** に設定する。
+
+- scheduler は FastAPI process 内 thread で動く
+- 複数 worker（`uvicorn -w 4` 等）では worker 数だけ scheduler が立ち、同一 device / topic に対して重複 finalize が走る
+- 重複実行は LLM 課金と DB 整合性の両方でリスクになる
+- 将来的には Lambda / EventBridge への外部化が本命（`roadmap.md` 参照）
+
+### 14.3 VAD の実装状態
+
+- Silero VAD が稼働中（メインの音声検知）
+- WebRTC VAD は**未実装**。設定で選択しても Silero にフォールバックする
+
+### 14.4 Failed card の retry UI
+
+- API 層のリトライ（IOException / 408 / 429 / 5xx）は実装済み
+- 最終的に `failed` になった Card を UI から再送する導線は**未実装**
+- 必要な導線:
+  - upload 済み → `retry transcribe`
+  - upload 前 → ローカルファイルが残っている場合のみ再 upload
+
+---
+
+## 15. ドキュメント上の扱い
 
 以後、会話可視化についてはこの文書を正本にする。
 
@@ -439,8 +475,8 @@ displayConversationItems =
 
 - プロダクト全体方針: `conversation-action-platform.md`
 - Wiki / 長期記憶: `knowledge-pipeline-v2.md`
-- Live presentation: `live-support-pivot-spec.md`
-- 直近の作業メモ: `ambient-pipeline-refactor-handoff.md`
+- Live presentation: `live-support.md`
+- 将来の TODO: `roadmap.md`
 
 もし handoff 文書や README にこの文書と矛盾する記述があれば、
 **この文書を優先して修正する**。

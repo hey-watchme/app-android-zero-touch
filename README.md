@@ -581,7 +581,6 @@ android-zero-touch/
 - 会話 → 業務アクション変換設計: `docs/conversation-action-platform.md`
 - Wiki / 長期記憶レイヤー設計: `docs/knowledge-pipeline-v2.md`
 - 旧作業引き継ぎ（履歴参照）: `docs/amical-longterm-memory-handoff.md`
-- Ambient pipeline リファクタリング再開メモ: `docs/ambient-pipeline-refactor-handoff.md`
 - アンビエント録音デバッグ手順: `docs/ambient-recording-debug-checklist.md`
 - 企画書: `docs/ambient-agent-spec.md`
 - モデルプロジェクト: `/Users/kaya.matsumoto/projects/watchme/business`

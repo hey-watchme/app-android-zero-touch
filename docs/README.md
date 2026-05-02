@@ -66,7 +66,6 @@ Wiki / Action Candidate / Connector などの後段機能はすべて Conversati
 | `context-enrichment-project.md` | Converter / Wiki の精度を上げる文脈入力 | 📋 構想 |
 | `pipeline-cost-benchmarks.md` | 再処理コスト、トークン目安 | ✅ 有効 |
 | `amical-longterm-memory-handoff.md` | 旧系引き継ぎメモ（歴史的経緯の参照のみ） | 🟡 参照用 |
-| `ambient-pipeline-refactor-handoff.md` | Ambient pipeline リファクタリングの再開ポイント | 🟡 参照用 |
 
 ---
 
