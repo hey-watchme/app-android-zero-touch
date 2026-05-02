@@ -42,11 +42,37 @@ from services.action_converter import (
 
 # --- Configuration ---
 
+
+def _env_str(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    stripped = value.strip()
+    return stripped or default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() not in {"0", "false", "no"}
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        print(f"[ZeroTouch] Invalid float for {name}: {value!r}. Falling back to {default}.")
+        return default
+
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 S3_BUCKET = os.getenv("S3_BUCKET", "watchme-vault")
 AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-2")
-TOPIC_FINALIZE_SCHEDULER_ENABLED = os.getenv("TOPIC_FINALIZE_SCHEDULER_ENABLED", "true").lower() not in {"0", "false", "no"}
+TOPIC_FINALIZE_SCHEDULER_ENABLED = _env_bool("TOPIC_FINALIZE_SCHEDULER_ENABLED", True)
 TOPIC_FINALIZE_SCHEDULER_INTERVAL_SECONDS = int(os.getenv("TOPIC_FINALIZE_SCHEDULER_INTERVAL_SECONDS", "15"))
 TABLE = "zerotouch_sessions"
 TOPIC_TABLE = os.getenv("TOPIC_TABLE", "zerotouch_conversation_topics")
@@ -63,9 +89,12 @@ DEVICE_SETTINGS_TABLE = "zerotouch_device_settings"
 LIVE_SESSION_TABLE = "zerotouch_live_sessions"
 LIVE_TRANSCRIPT_TABLE = "zerotouch_live_transcripts"
 LIVE_KEYPOINT_TABLE = "zerotouch_live_keypoints"
-REALTIME_TRANSCRIBE_MODEL = os.getenv("REALTIME_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
-REALTIME_TRANSCRIBE_PERSIST = os.getenv("REALTIME_TRANSCRIBE_PERSIST", "false").lower() == "true"
-REALTIME_TRANSLATE_MODEL = os.getenv("REALTIME_TRANSLATE_MODEL", "gpt-4o-mini")
+REALTIME_TRANSCRIBE_MODEL = _env_str("REALTIME_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
+REALTIME_TRANSCRIBE_LANGUAGE = _env_str("REALTIME_TRANSCRIBE_LANGUAGE", "ja")
+REALTIME_TRANSCRIBE_PROMPT = os.getenv("REALTIME_TRANSCRIBE_PROMPT", "").strip()
+REALTIME_TRANSCRIBE_TEMPERATURE = _env_float("REALTIME_TRANSCRIBE_TEMPERATURE", 0.0)
+REALTIME_TRANSCRIBE_PERSIST = _env_bool("REALTIME_TRANSCRIBE_PERSIST", False)
+REALTIME_TRANSLATE_MODEL = _env_str("REALTIME_TRANSLATE_MODEL", "gpt-4o-mini")
 
 
 # --- Globals ---
@@ -1087,16 +1116,21 @@ async def transcribe_realtime(
 
     client = OpenAI(api_key=api_key)
     model = REALTIME_TRANSCRIBE_MODEL
+    request_kwargs: Dict[str, Any] = {
+        "model": model,
+        "file": (
+            file.filename or f"chunk-{chunk_index}.webm",
+            content,
+            file.content_type or "audio/webm",
+        ),
+        "language": REALTIME_TRANSCRIBE_LANGUAGE,
+        "temperature": REALTIME_TRANSCRIBE_TEMPERATURE,
+    }
+    if REALTIME_TRANSCRIBE_PROMPT:
+        request_kwargs["prompt"] = REALTIME_TRANSCRIBE_PROMPT
 
     try:
-        response = client.audio.transcriptions.create(
-            model=model,
-            file=(
-                file.filename or f"chunk-{chunk_index}.webm",
-                content,
-                file.content_type or "audio/webm",
-            ),
-        )
+        response = client.audio.transcriptions.create(**request_kwargs)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Realtime transcription failed: {exc}")
 
@@ -1112,6 +1146,8 @@ async def transcribe_realtime(
             "persisted": False,
             "model": model,
             "language": language,
+            "requested_language": REALTIME_TRANSCRIBE_LANGUAGE,
+            "temperature": REALTIME_TRANSCRIBE_TEMPERATURE,
             "processed_at": now,
         }
 
@@ -1123,6 +1159,7 @@ async def transcribe_realtime(
         "provider": "openai",
         "model": model,
         "language": language,
+        "requested_language": REALTIME_TRANSCRIBE_LANGUAGE,
         "metadata": {},
         "created_at": now,
         "updated_at": now,
@@ -1142,6 +1179,8 @@ async def transcribe_realtime(
         "chunk_index": int(chunk_index),
         "text": text,
         "persisted": True,
+        "requested_language": REALTIME_TRANSCRIBE_LANGUAGE,
+        "temperature": REALTIME_TRANSCRIBE_TEMPERATURE,
         "transcript": stored_rows[0] if stored_rows else transcript_payload,
     }
 

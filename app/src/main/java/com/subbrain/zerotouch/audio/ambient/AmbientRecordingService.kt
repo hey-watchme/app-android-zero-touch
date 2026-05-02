@@ -213,7 +213,7 @@ class AmbientRecordingService : Service() {
                     val retained = AmbientStatus.state.value.recordings.map { item ->
                         if (item.path == file.absolutePath) {
                             item.copy(
-                                status = "completed",
+                                status = "live_only",
                                 errorMessage = null
                             )
                         } else {
