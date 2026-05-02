@@ -1346,14 +1346,9 @@ class ZeroTouchViewModel : ViewModel() {
 
             items += TopicFeedCard(
                 id = "home_live_${card.id}",
-                status = when (card.status) {
-                    "failed" -> "failed"
-                    "live_only" -> "live_only"
-                    else -> "processing"
-                },
+                status = if (card.status == "failed") "failed" else "processing",
                 title = when (card.status) {
                     "failed" -> "処理に失敗しました"
-                    "live_only" -> "Conversation パイプライン未接続"
                     "uploaded" -> "文字起こし待ちの録音"
                     "transcribing" -> "文字起こし中の録音"
                     "generating" -> "解析中の録音"
@@ -1361,7 +1356,6 @@ class ZeroTouchViewModel : ViewModel() {
                 },
                 summary = when (card.status) {
                     "failed" -> card.text
-                    "live_only" -> "Live Transcript / Translation までは完了していますが、Conversation 列へ流す後段パイプラインは現在無効です。"
                     "uploaded" -> "アップロードが完了し、文字起こし開始を待っています。"
                     "transcribing" -> "音声を文字起こししています。完了次第ここに反映されます。"
                     "generating" -> "発話内容をTopicとして整理しています。"
@@ -1423,7 +1417,6 @@ class ZeroTouchViewModel : ViewModel() {
     ): TranscriptCard {
         val visualStatus = when (status) {
             "failed" -> "failed"
-            "live_only" -> "live_only"
             "uploaded", "transcribing", "generating" -> status
             else -> "pending"
         }
@@ -1433,13 +1426,11 @@ class ZeroTouchViewModel : ViewModel() {
             "transcribing" -> "文字起こし中"
             "generating" -> "解析中"
             "failed" -> "失敗"
-            "live_only" -> "Liveのみ"
             else -> "処理中"
         }
         val displayText = when (visualStatus) {
             "pending" -> "音声をサーバーに送信しています…"
             "failed" -> errorMessage?.takeIf { it.isNotBlank() } ?: "処理に失敗しました"
-            "live_only" -> "Conversation 連携は無効です。リアルタイム表示のみ更新されます。"
             else -> processingTextForStatus(visualStatus)
         }
         return TranscriptCard(
@@ -1633,7 +1624,6 @@ class ZeroTouchViewModel : ViewModel() {
         "uploaded" -> "アップロード完了 - 文字起こし開始を待機中"
         "transcribing" -> "音声を文字起こししています…"
         "generating" -> "発話内容を解析しています…"
-        "live_only" -> "Conversation 連携は無効です。リアルタイム表示のみ更新されます。"
         else -> "データ取得中..."
     }
 

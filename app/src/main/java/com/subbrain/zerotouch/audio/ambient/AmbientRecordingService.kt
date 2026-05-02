@@ -209,24 +209,6 @@ class AmbientRecordingService : Service() {
         scope.launch {
             var uploadedSessionId: String? = null
             try {
-                if (!ENABLE_LEGACY_BATCH_PIPELINE) {
-                    val retained = AmbientStatus.state.value.recordings.map { item ->
-                        if (item.path == file.absolutePath) {
-                            item.copy(
-                                status = "live_only",
-                                errorMessage = null
-                            )
-                        } else {
-                            item
-                        }
-                    }
-                    AmbientStatus.update(
-                        recordings = retained.take(MAX_RECORDINGS),
-                        lastEvent = "Live-only chunk completed"
-                    )
-                    runCatching { file.delete() }
-                    return@launch
-                }
                 val api = ZeroTouchApi()
                 val upload = api.uploadAudio(
                     file = file,
@@ -762,7 +744,6 @@ class AmbientRecordingService : Service() {
         private const val MAX_RECORDINGS = 50
         private const val RECORDING_STALE_THRESHOLD_MS = 4000L
         private const val WATCHDOG_RESTART_COOLDOWN_MS = 10_000L
-        private const val ENABLE_LEGACY_BATCH_PIPELINE = false
         private const val MAX_LIVE_TRANSCRIPT_LINES = 50
         private const val MAX_LIVE_TRANSLATION_LINES = 50
         private const val MAX_TRANSLATION_CARRYOVER_CHARS = 400
