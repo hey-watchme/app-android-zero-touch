@@ -22,6 +22,7 @@ import com.subbrain.zerotouch.api.WorkspaceSummary
 import com.subbrain.zerotouch.api.ZeroTouchApi
 import com.subbrain.zerotouch.api.SelectionPreferences
 import com.subbrain.zerotouch.api.SupabaseAuthApi
+import com.subbrain.zerotouch.api.SupabaseRealtimeClient
 import com.subbrain.zerotouch.audio.ambient.AmbientPreferences
 import com.subbrain.zerotouch.audio.ambient.AmbientUiState
 import com.subbrain.zerotouch.audio.ambient.AmbientStatus
@@ -146,10 +147,12 @@ class ZeroTouchViewModel : ViewModel() {
         private const val PROCESSING_TIMEOUT_MS = 20 * 60_000L
         private const val PROCESSING_MONITOR_INTERVAL_MS = 2_000L
         private const val TOPIC_IDLE_SECONDS = 30
+        private const val REALTIME_REFRESH_DEBOUNCE_MS = 250L
     }
 
     private val api = ZeroTouchApi()
     private val authApi = SupabaseAuthApi()
+    private val realtime = SupabaseRealtimeClient()
 
     private val _uiState = MutableStateFlow(ZeroTouchUiState())
     val uiState: StateFlow<ZeroTouchUiState> = _uiState
@@ -165,6 +168,8 @@ class ZeroTouchViewModel : ViewModel() {
     private val processingMonitors = mutableMapOf<String, Job>()
     private var isLoadingFacts = false
     private var isLoadingSelection = false
+    private var realtimeRefreshJob: Job? = null
+    private var realtimeDeviceId: String? = null
 
     fun updateHomeLiveInput(ambientState: AmbientUiState) {
         _uiState.update { state ->
@@ -924,6 +929,48 @@ class ZeroTouchViewModel : ViewModel() {
         updateHomeLiveInput(AmbientStatus.state.value)
     }
 
+    fun startRealtime(context: Context) {
+        val session = _uiState.value.authSession ?: return
+        val deviceId = DeviceIdProvider.getDeviceId(context)
+        if (realtimeDeviceId == deviceId) return
+        realtimeDeviceId = deviceId
+        Log.d(TAG, "realtime: starting subscription for device=$deviceId")
+        realtime.connect(
+            deviceId = deviceId,
+            accessToken = session.accessToken,
+            onChange = { change ->
+                Log.d(
+                    TAG,
+                    "realtime change: table=${change.table} type=${change.type}"
+                )
+                scheduleRealtimeRefresh(context)
+            },
+            onStatus = { status ->
+                Log.d(TAG, "realtime status: $status")
+            }
+        )
+    }
+
+    fun stopRealtime() {
+        realtimeDeviceId = null
+        realtimeRefreshJob?.cancel()
+        realtimeRefreshJob = null
+        realtime.disconnect()
+    }
+
+    private fun scheduleRealtimeRefresh(context: Context) {
+        realtimeRefreshJob?.cancel()
+        realtimeRefreshJob = viewModelScope.launch {
+            delay(REALTIME_REFRESH_DEBOUNCE_MS)
+            refreshSessions(context, showIndicator = false)
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopRealtime()
+    }
+
     private fun startProcessingMonitor(context: Context, sessionId: String) {
         if (sessionId.isBlank()) return
         if (processingMonitors[sessionId]?.isActive == true) return
@@ -1270,40 +1317,6 @@ class ZeroTouchViewModel : ViewModel() {
         val sessionById = state.sessions.associateBy { it.id }
         val cardById = state.feedCards.associateBy { it.id }
         val items = mutableListOf<TopicFeedCard>()
-
-        if (ambientState.isRecording || ambientState.speech) {
-            val now = System.currentTimeMillis()
-            val status = if (ambientState.isRecording) "recording" else "speech_detected"
-            val label = if (ambientState.isRecording) "録音中" else "音声検出"
-            val text = if (ambientState.isRecording) "録音中..." else "音声を検出しています..."
-            items += TopicFeedCard(
-                id = "home_live_input",
-                status = status,
-                title = label,
-                summary = if (ambientState.isRecording) {
-                    "発話を取り込んでいます。発話が終わるとアップロードと文字起こしに進みます。"
-                } else {
-                    "音声を検出しています。発話として確定すると録音カードになります。"
-                },
-                utteranceCount = 1,
-                updatedAtEpochMs = now,
-                displayDate = buildDisplayDateFromEpoch(now),
-                utterances = listOf(
-                    TranscriptCard(
-                        id = "home_live_input_card",
-                        createdAt = "",
-                        createdAtEpochMs = now,
-                        status = status,
-                        displayStatus = label,
-                        isProcessing = true,
-                        text = text,
-                        displayTitle = buildTitleFromEpoch(now),
-                        durationSeconds = (ambientState.recordingElapsedMs / 1000L).toInt(),
-                        displayDate = buildDisplayDateFromEpoch(now)
-                    )
-                )
-            )
-        }
 
         ambientState.recordings.forEach { entry ->
             val sessionId = entry.sessionId

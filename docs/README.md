@@ -38,7 +38,7 @@ Wiki / Action Candidate / Connector などの後段機能はすべて Conversati
    現状動いている Live Support 機能の技術スタック・API・DB・実装場所。これは完成済み。
 
 2. **`conversation-visualization-pipeline.md`**  
-   Card → Topic → Fact → Wiki の本体パイプラインの正本。**再稼働させる対象の設計書**。
+   Card → Topic → Fact → Wiki の本体パイプラインの正本。**特に Home 右側 `Conversation` レーンの仕様をここで固定する**。
 
 3. **`roadmap.md`**  
    将来の TODO（Action Candidate / Connector / Take-Home / 多言語化など）。Conversation パイプライン復活後に着手する。

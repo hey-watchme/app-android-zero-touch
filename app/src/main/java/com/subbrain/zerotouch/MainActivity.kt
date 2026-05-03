@@ -154,7 +154,10 @@ import androidx.activity.SystemBarStyle
 
 private const val AMICAL_TEST_EMAIL = "amical-test@zerotouch.local"
 private const val AMICAL_TEST_PASSWORD = "AmicalTest123!"
-private const val AUTO_REFRESH_INTERVAL_MS = 10_000L
+// Realtime is the primary refresh mechanism (SupabaseRealtimeClient).
+// This polling exists only as a safety net in case the WebSocket drops
+// without an onFailure callback. Long interval keeps it cheap.
+private const val AUTO_REFRESH_INTERVAL_MS = 60_000L
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -300,8 +303,12 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
     }
 
     LaunchedEffect(uiState.authSession?.userId) {
-        if (uiState.authSession == null) return@LaunchedEffect
+        if (uiState.authSession == null) {
+            viewModel.stopRealtime()
+            return@LaunchedEffect
+        }
         viewModel.loadSelection(context, force = true, loadDataAfter = true)
+        viewModel.startRealtime(context)
         while (true) {
             delay(AUTO_REFRESH_INTERVAL_MS)
             val state = latestUiState
@@ -628,13 +635,14 @@ fun ZeroTouchApp(viewModel: ZeroTouchViewModel = viewModel()) {
                             0 -> MemoLiveHomeScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 uiState = uiState,
-                                workspaceLabel = workspaceLabel,
                                 ambientEnabled = ambientEnabled,
-                                ambientStatusLabel = ambientStatusLabel,
                                 isAmbientLive = ambientState.isRecording || ambientState.speech,
+                                ambientLevel = ambientState.ambientLevel,
+                                voiceLevel = ambientState.voiceLevel,
                                 liveSessionId = ambientState.liveSessionId,
                                 liveShareToken = ambientState.liveShareToken,
                                 liveAsrModel = ambientState.liveAsrModel,
+                                liveTranslationModel = ambientState.liveTranslationModel,
                                 liveTranscriptLatest = ambientState.liveTranscriptLatest,
                                 liveTranscriptHistory = ambientState.liveTranscriptHistory,
                                 liveTranslationLatest = ambientState.liveTranslationLatest,
